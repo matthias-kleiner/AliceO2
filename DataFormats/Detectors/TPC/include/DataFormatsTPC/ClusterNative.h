@@ -67,6 +67,14 @@ struct ClusterNative {
   uint16_t qMax;            //< QMax of the cluster
   uint16_t qTot;            //< Total charge of the cluster
 
+  //================ for debugging =============
+  float z; // z position of the cluster
+  float corrVal1, corrVal2, corrVal3;
+  float timeVal;
+  float ty, tz; // tan y; phi angle
+  int padrow;
+  //============================================
+
   GPUd() static uint16_t packPad(float pad) { return (uint16_t)(pad * scalePadPacked + 0.5); }
   GPUd() static uint32_t packTime(float time) { return (uint32_t)(time * scaleTimePacked + 0.5); }
   GPUd() static float unpackPad(uint16_t pad) { return float(pad) * (1.f / scalePadPacked); }

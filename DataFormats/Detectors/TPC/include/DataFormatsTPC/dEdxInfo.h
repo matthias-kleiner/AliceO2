@@ -15,6 +15,8 @@
 #define ALICEO2_DATAFORMATSTPC_DEDXINFO_H
 
 #include "GPUCommonRtypes.h"
+#include "DataFormatsTPC/ClusterNative.h" // for debugging
+#include <vector>
 
 namespace o2
 {
@@ -39,6 +41,9 @@ struct dEdxInfo {
   unsigned char NHitsSubThresholdOROC2;
   unsigned char NHitsOROC3;
   unsigned char NHitsSubThresholdOROC3;
+  //=========== added for debugging================
+  std::vector<o2::tpc::ClusterNative> clNat;
+  //===============================================
   ClassDefNV(dEdxInfo, 1);
 };
 } // namespace tpc
