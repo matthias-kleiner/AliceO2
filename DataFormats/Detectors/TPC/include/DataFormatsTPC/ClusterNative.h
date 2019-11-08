@@ -20,6 +20,8 @@
 #include "DataFormatsTPC/Constants.h"
 #include "GPUCommonDef.h"
 
+#include <vector>
+
 namespace o2
 {
 class MCCompLabel;
@@ -73,6 +75,10 @@ struct ClusterNative {
   float timeVal;
   float ty, tz; // tan y; phi angle
   int padrow;
+
+  //paramters enters qmaxCorr
+  float py, pz, pky, pkz, sy, sz;
+
   //============================================
 
   GPUd() static uint16_t packPad(float pad) { return (uint16_t)(pad * scalePadPacked + 0.5); }
