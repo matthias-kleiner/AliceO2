@@ -120,7 +120,7 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   }
 
   // const float rmsy0 = CAMath::Sqrt(param.GetClusterRMS(0, roc, 0, 0)); // roc is 0=0.205,1=0.285,2=0.295
-  const float rmsy0 = 0.2f;
+  const float rmsy0 = 0.f;
   // const float rmsy0 = 0.;                                              // GEM PRF is close to 0
   const float rmsz0 = CAMath::Sqrt(param.GetClusterRMS(1, roc, 0, 0)); // roc is 0:0.244, 1:0.2475, 2:0.2565
   // const float rmsz0 = 0.175f;
@@ -181,7 +181,8 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   const float fac2L = std::sqrt(driftlength) * diffL1;
   const float diff1T = std::sqrt(fac1T * fac1T) / zwidth;
   const float diff2L = std::sqrt(fac2L * fac2L) / padWidth;
-  const float corrValDiff = 1 / (2 * M_PI * diff1T * diff2L);
+  // const float corrValDiff = 1 / (2 * M_PI * diff1T * diff2L);
+  const float corrValDiff = 1 / ( sqrt(2 * M_PI) * diff2L);
 
   // TF1 f("","1/sqrt(250-x)*0.0209",0,250);
 
