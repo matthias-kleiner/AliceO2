@@ -73,7 +73,7 @@ GPUd() float GPUdEdx::GetSortTruncMean(float* GPUrestrict() array, int count, in
 }
 
 //===================================== qmax calib =================================
-GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type)
+GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime)
 {
   /*
     THIS CORRECTION WORKS ONLY FOR TRACKS WITHOUT AN ANGLE THETA OR AN ANGLE Phi
@@ -194,22 +194,34 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
     //corrVal = TMath::Gaus(py, 0, sy) / (sy * twoPi);
 
 
-    TF1 fGausOne("fGausOne", "TMath::Gaus(x, [1], [0]) / ([0] * sqrt(2*3.141592653589))",-2,2); //sqrt(2*PI) TODO
-    fGausOne.SetParameters(sy,py);
-    corrVal = fGausOne.Integral(-0.5,0.5);
+    // TF1 fGausOne("fGausOne", "TMath::Gaus(x, [1], [0]) / ([0] * sqrt(2*3.141592653589))",-2,2); //sqrt(2*PI) TODO
+    // fGausOne.SetParameters(sy,py);
+    // corrVal = fGausOne.Integral(-0.5,0.5);
 
-    /*
-    TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2);
+
+    // TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
+    // static tpc::SAMPAProcessing& sampaProcessing = tpc::SAMPAProcessing::instance();
+    // TF1 fGamma4("fGamma4","sampaProcessing.getGamma4(x,0.,1.)",0,1);
+
+
+    static TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
     fGaus.SetParameters(py,sy,pz,sz);
     corrVal = fGaus.Integral(-0.5,0.5,-0.5,0.5);
-    */
+
+    //take angles into account
+    // const float normFac = sy*sz*2*3.141592653589f;
+    // TF2 fGaus("fGaus", "exp(-([0]-[1]*x)*([0]-[1]*x)/(2*[2]*[2]) - ([3]-[4]*y)*([3]-[4]*y)/(2*[5]*[5])  )", -2, 2, -2, 2);
+    // fGaus.SetParameters(py,pky,sy,pz,pkz,sz);
+    // corrVal = fGaus.Integral(-0.5,0.5,-0.5,0.5) / normFac;
+
+
   }
   std::array<float, 7> arr{py, pz, pky, pkz, sy, sz, corrVal};
   return arr;
   // return length;
 }
 
-GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type)
+GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, float ctime)
 {
   /// This function approximates the charge distribution by assuming a convolution of two gaussian functions in pad and time direction.
   /// gaussian function in pad direction assumes that the width of the gaussian is given by the pad-response-function and the transversal diffusion.
@@ -260,7 +272,7 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
   const float diffT1 = 0.0209f;
   const float diffL1 = 0.0221f;
 
-  const float fDriftLength = CAMath::Sqrt(ctime * zwidth); // ctime*zwidth = driftlength
+  const float fDriftLength = CAMath::Sqrt(driftDistance); // ctime*zwidth = driftlength
 
   // effLength: effective length in x direction which takes the
   // padLength: length of a pad
@@ -307,10 +319,10 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
 
   float corrVal = 0;
 
-  if (type) {
-    const float tau = 160e-3f;                                       // float PeakingTime = 160e-3f;
-    corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
-  }
+  // if (type) {
+  //   const float tau = 160e-3f;                                       // float PeakingTime = 160e-3f;
+  //   corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
+  // }
   // const float length = padLength * CAMath::Sqrt(1 + ky * ky + kz * kz); // this correction is already applied in the GPUdEdx.h
 
   // py,pz: realative cluster and pad position
@@ -318,9 +330,9 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
   // sy,sz (sigmay, sigmaz): sigma value of the gaussian induced charge distribution. PRF+diffusion
   // pkz = 0.01;
   // pky = 0.01;
-  if (!type) {
+  // if (!type) {
     corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz); // * length;
-  }
+  // }
   std::array<float, 7> arr{py, pz, pky, pkz, sy, sz, corrVal};
   return arr;
   // return length;
@@ -331,7 +343,7 @@ GPUd() float GPUdEdx::GaussConvolution(float x0, float x1, float k0, float k1, f
   /// 2 D gaus convoluted with angular effect
   /// See in mathematica:
   /// Simplify[Integrate[Exp[-(x0-k0*xd)*(x0-k0*xd)/(2*s0*s0)-(x1-k1*xd)*(x1-k1*xd)/(2*s1*s1)]/(s0*s1),{xd,-1/2,1/2}]]
-  ///
+  /// WolframAlpha: 'integrate exp[-(x0-k0*x)^2/(2*s0^2)-(x1-k1*x)^2/(2*s1^2)]/(s0*s1) dx from x=-0.5 to x=0.5'
   /// TF1 f1("f1","GPUdEdx::GaussConvolution(x,0,1,0,0.1,0.1)",-2,2)
   /// TF2 f2("f2","AliTPCClusterParamNEW::GaussConvolution(x,y,1,1,0.1,0.1)",-2,2,-2,2)
 
@@ -348,7 +360,7 @@ GPUd() float GPUdEdx::GaussConvolution(float x0, float x1, float k0, float k1, f
   if ((CAMath::Abs(k0) + CAMath::Abs(k1)) < kEpsilon * (s0 + s1)) {
     // small angular effect
     const float val = TMath::Gaus(x0, 0, s0) * TMath::Gaus(x1, 0, s1) / (s0 * s1 * twoPi);
-    return val;
+    // return val;
   }
   const float sigma2 = k1 * k1 * s0 * s0 + k0 * k0 * s1 * s1;
   const float sigma = CAMath::Sqrt(sigma2);

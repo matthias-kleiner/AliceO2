@@ -21,6 +21,7 @@
 #include "GPUdEdxInfo.h"
 
 #include "Fairlogger.h"
+// #include "TPCSimulation/SAMPAProcessing.h"
 
 namespace GPUCA_NAMESPACE
 {
@@ -32,7 +33,7 @@ class GPUdEdx
 {
  public:
   GPUd() void clear() {}
-  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0) {}
+  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0, float time) {}
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param) {}
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param) {}
 };
@@ -44,7 +45,7 @@ class GPUdEdx
  public:
   // The driver must call clear(), fill clusters row by row outside-in, then run computedEdx() to get the result
   GPUd() void clear();
-  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0);
+  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0, float time);
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param);
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param);
 
@@ -55,8 +56,8 @@ class GPUdEdx
   //========================== qmax calib =============================
   /// ky: y angle - tan(y) - dy/dx (cm/cm)
   /// kz: Float_t fTAngleZ;     ///< z angle - tan(z) - dz/dx (cm/cm)
-  GPUd() std::array<float, 7> qmaxCorrection(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type);
-  GPUd() std::array<float, 7> qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type);
+  GPUd() std::array<float, 7> qmaxCorrection(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, float time);
+  GPUd() std::array<float, 7> qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime);
 
   GPUd() static float GaussConvolution(float x0, float x1, float k0, float k1, float s0, float s1);
   GPUd() static float ErfFast(float x) { return 1 - ErfcFast(x); } // Error function erf(x)
@@ -97,7 +98,7 @@ GPUdi() void GPUdEdx::checkSubThresh(int roc)
   mLastROC = roc;
 }
 
-GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& GPUrestrict() param, float pad, float zz, float rms0)
+GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& GPUrestrict() param, float pad, float zz, float rms0, float time)
 {
   if (mCount >= MAX_NCL) {
     return;
@@ -122,9 +123,9 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   // const float rmsy0 = CAMath::Sqrt(param.GetClusterRMS(0, roc, 0, 0)); // roc is 0=0.205,1=0.285,2=0.295
   const float rmsy0 = 0.f;
   // const float rmsy0 = 0.;                                              // GEM PRF is close to 0
-  const float rmsz0 = CAMath::Sqrt(param.GetClusterRMS(1, roc, 0, 0)); // roc is 0:0.244, 1:0.2475, 2:0.2565
+  // const float rmsz0 = CAMath::Sqrt(param.GetClusterRMS(1, roc, 0, 0)); // roc is 0:0.244, 1:0.2475, 2:0.2565
   // const float rmsz0 = 0.175f;
-  // const float rmsz0 = 0.175f;
+  const float rmsz0 = 0.16f / 2.35f;
   // const float rmsz0 = 0.f;
 
   // const float effPad = 0.5; // FIX ME get correct value
@@ -154,11 +155,13 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   // tz = dz * sqrt( (dx*dx+dy*dy) / (dx*dx+dy*dy) * 1/dx*dx )
   // tz = dz * sqrt( 1/dx*dx )
   // tz = dz / dx
-  // Float_t tz = TMath::Abs(point->GetAngleZ() * TMath::Sqrt(1 + ty * ty));
+  // Float_t tz = TMath::Abs(point->tAngleZ() * TMath::Sqrt(1 + ty * ty));
   const float timeBin = (250.f - GPUCommonMath::Abs(zz)) * 1.93798f; // (1/0.516f) = 1.93798f;
-  // std::array<float, 7> qmaxcorrGaus = qmaxCorrection(param, padRow, pad, timeBin, ty, tz, rmsy0, rmsz0, effPad, effDiff, 0); // final correction ALL EFFECTS
 
-  std::array<float, 7> qmaxcorrGaus = qmaxCorrectionOneDim(param, padRow, pad, timeBin, ty, tz, rmsy0, rmsz0, effPad, effDiff, 0); // ONLY ONE DIMENSIONAL
+  const float driftDistance = (250.f - GPUCommonMath::Abs(zz));
+  // const float driftTime = (250.f - GPUCommonMath::Abs(zz)) / 2.58f; // (1/0.516f) = 1.93798f;
+  std::array<float, 7> qmaxcorrGaus = qmaxCorrection(param, padRow, pad, driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, time); // final correction ALL EFFECTS
+  // std::array<float, 7> qmaxcorrGaus = qmaxCorrectionOneDim(param, padRow, pad, timeBin, ty, tz, rmsy0, rmsz0, effPad, effDiff, 0, time); // ONLY ONE DIMENSIONAL
 
 
   // const float qmaxcorrGamma = qmaxCorrection(param, padRow, pad, timeBin, ty, tz, rmsy0, rmsz0, effPad, effDiff, 1);
@@ -187,6 +190,7 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   // TF1 f("","1/sqrt(250-x)*0.0209",0,250);
 
   mClNative[mCount].setPad(pad);
+  mClNative[mCount].setTime(time);
   mClNative[mCount].padrow = padRow;
   mClNative[mCount].qTot = qtot;
   mClNative[mCount].qMax = qmax;
