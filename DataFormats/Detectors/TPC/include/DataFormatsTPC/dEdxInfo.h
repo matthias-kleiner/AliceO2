@@ -42,7 +42,7 @@ struct dEdxInfo {
   unsigned char NHitsOROC3;
   unsigned char NHitsSubThresholdOROC3;
   //=========== added for debugging================
-  std::vector<o2::tpc::ClusterNative> clNat;
+  o2::tpc::ClusterNative clNat[152]{};
   //===============================================
   ClassDefNV(dEdxInfo, 1);
 };

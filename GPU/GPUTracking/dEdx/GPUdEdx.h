@@ -19,9 +19,12 @@
 #include "GPUCommonMath.h"
 #include "GPUParam.h"
 #include "GPUdEdxInfo.h"
+#include "DataFormatsTPC/ClusterNative.h"
 
 #include "Fairlogger.h"
-// #include "TPCSimulation/SAMPAProcessing.h"
+// #include "/Users/matthias/alice/O2/Detectors/TPC/base/include/TPCBase/PadPos.h"
+// #include "/Users/matthias/alice/O2/Detectors/TPC/base/include/TPCBase/Mapper.h"
+// #include "/Users/matthias/alice/O2/Detectors/TPC/base/include/TPCBase/PadPos.h"
 
 namespace GPUCA_NAMESPACE
 {
@@ -33,9 +36,10 @@ class GPUdEdx
 {
  public:
   GPUd() void clear() {}
-  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0, float time) {}
+  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0, float time, const tpc::ClusterNative& clNat, const float sector) {}
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param) {}
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param) {}
+  GPUd() void GlobalToLocal(float arr[], const float globalX, const float globalY, const float globalZ, const float sec);
 };
 
 #else
@@ -45,9 +49,10 @@ class GPUdEdx
  public:
   // The driver must call clear(), fill clusters row by row outside-in, then run computedEdx() to get the result
   GPUd() void clear();
-  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0, float time);
+  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, float pad, float zz, float rms0, float time, const tpc::ClusterNative& clNat, const float sector);
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param);
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param);
+  GPUd() void GlobalToLocal(float arr[], const float globalX, const float globalY, const float globalZ, const float sec);
 
  private:
   GPUd() float GetSortTruncMean(float* array, int count, int trunclow, int trunchigh);
@@ -57,7 +62,7 @@ class GPUdEdx
   /// ky: y angle - tan(y) - dy/dx (cm/cm)
   /// kz: Float_t fTAngleZ;     ///< z angle - tan(z) - dz/dx (cm/cm)
   GPUd() std::array<float, 7> qmaxCorrection(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, float time);
-  GPUd() std::array<float, 7> qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime);
+  GPUd() std::array<float, 7> qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime);
 
   GPUd() static float GaussConvolution(float x0, float x1, float k0, float k1, float s0, float s1);
   GPUd() static float ErfFast(float x) { return 1 - ErfcFast(x); } // Error function erf(x)
@@ -76,7 +81,7 @@ class GPUdEdx
   unsigned char mLastROC = 255;
   char mNSubThresh = 0;
 
-  o2::tpc::ClusterNative mClNative[MAX_NCL]; //for debugging
+  o2::tpc::ClusterNative mClNative[MAX_NCL]{}; //for debugging
 };
 
 GPUdi() void GPUdEdx::checkSubThresh(int roc)
@@ -98,7 +103,7 @@ GPUdi() void GPUdEdx::checkSubThresh(int roc)
   mLastROC = roc;
 }
 
-GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& GPUrestrict() param, float pad, float zz, float rms0, float time)
+GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& GPUrestrict() param, float pad, float zz, float rms0, float time, const tpc::ClusterNative& clNat, const float sector)
 {
   if (mCount >= MAX_NCL) {
     return;
@@ -160,9 +165,8 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
 
   const float driftDistance = (250.f - GPUCommonMath::Abs(zz));
   // const float driftTime = (250.f - GPUCommonMath::Abs(zz)) / 2.58f; // (1/0.516f) = 1.93798f;
-  std::array<float, 7> qmaxcorrGaus = qmaxCorrection(param, padRow, pad, driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, time); // final correction ALL EFFECTS
-  // std::array<float, 7> qmaxcorrGaus = qmaxCorrectionOneDim(param, padRow, pad, timeBin, ty, tz, rmsy0, rmsz0, effPad, effDiff, 0, time); // ONLY ONE DIMENSIONAL
-
+  // std::array<float, 7> qmaxcorrGaus = qmaxCorrection      (param, padRow, pad, driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, time); // final correction ALL EFFECTS
+  std::array<float, 7> qmaxcorrGaus = qmaxCorrectionOneDim(param, padRow, pad, driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, 0, time); // ONLY ONE DIMENSIONAL
 
   // const float qmaxcorrGamma = qmaxCorrection(param, padRow, pad, timeBin, ty, tz, rmsy0, rmsz0, effPad, effDiff, 1);
   const float qmaxcorrGamma = 0;
@@ -185,12 +189,30 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   const float diff1T = std::sqrt(fac1T * fac1T) / zwidth;
   const float diff2L = std::sqrt(fac2L * fac2L) / padWidth;
   // const float corrValDiff = 1 / (2 * M_PI * diff1T * diff2L);
-  const float corrValDiff = 1 / ( sqrt(2 * M_PI) * diff2L);
+  const float corrValDiff = 1 / (sqrt(2 * M_PI) * diff2L);
 
   // TF1 f("","1/sqrt(250-x)*0.0209",0,250);
 
+  //set true Position information!
+  // convert global to local position
+  // const float truePad = clNat.truePad;
+  // const float trueRow = clNat.trueRow;
+  // const float trueTime = clNat.trueTime;
+
+  // static const auto& mapper = o2::tpc::Mapper::instance();
+  // static const auto& mapper = Mapper::instance();
+  // const GlobalPosition3D globPos(trueX, trueY, trueZ);
+  // float localPos[3]{};
+  // GlobalToLocal(localPos, trueX, trueY, trueZ, sector);
+  //
+  // mClNative[mCount].truePad = truePad;
+  // mClNative[mCount].trueRow = trueRow;
+  // mClNative[mCount].trueTime = trueTime;
+
   mClNative[mCount].setPad(pad);
   mClNative[mCount].setTime(time);
+  mClNative[mCount].clpad = clNat.getPad();
+  mClNative[mCount].cltime = clNat.getTime();
   mClNative[mCount].padrow = padRow;
   mClNative[mCount].qTot = qtot;
   mClNative[mCount].qMax = qmax;
@@ -211,6 +233,7 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   mClNative[mCount].sz = qmaxcorrGaus.at(5);
 
   mClNative[mCount].setSigmaPad(rms0);
+
   //===========================================================================================================
 
   mChargeTot[mCount] = qmax;
@@ -224,7 +247,55 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   }
 }
 
+<<<<<<< HEAD
 GPUdi() void GPUdEdx::fillSubThreshold(int padRow, const GPUParam& GPUrestrict() param)
+=======
+const int SECTORSPERSIDE = 18;
+
+static constexpr std::array<double, SECTORSPERSIDE> SinsPerSector{
+  {0.1736481776669303311866343619840336032212, 0.4999999999999999444888487687421729788184,
+   0.7660444431189780134516809084743726998568, 0.9396926207859083168827396548294927924871, 1,
+   0.9396926207859084279050421173451468348503, 0.7660444431189780134516809084743726998568,
+   0.4999999999999999444888487687421729788184, 0.1736481776669302756754831307262065820396,
+   -0.1736481776669304699645124401286011561751, -0.5000000000000001110223024625156540423632,
+   -0.7660444431189779024293784459587186574936, -0.9396926207859084279050421173451468348503, -1,
+   -0.9396926207859083168827396548294927924871, -0.7660444431189781244739833709900267422199,
+   -0.5000000000000004440892098500626161694527, -0.1736481776669303866977855932418606244028}};
+
+//     static constexpr std::array<int, 2> test{1,2};
+
+// for (double i=0; i<18; ++i) { cout << std::setprecision(40) << std::cos(TMath::DegToRad()*(10.+i*20.))
+// <<","<<std::endl; }
+static constexpr std::array<double, SECTORSPERSIDE> CosinsPerSector{
+  {0.9848077530122080203156542665965389460325, 0.866025403784438707610604524234076961875,
+   0.6427876096865393629187224178167525678873, 0.34202014332566882393038554255326744169, 0.,
+   -0.3420201433256687129080830800376133993268, -0.6427876096865393629187224178167525678873,
+   -0.866025403784438707610604524234076961875, -0.9848077530122080203156542665965389460325,
+   -0.9848077530122080203156542665965389460325, -0.8660254037844385965883020617184229195118,
+   -0.6427876096865394739410248803324066102505, -0.3420201433256685463746293862641323357821, 0.,
+   0.3420201433256689904638392363267485052347, 0.6427876096865392518964199553010985255241,
+   0.8660254037844383745436971366871148347855, 0.9848077530122080203156542665965389460325}};
+
+GPUdi() void GPUdEdx::GlobalToLocal(float arr[], const float globalX, const float globalY, const float globalZ, const float sec)
+{
+  ///@todo: Lookup over sector number
+  // const double cs = CosinsPerSector[sec % SECTORSPERSIDE],
+               // sn = -SinsPerSector[sec % SECTORSPERSIDE];
+
+ const double cs = std::cos(-sec), sn = std::sin(-sec);
+  const float localX = float(double(globalX) * cs - double(globalY) * sn);
+  const float localY = float(double(globalX) * sn + double(globalY * cs));
+  const float localZ = globalZ;
+
+  arr[0] = localX;
+  arr[1] = localY;
+  arr[2] = localZ;
+  // const float localPos[3] = {localX, localY, localZ};
+  // return localPos;
+}
+
+GPUdi() void GPUdEdx::fillSubThreshold(int padRow, const GPUParam& param)
+>>>>>>> changed rel pad pos to tracking! added full TF3 function to describe charge distr
 {
   const int roc = param.tpcGeometry.GetROC(padRow);
   checkSubThresh(roc);

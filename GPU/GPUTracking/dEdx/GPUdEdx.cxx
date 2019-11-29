@@ -19,6 +19,7 @@
 #include "TMath.h"
 #include "TF1.h"
 #include "TF2.h"
+#include "TF3.h"
 
 using namespace GPUCA_NAMESPACE::gpu;
 
@@ -53,7 +54,7 @@ GPUd() void GPUdEdx::computedEdx(GPUdEdxInfo& GPUrestrict() output, const GPUPar
   output.NHitsSubThresholdOROC2 = countOROC3;
 
   for (int i = 0; i < mCount; ++i) {
-    output.clNat.push_back(mClNative[i]); // for debugging
+    output.clNat[i] = mClNative[i];
   }
 }
 
@@ -73,7 +74,7 @@ GPUd() float GPUdEdx::GetSortTruncMean(float* GPUrestrict() array, int count, in
 }
 
 //===================================== qmax calib =================================
-GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float ctime, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime)
+GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime)
 {
   /*
     THIS CORRECTION WORKS ONLY FOR TRACKS WITHOUT AN ANGLE THETA OR AN ANGLE Phi
@@ -130,7 +131,7 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
   const float diffT1 = 0.0209f;
   const float diffL1 = 0.0221f;
 
-  const float fDriftLength = CAMath::Sqrt(ctime * zwidth); // ctime*zwidth = driftlength
+  const float fDriftLength = CAMath::Sqrt(driftDistance); // ctime*zwidth = driftlength
 
   // effLength: effective length in x direction which takes the
   // padLength: length of a pad
@@ -162,8 +163,8 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
   float pkz = kz * effLength / zwidth;
 
   // position in pad/time units. A shift of 0.5 is added due to the shift produced in the HWClusterer.cxx
-  const float py = cpad - static_cast<int>(cpad + 0.5f);   // relative pad position. e.g.: pad=1.7 -> py=0.2
-  const float pz = ctime - static_cast<int>(ctime + 0.5f); // relative time position
+  const float py = cpad - static_cast<int>(cpad + 0.5f);       // relative pad position. e.g.: pad=1.7 -> py=0.2
+  const float pz = altTime - static_cast<int>(altTime + 0.5f); // relative time position
 
   // if(py==0) return -1; // return in case of single pad cluster
 
@@ -178,8 +179,8 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
   float corrVal = 0;
 
   if (type) {
-    const float tau = 160e-3f;                                       // float PeakingTime = 160e-3f;
-    corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
+    const float tau = 160e-3f; // float PeakingTime = 160e-3f;
+    //corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
   }
   // const float length = padLength * CAMath::Sqrt(1 + ky * ky + kz * kz); // this correction is already applied in the GPUdEdx.h
 
@@ -193,28 +194,47 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
     static const float twoPi = CAMath::TwoPi();
     //corrVal = TMath::Gaus(py, 0, sy) / (sy * twoPi);
 
-
     // TF1 fGausOne("fGausOne", "TMath::Gaus(x, [1], [0]) / ([0] * sqrt(2*3.141592653589))",-2,2); //sqrt(2*PI) TODO
     // fGausOne.SetParameters(sy,py);
     // corrVal = fGausOne.Integral(-0.5,0.5);
-
 
     // TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
     // static tpc::SAMPAProcessing& sampaProcessing = tpc::SAMPAProcessing::instance();
     // TF1 fGamma4("fGamma4","sampaProcessing.getGamma4(x,0.,1.)",0,1);
 
+    // static TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
+    // fGaus.SetParameters(py, sy, pz, sz);
+    // corrVal = fGaus.Integral(-0.5, 0.5, -0.5, 0.5);
 
-    static TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
-    fGaus.SetParameters(py,sy,pz,sz);
-    corrVal = fGaus.Integral(-0.5,0.5,-0.5,0.5);
+    // with angulat effect rel pad postiion ONLY
+    // x is in principle pad length: integrate over x from -0.5 to 0.5 integrate over one pad length
+    // y is integrated over padwidth from -0.5 to 0.5
+    // [0] is relative pad position
+    // [1] is sigma
+    // [2] is pky
+
+    //full functions
+    // std::string relPadWithAngular = "std::exp( - ([0]+x*[2] - y)*([0]+x*[2] - y)/(2*[1]*[1]) - ([3]+x*[5] - z)*([3]+x*[5] - z)/(2*[4]*[4]) ) / (2*3.141592653589*[1]*[4])"
+
+    // two dim
+    /*
+    static std::string relPadWithAngular = "std::exp( - ([0]+x*[2] - y)*([0]+x*[2] - y)/(2*[1]*[1]) ) / (sqrt(2*3.141592653589)*[1])";
+    static TF2 fGausRelPadWithAngular("fGausRelPadWithAngular", relPadWithAngular.data(), -2, 2, -2, 2);
+    fGausRelPadWithAngular.SetParameters(py, sy, pky);
+    corrVal = std::abs( fGausRelPadWithAngular.Integral(-0.5, 0.5, -0.5, 0.5));
+    */
+
+    std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+    TF3 fQMax("qMax", formularQMax.data(), -2, 2, -2, 2, -2, 2); // should be the correct version
+    //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
+    fQMax.SetParameters(py,   pky,  sy,  pz,  pkz,  sz); //straight track in pad and time direction and at the pad and time centers
+    corrVal = std::abs( fQMax.Integral(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5));
 
     //take angles into account
     // const float normFac = sy*sz*2*3.141592653589f;
     // TF2 fGaus("fGaus", "exp(-([0]-[1]*x)*([0]-[1]*x)/(2*[2]*[2]) - ([3]-[4]*y)*([3]-[4]*y)/(2*[5]*[5])  )", -2, 2, -2, 2);
     // fGaus.SetParameters(py,pky,sy,pz,pkz,sz);
     // corrVal = fGaus.Integral(-0.5,0.5,-0.5,0.5) / normFac;
-
-
   }
   std::array<float, 7> arr{py, pz, pky, pkz, sy, sz, corrVal};
   return arr;
@@ -331,7 +351,7 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
   // pkz = 0.01;
   // pky = 0.01;
   // if (!type) {
-    corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz); // * length;
+  corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz); // * length;
   // }
   std::array<float, 7> arr{py, pz, pky, pkz, sy, sz, corrVal};
   return arr;
@@ -346,21 +366,17 @@ GPUd() float GPUdEdx::GaussConvolution(float x0, float x1, float k0, float k1, f
   /// WolframAlpha: 'integrate exp[-(x0-k0*x)^2/(2*s0^2)-(x1-k1*x)^2/(2*s1^2)]/(s0*s1) dx from x=-0.5 to x=0.5'
   /// TF1 f1("f1","GPUdEdx::GaussConvolution(x,0,1,0,0.1,0.1)",-2,2)
   /// TF2 f2("f2","AliTPCClusterParamNEW::GaussConvolution(x,y,1,1,0.1,0.1)",-2,2,-2,2)
+  /// checked this function should be correct :)
 
   static const float kEpsilon = 0.0001f;
   static const float twoPi = CAMath::TwoPi();
   static const float hnorm = 0.5f / CAMath::Sqrt(twoPi);
   static const float sqtwo = CAMath::Sqrt(2.);
 
-  //=========++TESTING ============
-  // const float valr = 1 / (s0 * s1 * twoPi);
-  // return valr;
-  // =============================================
-
   if ((CAMath::Abs(k0) + CAMath::Abs(k1)) < kEpsilon * (s0 + s1)) {
     // small angular effect
     const float val = TMath::Gaus(x0, 0, s0) * TMath::Gaus(x1, 0, s1) / (s0 * s1 * twoPi);
-    // return val;
+    return val;
   }
   const float sigma2 = k1 * k1 * s0 * s0 + k0 * k0 * s1 * s1;
   const float sigma = CAMath::Sqrt(sigma2);
@@ -381,6 +397,7 @@ GPUd() float GPUdEdx::ErfcFast(float x)
   // Fast implementation of the complementary error function
   // The error of the approximation is |eps(x)| < 5E-4
   // See Abramowitz and Stegun, p.299, 7.1.27
+  // http://people.math.sfu.ca/~cbm/aands/page_299.htm
 
   const float z = CAMath::Abs(x);
   float ans = 1 + z * (0.278393f + z * (0.230389f + z * (0.000972f + z * 0.078108f)));
@@ -408,10 +425,12 @@ float GPUdEdx::GaussConvolutionGamma4(float x0, float x1, float k0, float k1, fl
                         (time - startTime) / eleParam.PeakingTime;
   */
 
-  float sum = 0, mean = 0;
+  float sum = 0;
+  float mean = 0;
+
   // the COG of G4
-  for (float iexp = 0; iexp < 5; iexp += 0.2) {
-    float g4 = std::exp(-4. * iexp / tau) * TMath::Power(iexp / tau, 4.);
+  for (float iexp = 0; iexp < 5; iexp += 0.2f) {
+    const float g4 = std::exp(-4. * iexp / tau) * std::pow(iexp / tau, 4.);
     mean += iexp * g4;
     sum += g4;
   }
@@ -419,8 +438,8 @@ float GPUdEdx::GaussConvolutionGamma4(float x0, float x1, float k0, float k1, fl
   //
   sum = 0;
   float val = 0;
-  for (float iexp = 0; iexp < 5; iexp += 0.2) {
-    float g4 = std::exp(-4. * iexp / tau) * TMath::Power(iexp / tau, 4.);
+  for (float iexp = 0; iexp < 5; iexp += 0.2f) {
+    float g4 = std::exp(-4. * iexp / tau) * std::pow(iexp / tau, 4.);
     val += GaussConvolution(x0, x1 + mean - iexp, k0, k1, s0, s1) * g4;
     sum += g4;
   }
