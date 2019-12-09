@@ -224,8 +224,8 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
     corrVal = std::abs( fGausRelPadWithAngular.Integral(-0.5, 0.5, -0.5, 0.5));
     */
 
-    std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
-    TF3 fQMax("qMax", formularQMax.data(), -2, 2, -2, 2, -2, 2); // should be the correct version
+    static std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+    static TF3 fQMax("qMax", formularQMax.data(), -2, 2, -2, 2, -2, 2); // should be the correct version
     //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
     fQMax.SetParameters(py,   pky,  sy,  pz,  pkz,  sz); //straight track in pad and time direction and at the pad and time centers
     corrVal = std::abs( fQMax.Integral(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5));

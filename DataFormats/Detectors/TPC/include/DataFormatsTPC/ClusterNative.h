@@ -77,7 +77,7 @@ struct ClusterNative {
   int padrow;
 
   //paramters enters qmaxCorr
-  float py, pz, pky, pkz, sy, sz, clpad, cltime;
+  float py, pz, pky, pkz, sy, sz, clpad, cltime, truepad, truetime;
   //============================================
 
   GPUd() static uint16_t packPad(float pad) { return (uint16_t)(pad * scalePadPacked + 0.5); }

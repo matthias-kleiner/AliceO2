@@ -305,12 +305,12 @@ GPUd() bool GPUTPCGMTrackParam::Fit(const GPUTPCGMMerger* GPUrestrict() merger, 
             // dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, cl.getPad(), zz, cl.getSigmaPad(),cl.getTime(), cl, sector );
 
             // convert y to pad coordinates
-            const float y = mP[0] / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f; // - 0.5 could also be done later. this ensures that its the same as in the cluster.getPad()
-            const float timeBin = (250.f - GPUCommonMath::Abs(mP[1])) * 1.93798f;
+            const float relPad = mP[0] / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f; // - 0.5 could also be done later. this ensures that its the same as in the cluster.getPad()
+            const float timeBin = (250.f - GPUCommonMath::Abs(mP[1])) * 1.93798f - 0.5f;
 
             const float yProp = prop.Model().Y() / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f;
 
-            dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, yProp, zz, cl.getSigmaPad(), timeBin, cl, sector);
+            dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, relPad, zz, cl.getSigmaPad(), timeBin, cl, sector);
           }
         }
       } else if (retVal == 2) { // cluster far away form the track
