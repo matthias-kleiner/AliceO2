@@ -293,24 +293,19 @@ GPUd() bool GPUTPCGMTrackParam::Fit(const GPUTPCGMMerger* GPUrestrict() merger, 
         if (dEdxOut && iWay == nWays - 1 && clusters[ihit].leg == clusters[maxN - 1].leg) {
           if (merger->GetConstantMem()->ioPtrs.clustersNative == nullptr) {
             ClusterNative cl{};
-            dEdx.fillCluster(clusters[ihit].amp, 0, clusters[ihit].row, mP[2], mP[3], param, 0, zz, 0, 0, cl, 0);
+            // dEdx.fillCluster(clusters[ihit].amp, 0, clusters[ihit].row, mP[2], mP[3], param, 0, zz, 0, 0, cl, 0);
           } else {
             const ClusterNative& cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[clusters[ihit].num];
-            // const float sector = (int)(prop.GetAlpha() / kSectAngle + 0.5) + (mP[1] < 0 ? 18 : 0);
-            const float sector = prop.GetAlpha();
-            // float projY = 0;
-            // float projZ = 0;
-            // const float x = param.tpcGeometry.Row2X(clusters[ihit].row) ;
-            // prop.GetPropagatedYZ( x, projY, projZ);
-            // dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, cl.getPad(), zz, cl.getSigmaPad(),cl.getTime(), cl, sector );
 
             // convert y to pad coordinates
-            const float relPad = mP[0] / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f; // - 0.5 could also be done later. this ensures that its the same as in the cluster.getPad()
-            const float timeBin = (250.f - GPUCommonMath::Abs(mP[1])) * 1.93798f - 0.5f;
+            const float relPad = std::abs(mP[0] / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f); // - 0.5 could also be done later. this ensures that its the same as in the cluster.getPad() //TODO FIX THIS THIS IST NOT CORRECT abs(mp[0])! mirror it...
+            const float timeBin = (250.f - GPUCommonMath::Abs(mP[1])) * 1.93798f;
+            // const float yProp = prop.Model().Y() / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f;
 
-            const float yProp = prop.Model().Y() / param.tpcGeometry.PadWidth(clusters[ihit].row) - 0.5f;
+            // dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, relPad, zz, cl.getSigmaPad(), timeBin, cl, sector);
+            dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, relPad, zz, mP[1], timeBin, cl );
+                                                                                          // float zz, float rms0,
 
-            dEdx.fillCluster(cl.qTot, cl.qMax, clusters[ihit].row, mP[2], mP[3], param, relPad, zz, cl.getSigmaPad(), timeBin, cl, sector);
           }
         }
       } else if (retVal == 2) { // cluster far away form the track

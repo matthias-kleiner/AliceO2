@@ -74,14 +74,8 @@ GPUd() float GPUdEdx::GetSortTruncMean(float* GPUrestrict() array, int count, in
 }
 
 //===================================== qmax calib =================================
-GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, int type, float altTime)
+GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, float altTime)
 {
-  /*
-    THIS CORRECTION WORKS ONLY FOR TRACKS WITHOUT AN ANGLE THETA OR AN ANGLE Phi
-    ONLY RELATIVE PAD POSITION IS CORRECTED
-    PLOT; QMAX VS REL PAD SHOULD BE FLAT
-  */
-
   /// This function approximates the charge distribution by assuming a convolution of two gaussian functions in pad and time direction.
   /// gaussian function in pad direction assumes that the width of the gaussian is given by the pad-response-function and the transversal diffusion.
   ///
@@ -100,50 +94,20 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
   // Q max is calculated at position cpad, ctime
   // Example function:
   //  TF1 f1("f1", "AliTPCClusterParamNEW::QmaxCorrection(0,0.5,x,0,0,0.5,0.6)",0,1000)
-  //
-  // AliTPCParam *param   = AliTPCcalibDB::Instance()->GetParameters();
-  // const PadRegionInfo& pregion = mapper.getPadRegionInfo(region);
   const float padLength = param.tpcGeometry.PadHeight(padRow); // length of the pad
   const float padWidth = param.tpcGeometry.PadWidth(padRow);   // width of the pad
-  // const float padWidth = 1;
-
-  //=========================== get zwidth =========================
-  // static const auto& gasPar = o2::tpc::ParameterGas::Instance();
-  // const float fDriftVel  = gasPar.DriftV;
-  // const float fSamplRate = 5.; // 10 MHz
-  // const float zwidth = fDriftVel * 1/fSamplRate;
-
-  // o2::tpc::GPUCATracking g;
-  // g.getPseudoVDrift() // == 0.516f
-  const float zwidth = 0.516f; // bin width in z direction
-  // auto& elParam = ParameterElectronics::Instance();
-  // float vzbin = (elParam.ZbinWidth * gasParam.DriftV); // zBin
+  const float zwidth = 0.516f;                                 // bin width in z direction
 
   // normalize to pad and zwidth
   rmsy0 /= padWidth;
   rmsz0 /= zwidth;
 
-  // const float wwPitch = 0.25; //param->GetWWPitch(0); FIX ME: value is from aliroot in cm
-  // const float wwPitch = 0.028f; // GEM hole pitch in LP cm (is private in ModelGEM.cxx) IS THIS NEEDED ANYMORE?
-  // =============== get diffusion constants
-  // const float diffT1 = gasPar.DiffT;
-  // const float diffL1 = gasPar.DiffL;
   const float diffT1 = 0.0209f;
   const float diffL1 = 0.0221f;
+  // const float diffL1 = 0.007286f;
 
   const float fDriftLength = CAMath::Sqrt(driftDistance); // ctime*zwidth = driftlength
 
-  // effLength: effective length in x direction which takes the
-  // padLength: length of a pad
-  // wwPitch: the wire geometry. +0.5 pad pitch width (distance between two anode wires) REASON OF USAGE UNSURE: at the beginning and end of a pad (wwPitch),
-  //
-  // wire geometry for old MWPC readout system
-  //   ——————- anode wire
-  //   |‾‾‾‾‾|———- anode wire
-  //   | pad |———- anode wire
-  //   |_____|———- anode wire
-  //   ——————- anode wire
-  //
   // fDriftLength * diffT1: transverse diffusion
   // effPad: a one dim PRF is assumed with no dependence on the padrow. A shorter integration range is introduced with the effPad~0.5 factor
   // const float effLength = padLength + (wwPitch + fDriftLength * diffT1) * effPad; // TODO check if this is correct
@@ -166,22 +130,17 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
   const float py = cpad - static_cast<int>(cpad + 0.5f);       // relative pad position. e.g.: pad=1.7 -> py=0.2
   const float pz = altTime - static_cast<int>(altTime + 0.5f); // relative time position
 
-  // if(py==0) return -1; // return in case of single pad cluster
-
-  //
   // sy: total transversal smearing! response function + diffusion! normalized tp padwidth
   // sz: same as sy but in z (time) direction
   const float sy = CAMath::Sqrt(rmsy0 * rmsy0 + diffT * diffT);
-  // const float sy = diffT;
-  const float sz = CAMath::Sqrt(rmsz0 * rmsz0 + diffL * diffL); // USE THIS TODO
-  // const float sz = diffL; // WARNING TESTING
+  const float sz = CAMath::Sqrt(rmsz0 * rmsz0 + diffL * diffL);
 
   float corrVal = 0;
 
-  if (type) {
-    const float tau = 160e-3f; // float PeakingTime = 160e-3f;
-    //corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
-  }
+  // if (type) {
+  //   const float tau = 160e-3f; // float PeakingTime = 160e-3f;
+  //   //corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
+  // }
   // const float length = padLength * CAMath::Sqrt(1 + ky * ky + kz * kz); // this correction is already applied in the GPUdEdx.h
 
   // py,pz: realative cluster and pad position
@@ -189,59 +148,63 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrectionOneDim(const GPUParam& param,
   // sy,sz (sigmay, sigmaz): sigma value of the gaussian induced charge distribution. PRF+diffusion
   // pkz = 0.01;
   // pky = 0.01;
-  if (!type) {
-    // corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz);// * length;
-    static const float twoPi = CAMath::TwoPi();
-    //corrVal = TMath::Gaus(py, 0, sy) / (sy * twoPi);
+  // if (!type) {
+  // corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz);// * length;
+  static const float twoPi = CAMath::TwoPi();
+  //corrVal = TMath::Gaus(py, 0, sy) / (sy * twoPi);
 
-    // TF1 fGausOne("fGausOne", "TMath::Gaus(x, [1], [0]) / ([0] * sqrt(2*3.141592653589))",-2,2); //sqrt(2*PI) TODO
-    // fGausOne.SetParameters(sy,py);
-    // corrVal = fGausOne.Integral(-0.5,0.5);
+  // TF1 fGausOne("fGausOne", "TMath::Gaus(x, [1], [0]) / ([0] * sqrt(2*3.141592653589))",-2,2); //sqrt(2*PI) TODO
+  // fGausOne.SetParameters(sy,py);
+  // corrVal = fGausOne.Integral(-0.5,0.5);
 
-    // TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
-    // static tpc::SAMPAProcessing& sampaProcessing = tpc::SAMPAProcessing::instance();
-    // TF1 fGamma4("fGamma4","sampaProcessing.getGamma4(x,0.,1.)",0,1);
+  // TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
+  // static tpc::SAMPAProcessing& sampaProcessing = tpc::SAMPAProcessing::instance();
+  // TF1 fGamma4("fGamma4","sampaProcessing.getGamma4(x,0.,1.)",0,1);
 
-    // static TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
-    // fGaus.SetParameters(py, sy, pz, sz);
-    // corrVal = fGaus.Integral(-0.5, 0.5, -0.5, 0.5);
+  // static TF2 fGaus("fGaus", "TMath::Gaus(x, [0], [1]) * TMath::Gaus(y, [2], [3]) / ([1]*[3]*2*3.141592653589)", -2, 2, -2, 2);
+  // fGaus.SetParameters(py, sy, pz, sz);
+  // corrVal = fGaus.Integral(-0.5, 0.5, -0.5, 0.5);
 
-    // with angulat effect rel pad postiion ONLY
-    // x is in principle pad length: integrate over x from -0.5 to 0.5 integrate over one pad length
-    // y is integrated over padwidth from -0.5 to 0.5
-    // [0] is relative pad position
-    // [1] is sigma
-    // [2] is pky
+  // with angulat effect rel pad postiion ONLY
+  // x is in principle pad length: integrate over x from -0.5 to 0.5 integrate over one pad length
+  // y is integrated over padwidth from -0.5 to 0.5
+  // [0] is relative pad position
+  // [1] is sigma
+  // [2] is pky
 
-    //full functions
-    // std::string relPadWithAngular = "std::exp( - ([0]+x*[2] - y)*([0]+x*[2] - y)/(2*[1]*[1]) - ([3]+x*[5] - z)*([3]+x*[5] - z)/(2*[4]*[4]) ) / (2*3.141592653589*[1]*[4])"
+  //full functions
+  // std::string relPadWithAngular = "std::exp( - ([0]+x*[2] - y)*([0]+x*[2] - y)/(2*[1]*[1]) - ([3]+x*[5] - z)*([3]+x*[5] - z)/(2*[4]*[4]) ) / (2*3.141592653589*[1]*[4])"
 
-    // two dim
-    /*
+  // two dim
+  /*
     static std::string relPadWithAngular = "std::exp( - ([0]+x*[2] - y)*([0]+x*[2] - y)/(2*[1]*[1]) ) / (sqrt(2*3.141592653589)*[1])";
     static TF2 fGausRelPadWithAngular("fGausRelPadWithAngular", relPadWithAngular.data(), -2, 2, -2, 2);
     fGausRelPadWithAngular.SetParameters(py, sy, pky);
     corrVal = std::abs( fGausRelPadWithAngular.Integral(-0.5, 0.5, -0.5, 0.5));
     */
 
-    static std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
-    static TF3 fQMax("qMax", formularQMax.data(), -2, 2, -2, 2, -2, 2); // should be the correct version
-    //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
-    fQMax.SetParameters(py,   pky,  sy,  pz,  pkz,  sz); //straight track in pad and time direction and at the pad and time centers
-    corrVal = std::abs( fQMax.Integral(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5));
+  // with integration over zbinwidth
+  // static std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+  // without integration over z-bin width due to sampling of the sampa
+  static std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4])*([3]+x*[4])/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
 
-    //take angles into account
-    // const float normFac = sy*sz*2*3.141592653589f;
-    // TF2 fGaus("fGaus", "exp(-([0]-[1]*x)*([0]-[1]*x)/(2*[2]*[2]) - ([3]-[4]*y)*([3]-[4]*y)/(2*[5]*[5])  )", -2, 2, -2, 2);
-    // fGaus.SetParameters(py,pky,sy,pz,pkz,sz);
-    // corrVal = fGaus.Integral(-0.5,0.5,-0.5,0.5) / normFac;
-  }
+  static TF2 fQMax("qMax", formularQMax.data(), -2, 2, -2, 2); // should be the correct version
+  //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
+  fQMax.SetParameters(py, pky, sy, pz, pkz, sz); //straight track in pad and time direction and at the pad and time centers
+  corrVal = std::abs(fQMax.Integral(-0.5, 0.5, -0.5, 0.5));
+
+  //take angles into account
+  // const float normFac = sy*sz*2*3.141592653589f;
+  // TF2 fGaus("fGaus", "exp(-([0]-[1]*x)*([0]-[1]*x)/(2*[2]*[2]) - ([3]-[4]*y)*([3]-[4]*y)/(2*[5]*[5])  )", -2, 2, -2, 2);
+  // fGaus.SetParameters(py,pky,sy,pz,pkz,sz);
+  // corrVal = fGaus.Integral(-0.5,0.5,-0.5,0.5) / normFac;
+  // }
   std::array<float, 7> arr{py, pz, pky, pkz, sy, sz, corrVal};
   return arr;
   // return length;
 }
 
-GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, float ctime)
+GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int padRow, float cpad, float driftDistance, float ky, float kz, float rmsy0, float rmsz0, float effPad, float effDiff, float ctime, int correctionType)
 {
   /// This function approximates the charge distribution by assuming a convolution of two gaussian functions in pad and time direction.
   /// gaussian function in pad direction assumes that the width of the gaussian is given by the pad-response-function and the transversal diffusion.
@@ -277,12 +240,13 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
   // o2::tpc::GPUCATracking g;
   // g.getPseudoVDrift() // == 0.516f
   const float zwidth = 0.516f; // bin width in z direction
+  const float timebinwidth = 0.2f; //SamplintWidth
   // auto& elParam = ParameterElectronics::Instance();
   // float vzbin = (elParam.ZbinWidth * gasParam.DriftV); // zBin
 
   // normalize to pad and zwidth
   rmsy0 /= padWidth;
-  rmsz0 /= zwidth;
+  rmsz0 /= timebinwidth;
 
   // const float wwPitch = 0.25; //param->GetWWPitch(0); FIX ME: value is from aliroot in cm
   // const float wwPitch = 0.028f; // GEM hole pitch in LP cm (is private in ModelGEM.cxx) IS THIS NEEDED ANYMORE?
@@ -333,26 +297,87 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
   // sy: total transversal smearing! response function + diffusion! normalized tp padwidth
   // sz: same as sy but in z (time) direction
   const float sy = CAMath::Sqrt(rmsy0 * rmsy0 + diffT * diffT);
-  // const float sy = diffT;
-  const float sz = CAMath::Sqrt(rmsz0 * rmsz0 + diffL * diffL); // USE THIS TODO
-  // const float sz = diffL; // WARNING TESTING
+  const float sz = CAMath::Sqrt(rmsz0 * rmsz0 + diffL * diffL);
+  const float szTRF = diffL;
 
   float corrVal = 0;
-
-  // if (type) {
-  //   const float tau = 160e-3f;                                       // float PeakingTime = 160e-3f;
-  //   corrVal = GaussConvolutionGamma4(py, pz, pky, pkz, sy, sz, tau); // not used due to performance?
-  // }
-  // const float length = padLength * CAMath::Sqrt(1 + ky * ky + kz * kz); // this correction is already applied in the GPUdEdx.h
-
   // py,pz: realative cluster and pad position
-  // pky,pkz (Ly, Lz): smearing of the width over the length Ly,Lz for tracks with an angle!=0
+  // pky,pkz (Ly, Lz): running mean of the gaussian ov length Ly,Lz for tracks with an angle!=0
   // sy,sz (sigmay, sigmaz): sigma value of the gaussian induced charge distribution. PRF+diffusion
-  // pkz = 0.01;
-  // pky = 0.01;
-  // if (!type) {
-  corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz); // * length;
-  // }
+
+  if (correctionType==0) {
+    // this corrections doesnt integrate over the pad width
+    corrVal = GaussConvolution(py, pz, pky, pkz, sy, sz); // * length;
+  }
+  else if(correctionType==1){
+    // this correction integrates over the pad width
+    //classical approach without TRF
+    //wolframalpha integral [-0.5,0.5] integral [-0.5,0.5] exp[-(x0-k0*x-y)^2/(2*s0^2)-(x1-k1*x)^2/(2*s1^2)]/(s0*s1) dy dx
+    /* TF2 only
+     std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4])*([3]+x*[4])/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+    static TF2 fQMax("qMax", formularQMax.data(), -0.5, 0.5, -0.5, 0.5); // should be the correct version
+    //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
+    fQMax.SetParameters(py, pky, sy, pz, pkz, sz);
+    corrVal = std::abs(fQMax.Integral(-0.5, 0.5, -0.5, 0.5));
+    */
+
+    // TF3
+    std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+   static TF3 fQMax("qMax", formularQMax.data(), -0.5, 0.5, -0.5, 0.5, -0.5, 0.5); // should be the correct version
+   //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
+   fQMax.SetParameters(py, pky, sy, pz, pkz, sz);
+   corrVal = std::abs(fQMax.Integral(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5));
+  }
+  else if(correctionType==2){
+    // gamma4 shift
+    static std::string sSampaNormalizedMirroredShift = "55*std::exp(4*0.2*(z-0.16/0.2+0.16)/0.16)*std::pow(0.2*(0.16/0.2-z+0.16)/0.16,4.)";
+    static std::string formularQMaxTRF = "std::exp( -([0]+x*[1]-y)*([0]+x*[1]-y)/(2*[2]*[2]) -([3]+x*[4]-z)*([3]+x*[4]-z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+    static TF3 fQMaxTRF("fQMaxTRF", Form("(%s) * (%s)", formularQMaxTRF.data(), sSampaNormalizedMirroredShift.data()), -.5, .5, -.5, .5, -2., .7+0.16); // should be the correct version
+
+    // static std::string sSampaNormalizedMirrored = "55*std::exp(4*0.2*(z-0.16/0.2)/0.16)*std::pow(0.2*(0.16/0.2-z)/0.16,4.)";
+    // static std::string formularQMaxTRF = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z - 0.16)*([3]+x*[4] - z - 0.16)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+    // static TF3 fQMaxTRF("fQMaxTRF", Form("(%s) * (%s)", formularQMaxTRF.data(), sSampaNormalizedMirrored.data()), -.5, .5, -.5, .5, -2., .7); // should be the correct version
+
+
+    fQMaxTRF.SetParameters(py, pky, sy, pz, pkz, szTRF);
+    const float integralRangeMax = (3 * szTRF + pz) <= 0.7f ? (3 * szTRF + pz) : .7f+0.16f;
+    const float integralRangeMin = (-3 * szTRF + pz) >= -2.f ? (-3 * szTRF + pz) : -2.f;
+    const float epsilon = (szTRF < 0.3) ? 1.e-4f : 1.e-6f;
+    corrVal = std::abs(fQMaxTRF.Integral(-0.5, 0.5, -0.5, 0.5, integralRangeMin, integralRangeMax, epsilon));
+  }
+  else if(correctionType==3){
+    // gamma4 shift
+    // new approach with 'mirrored' gamma4....
+    // static std::string sSampaNormalizedMirrored = "55*std::exp(4*0.2*(z-0.16/0.2+0.16)/0.16)*std::pow(0.2*(0.16/0.2-z+0.16)/0.16,4.)";
+    // static std::string formularQMaxTRF = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+
+    //static std::string sSampaNormalizedMirrored = "55 * (std::exp(4*0.2*(-z-0.5-0.15)/0.16)*std::pow(0.2*(-z-0.5-0.15)/0.16,4.) + std::exp(4*0.2*(-z-1.5-0.15)/0.16)*std::pow(0.2*(-z-1.5-0.15)/0.16,4.))";
+    //static std::string formularQMaxTRF = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+
+    // std::string sSampaNormalizedMirrored = "55 * (std::exp(4*0.2*(-z-0.5-0.15)/0.16)*std::pow(0.2*(-z-0.5-0.15)/0.16,4.) + std::exp(4*0.2*(-z-1.5-0.15)/0.16)*std::pow(0.2*(-z-1.5-0.15)/0.16,4.))";
+    // std::string formularQMaxTRF = "std::exp( - ([0]+x*[1]-y)*([0]+x*[1]-y)/(2*[2]*[2]) - ([3]+x*[4]-z)*([3]+x*[4]-z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
+    //static TF3 fQMaxTRFNEW("fQMaxTRF", Form("(%s) * (%s)", formularQMaxTRF.data(), sSampaNormalizedMirrored.data()), -.5, .5, -.5, .5, -1.5, .5);
+
+    static TF3 g1("g1", "55 * (std::exp(4*0.2*(-z-1.5-0.15)/0.16)*std::pow(0.2*(-z-1.5-0.15)/0.16,4.))", -.5, .5, -.5, .5, -1.7, 2.);
+    static TF3 g2("g2", "55 * (std::exp(4*0.2*(-z-0.5-0.15)/0.16)*std::pow(0.2*(-z-0.5-0.15)/0.16,4.))", -.5, .5, -.5, .5, -1.7, 2.);
+    static TF3 g1Fixed("g1Fixed", [&](double *x, double *p){ if(x[2]>-1.7){return  g1(x);} else{ return 0.;} }, -.5, .5, -.5, .5, -1.7, 2., 0);
+    static TF3 g2Fixed("g2Fixed", [&](double *x, double *p){ if(x[2]>-0.7){return  g2(x);} else{ return 0.;} }, -.5, .5, -.5, .5, -1.7, 2., 0);
+    static TF3 formularQMaxTRF("formularQMaxTRF", "std::exp( - ([0]+x*[1]-y)*([0]+x*[1]-y)/(2*[2]*[2]) - ([3]+x*[4]-z)*([3]+x*[4]-z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])", -.5, .5, -.5, .5, -1.7, 2.);
+    static TF3 fQMaxTRFNEW("fQMaxTRF", [&](double *x, double *p){ return  (g1Fixed(x)+g2Fixed(x)) * formularQMaxTRF(x,p); }, -.5, .5, -.5, .5, -1.7, 2., 6);
+
+    fQMaxTRFNEW.SetParameters(py, pky, sy, pz, pkz, szTRF);
+    const float integralRangeMax = (3 * szTRF + pz) <= 0.7f ? (3 * szTRF + pz) : 0.7f;
+    const float integralRangeMin = (-3 * szTRF + pz) >= -1.5f ? (-3 * szTRF + pz) : -1.5f;
+    // const float integralRangeMin = -0.7f;
+    const float epsilon = (szTRF < 0.3) ? 1.e-4f : 1.e-6f;
+    corrVal = std::abs(fQMaxTRFNEW.Integral(-0.5, 0.5, -0.5, 0.5, integralRangeMin, integralRangeMax, epsilon));
+  }
+
+  // if something goes wrong
+  if(corrVal<=0){
+    corrVal=1;
+  }
+
   std::array<float, 7> arr{py, pz, pky, pkz, sy, sz, corrVal};
   return arr;
   // return length;
