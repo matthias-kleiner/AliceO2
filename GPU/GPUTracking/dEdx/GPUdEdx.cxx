@@ -372,9 +372,11 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
     const float epsilon = (szTRF < 0.3) ? 1.e-4f : 1.e-6f;
     corrVal = std::abs(fQMaxTRFNEW.Integral(-0.5, 0.5, -0.5, 0.5, integralRangeMin, integralRangeMax, epsilon));
   }
-
+  else if(correctionType==4){
+    corrVal = 1;
+  }
   // if something goes wrong
-  if(corrVal<=0){
+  if(corrVal<=0 || corrVal>5){
     corrVal=1;
   }
 

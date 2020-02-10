@@ -114,7 +114,8 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   if (snp2 > GPUCA_MAX_SIN_PHI_LOW) {
     snp2 = GPUCA_MAX_SIN_PHI_LOW;
   }
-  float factor = CAMath::Sqrt((1 - snp2) / (1 + trackTgl * trackTgl));
+  float tgl2 = trackTgl * trackTgl;
+  float factor = CAMath::Sqrt((1 - snp2) / (1 + tgl2));
   factor /= param.tpcGeometry.PadHeight(padRow);
   qtot *= factor;
   qmax *= factor; // / param.tpcGeometry.PadWidth(padRow);
@@ -133,21 +134,46 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   // const float rmsz0 = 0.175f;
   const float rmsz0 = 0.16f / 2.35f; //this doesnt effect the shape of the qmax vs rel pad distr., but a lower value shifts the qmxa distr down
 
-  const float effPad = .5; // this should be needed , o big difference
+  const float effPad  = 1.; // this should be needed , o big difference
   const float effDiff = 1;
 
   // Float_t zres0 = parcl->GetRMS0(1,ipad,0,0)/param->GetZWidth();
   // Float_t yres0 = parcl->GetRMS0(0,ipad,0,0)/padWidth;
 
+  // TODO https://github.com/AliceO2Group/AliceO2/blob/391fa81582c895dc8122ed4aea8dc7fb656cbc62/GPU/GPUTracking/Base/GPUParam.inc
+//   MEM_CLASS_PRE()
+// GPUdi() void MEM_LG(GPUParam)::GetClusterRMS2(int iRow, float z, float sinPhi, float DzDs, float& ErrY2, float& ErrZ2) const
+// {
+//   int rowType = tpcGeometry.GetROC(iRow);
+//   if (rowType > 2) {
+//     rowType = 2; // TODO: Add type 3
+//   }
+//   z = CAMath::Abs((250.f - 0.275f) - CAMath::Abs(z));
+//   float s2 = sinPhi * sinPhi;
+//   if (s2 > 0.95f * 0.95f) {
+//     s2 = 0.95f * 0.95f;
+//   }
+//   float sec2 = 1.f / (1.f - s2);
+//   float angleY2 = s2 * sec2;          // dy/dx
+//   float angleZ2 = DzDs * DzDs * sec2; // dz/dx
+//
+//   ErrY2 = GetClusterRMS(0, rowType, z, angleY2);
+//   ErrZ2 = GetClusterRMS(1, rowType, z, angleZ2);
+//   ErrY2 *= ErrY2;
+//   ErrZ2 *= ErrZ2;
+// }
   // ty: y angle - tan(y) - dy/dx (cm/cm)
-  const float ty = CAMath::Abs(CAMath::Tan(o2::gpu::GPUCommonMath::ASin(trackSnp)));
+  // const float ty = CAMath::Abs(CAMath::Tan(o2::gpu::GPUCommonMath::ASin(trackSnp))); //slow
+  const float sec2 = 1.f / (1.f - snp2);
+  const float ty =  CAMath::Sqrt( snp2 * sec2 ); // fast
   // ty=dy/dx
   // sin(Phi) = dy / sqrt(dx*dx+dy*dy)
   // cos(Phi) = dx / sqrt(dx*dx+dy*dy)
   // tan(Phi) = dy / dx
 
   // tz: z angle - tan(z) - dz/dx (cm/cm)
-  const float tz = CAMath::Abs(trackTgl * CAMath::Sqrt(1 + ty * ty));
+  // const float tz = CAMath::Abs(trackTgl * CAMath::Sqrt(1 + ty * ty)); // slow
+  const float tz = CAMath::Sqrt(tgl2 * sec2); // fast
   // tz = dz / dx
   // tz = tan(lambda) * sqrt(1 + ty * ty)
   // tz = tan(lambda) * sqrt(1 + dy*dy / dx*dx)
@@ -219,13 +245,14 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   mClNative[mCount].qMax = qmax;
 
   mClNative[mCount].z = zz; // z from prop model
-  mClNative[mCount].ty = rms0; // y from tracking
+  mClNative[mCount].ty = ty; // y from tracking
+  mClNative[mCount].tz = tz; // y from tracking
 
   mClNative[mCount].corrVal1 = qmaxcorrGaus[6];
   // mClNative[mCount].corrVal2 = qmaxcorrGaus2[6];
   // mClNative[mCount].corrVal3 = qmaxcorrGaus3[6];
-  mClNative[mCount].corrVal2 = 1;
-  mClNative[mCount].corrVal3 = 1;
+  mClNative[mCount].corrVal2 = 0;
+  mClNative[mCount].corrVal3 = factor;
   mClNative[mCount].timeVal = timeBin;
 
   mClNative[mCount].py = qmaxcorrGaus[0];
