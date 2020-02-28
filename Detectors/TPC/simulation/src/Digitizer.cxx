@@ -70,8 +70,45 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
   /// obtain max drift_time + hitTime which can be processed
   float maxEleTime = (int(mDigitContainer.size()) - nShapedPoints) * eleParam.ZbinWidth;
 
+  // // // tree for debugging
+  // auto f = TFile::Open("tree.root", "update");
+  // TTree *tree = (TTree *)f->Get("tree");
+  // std::vector<float> *vEleX = new std::vector<float>;
+  // std::vector<float> *vEleY = new std::vector<float>;
+  // std::vector<float> *vEleZ = new std::vector<float>;
+  // std::vector<float> *signalTree = new std::vector<float>;
+  // float nPrimary=0;
+  //
+  // if (!tree) {
+  //   tree = new TTree("tree", "testTree");
+  //   tree->Branch("eleX", &vEleX);
+  //   tree->Branch("eleY", &vEleY);
+  //   tree->Branch("eleZ", &vEleZ);
+  //   tree->Branch("nele", &nPrimary);
+  //   tree->Branch("signal", &signalTree);
+  // } else {
+  //   tree->SetBranchAddress("eleX", &vEleX);
+  //   tree->SetBranchAddress("eleY", &vEleY);
+  //   tree->SetBranchAddress("eleZ", &vEleZ);
+  //   tree->SetBranchAddress("nele", &nPrimary);
+  //   tree->SetBranchAddress("signal", &signalTree);
+  // }
+
   for (auto& hitGroup : hits) {
     const int MCTrackID = hitGroup.GetTrackID();
+
+    // vEleX->clear();
+    // vEleY->clear();
+    // vEleZ->clear();
+    // signalTree->clear();
+    //
+    // /// Loop over electrons
+    // vEleX->reserve(hitGroup.getSize());
+    // vEleY->reserve(hitGroup.getSize());
+    // vEleZ->reserve(hitGroup.getSize());
+    // signalTree->reserve(hitGroup.getSize());
+    // nPrimary = hitGroup.getSize();
+
     for (size_t hitindex = 0; hitindex < hitGroup.getSize(); ++hitindex) {
       const auto& eh = hitGroup.getHit(hitindex);
 
@@ -94,8 +131,6 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
       float driftTime = 0.f;
 
       /// TODO: add primary ions to space-charge density
-
-      /// Loop over electrons
       for (int iEle = 0; iEle < nPrimaryElectrons; ++iEle) {
 
         /// Drift and Diffusion
@@ -109,7 +144,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
         /// Attachment
         if (electronTransport.isElectronAttachment(driftTime)) {
-          continue;
+          // continue;
         }
 
         /// Remove electrons that end up outside the active volume
@@ -134,25 +169,40 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
         }
 
         /// Electron amplification
-        const int nElectronsGEM = gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode);
+        const int nElectronsGEM = 2000;//gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode);//gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode); //2000; //
         if (nElectronsGEM == 0) {
           continue;
         }
+
+        // vEleX->emplace_back(posEleDiff.X());
+        // vEleY->emplace_back(posEleDiff.Y());
+        // vEleZ->emplace_back(posEleDiff.Z());
 
         const GlobalPadNumber globalPad = mapper.globalPadNumber(digiPadPos.getGlobalPadPos());
         const float ADCsignal = sampaProcessing.getADCvalue(static_cast<float>(nElectronsGEM));
         const MCCompLabel label(MCTrackID, eventID, sourceID, false);
         sampaProcessing.getShapedSignal(ADCsignal, absoluteTime, signalArray);
+        // signalArray[0] = ADCsignal;
+        // signalTree->emplace_back(signalArray[0]);
+
         for (float i = 0; i < nShapedPoints; ++i) {
+          // signalTree->push_back(signalArray[i]);
           const float time = absoluteTime + i * eleParam.ZbinWidth;
           mDigitContainer.addDigit(label, digiPadPos.getCRU(), sampaProcessing.getTimeBinFromTime(time), globalPad,
                                    signalArray[i]);
         }
         /// TODO: add ion backflow to space-charge density
       }
+      // tree->Fill();
+
       /// end of loop over electrons
     }
+    // tree->Fill();
   }
+  // tree->Write("tree",
+  // TObject::kOverwrite); // overwrite the tree! this prevents creating
+  //                      // multiple copies of the same tree!
+  // f->Close();
 }
 
 void Digitizer::flush(std::vector<o2::tpc::Digit>& digits,

@@ -296,8 +296,12 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
   //
   // sy: total transversal smearing! response function + diffusion! normalized tp padwidth
   // sz: same as sy but in z (time) direction
-  const float sy = CAMath::Sqrt(rmsy0 * rmsy0 + diffT * diffT);
+  // const float sy = CAMath::Sqrt(rmsy0 * rmsy0 + diffT * diffT);
   const float sz = CAMath::Sqrt(rmsz0 * rmsz0 + diffL * diffL);
+  // const float sz = diffL;
+  const float sy = diffT;
+  // const float sz = diffL;
+
   const float szTRF = diffL;
 
   float corrVal = 0;
@@ -325,7 +329,8 @@ GPUd() std::array<float, 7> GPUdEdx::qmaxCorrection(const GPUParam& param, int p
     std::string formularQMax = "std::exp( - ([0]+x*[1] - y)*([0]+x*[1] - y)/(2*[2]*[2]) - ([3]+x*[4] - z)*([3]+x*[4] - z)/(2*[5]*[5]) ) / (2*3.141592653589*[2]*[5])";
    static TF3 fQMax("qMax", formularQMax.data(), -0.5, 0.5, -0.5, 0.5, -0.5, 0.5); // should be the correct version
    //    parameters   ty,   pky,   sy,  tz,  pkz,  sz
-   fQMax.SetParameters(py, pky, sy, pz, pkz, sz);
+   // fQMax.SetParameters(py, pky, sy, pz, pkz, sz);
+   fQMax.SetParameters(py, 0, sy, pz, 0, sz);
    corrVal = std::abs(fQMax.Integral(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5));
   }
   else if(correctionType==2){

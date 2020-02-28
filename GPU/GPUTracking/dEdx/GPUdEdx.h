@@ -111,8 +111,8 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   float tgl2 = trackTgl * trackTgl;
   float factor = CAMath::Sqrt((1 - snp2) / (1 + tgl2));
   factor /= param.tpcGeometry.PadHeight(padRow);
-  qtot *= factor;
-  qmax *= factor; // / param.tpcGeometry.PadWidth(padRow);
+  // qtot *= factor;
+  // qmax *= factor; // / param.tpcGeometry.PadWidth(padRow);
 
   //===================== begin qmax as a function of pad correction =======================
   // make qmax as a function of pad position correction
@@ -173,6 +173,9 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   mClNative[mCount].pkz = qmaxcorrGaus[3];
   mClNative[mCount].sy = qmaxcorrGaus[4];
   mClNative[mCount].sz = qmaxcorrGaus[5];
+
+  mClNative[mCount].setSigmaTime( clNat.getSigmaTime() );
+  mClNative[mCount].setSigmaPad( clNat.getSigmaPad() );
   //===========================================================================================================
 
   mChargeTot[mCount] = qmax;
