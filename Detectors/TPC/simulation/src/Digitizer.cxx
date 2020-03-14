@@ -144,7 +144,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
         /// Attachment
         if (electronTransport.isElectronAttachment(driftTime)) {
-          // continue;
+          continue;
         }
 
         /// Remove electrons that end up outside the active volume
@@ -169,7 +169,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
         }
 
         /// Electron amplification
-        const int nElectronsGEM = 2000;//gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode);//gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode); //2000; //
+        const int nElectronsGEM = gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode);//gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode); //2000; //
         if (nElectronsGEM == 0) {
           continue;
         }
