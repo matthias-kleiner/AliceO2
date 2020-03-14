@@ -20,8 +20,9 @@
 #include "GPUParam.h"
 #include "GPUdEdxInfo.h"
 #include "DataFormatsTPC/ClusterNative.h"
+#include <array>
 
-#include "Fairlogger.h"
+// #include "Fairlogger.h"
 // #include "/Users/matthias/alice/O2/Detectors/TPC/base/include/TPCBase/PadPos.h"
 // #include "/Users/matthias/alice/O2/Detectors/TPC/base/include/TPCBase/Mapper.h"
 // #include "/Users/matthias/alice/O2/Detectors/TPC/base/include/TPCBase/PadPos.h"
