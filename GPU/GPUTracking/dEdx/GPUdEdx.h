@@ -145,7 +145,7 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   const float effDiff = 1;
 
   const float driftDistance = (250.f - GPUCommonMath::Abs(zz));
-  std::array<float, 7> qmaxcorrGaus  = qmaxCorrection(param, padRow, clNat.getPad(), driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, clNat.getTime(), 1);
+  std::array<float, 7> qmaxcorrGaus  = qmaxCorrection(param, padRow, clNat.getPad(), driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, clNat.getTime(), 4);
   // std::array<float, 7> qmaxcorrGaus2 = qmaxCorrection(param, padRow, clNat.getPad(), driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, clNat.getTime(), 1);
   // std::array<float, 7> qmaxcorrGaus3 = qmaxCorrection(param, padRow, clNat.getPad(), driftDistance, ty, tz, rmsy0, rmsz0, effPad, effDiff, clNat.getTime(), 2);
 
@@ -180,7 +180,7 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   //===========================================================================================================
 
   mChargeTot[mCount] = qmax;
-  mChargeMax[mCount++] = qmax / qmaxcorrGaus[6];
+  mChargeMax[mCount++] = qtot;
   mNClsROC[roc]++;
   if (qtot < mSubThreshMinTot) {
     mSubThreshMinTot = qtot;
