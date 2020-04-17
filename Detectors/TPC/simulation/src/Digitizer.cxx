@@ -134,7 +134,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
         }
 
         /// Electron amplification
-        const int nElectronsGEM = gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode);
+        const int nElectronsGEM = 2000;//gemAmplification.getStackAmplification(digiPadPos.getCRU(), digiPadPos.getPadPos(), amplificationMode);
         if (nElectronsGEM == 0) {
           continue;
         }

@@ -108,19 +108,12 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
 
   const int region = param.tpcGeometry.GetRegion(padRow);
   z = CAMath::Abs(z);
-  const float qMaxCorr = splines->interpolateqMax(region, angleZ, z);
-  const float qTotCorr = splines->interpolateqTot(region, angleZ, z);
 
   mClNative[mCount].qMax = qmax;
   mClNative[mCount].qTot = qtot;
   mClNative[mCount].z = z;
   mClNative[mCount].tz = angleZ;
-  mClNative[mCount].corrqMax = qMaxCorr;
-  mClNative[mCount].corrqTot = qTotCorr;
-  mClNative[mCount].row = padRow;
-
-  qmax /= qMaxCorr;
-  qtot /= qTotCorr;
+  mClNative[mCount].region = region;
 
   mChargeTot[mCount] = qtot;
   mChargeMax[mCount++] = qmax;

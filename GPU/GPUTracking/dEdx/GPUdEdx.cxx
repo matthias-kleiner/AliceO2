@@ -57,9 +57,7 @@ GPUd() void GPUdEdx::computedEdx(GPUdEdxInfo& GPUrestrict() output, const GPUPar
     output.clNat[i].qTot = 0;
     output.clNat[i].z = -1;
     output.clNat[i].tz = -1;
-    output.clNat[i].corrqMax = -1;
-    output.clNat[i].corrqTot = -1;
-    output.clNat[i].row = -1;
+    output.clNat[i].region = -1;
   }
 }
 
