@@ -62,6 +62,8 @@ class GPUdEdx
   unsigned char mCount = 0;
   unsigned char mLastROC = 255;
   char mNSubThresh = 0;
+
+  o2::tpc::ClusterNative mClNative[MAX_NCL]{}; //for debugging
 };
 
 GPUdi() void GPUdEdx::checkSubThresh(int roc)
@@ -105,8 +107,18 @@ GPUdi() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trac
   const float angleZ = CAMath::Sqrt(tgl2 * sec2); // fast
 
   const int region = param.tpcGeometry.GetRegion(padRow);
+  z = CAMath::Abs(z);
   const float qMaxCorr = splines->interpolateqMax(region, angleZ, z);
   const float qTotCorr = splines->interpolateqTot(region, angleZ, z);
+
+  mClNative[mCount].qMax = qmax;
+  mClNative[mCount].qTot = qtot;
+  mClNative[mCount].z = z;
+  mClNative[mCount].tz = angleZ;
+  mClNative[mCount].corrqMax = qMaxCorr;
+  mClNative[mCount].corrqTot = qTotCorr;
+  mClNative[mCount].row = padRow;
+
   qmax /= qMaxCorr;
   qtot /= qTotCorr;
 

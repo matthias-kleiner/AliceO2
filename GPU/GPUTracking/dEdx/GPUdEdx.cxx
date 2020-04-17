@@ -48,6 +48,19 @@ GPUd() void GPUdEdx::computedEdx(GPUdEdxInfo& GPUrestrict() output, const GPUPar
   output.NHitsSubThresholdOROC2 = countOROC2;
   output.NHitsOROC2 = countOROC3 - mNClsROCSubThresh[3];
   output.NHitsSubThresholdOROC2 = countOROC3;
+
+  for (int i = 0; i < mCount; ++i) {
+    output.clNat[i] = mClNative[i];
+  }
+  for (int i = mCount; i < 152; ++i) {
+    output.clNat[i].qMax = 0;
+    output.clNat[i].qTot = 0;
+    output.clNat[i].z = -1;
+    output.clNat[i].tz = -1;
+    output.clNat[i].corrqMax = -1;
+    output.clNat[i].corrqTot = -1;
+    output.clNat[i].row = -1;
+  }
 }
 
 GPUd() float GPUdEdx::GetSortTruncMean(float* GPUrestrict() array, int count, int trunclow, int trunchigh)

@@ -66,6 +66,11 @@ struct ClusterNative {
   uint8_t sigmaPadPacked;   //< Sigma of the pad in packed format
   uint16_t qMax;            //< QMax of the cluster
   uint16_t qTot;            //< Total charge of the cluster
+  float z=-1;
+  float tz=-1;
+  float corrqMax=-1;
+  float corrqTot=-1;
+  int region=-1;
 
   GPUd() static uint16_t packPad(float pad) { return (uint16_t)(pad * scalePadPacked + 0.5); }
   GPUd() static uint32_t packTime(float time) { return (uint32_t)(time * scaleTimePacked + 0.5); }
