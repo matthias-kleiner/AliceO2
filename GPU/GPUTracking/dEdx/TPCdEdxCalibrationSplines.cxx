@@ -58,34 +58,37 @@ TPCdEdxCalibrationSplines& TPCdEdxCalibrationSplines::operator=(const TPCdEdxCal
 
 void TPCdEdxCalibrationSplines::recreate(int nKnotsU1[], int nKnotsU2[])
 {
-  /// Default constructor
-
-  FlatObject::startConstruction();
-
-  int buffSize = 0;
-  int offsets1[FSplines];
-  int offsets2[FSplines];
-  for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqMax[i].recreate(nKnotsU1[i], nKnotsU2[i]);
-    buffSize = alignSize(buffSize, mCalibSplinesqMax[i].getBufferAlignmentBytes());
-    offsets1[i] = buffSize;
-    buffSize += mCalibSplinesqMax[i].getFlatBufferSize();
-  }
-  for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqTot[i].recreate(nKnotsU1[i], nKnotsU2[i]);
-    buffSize = alignSize(buffSize, mCalibSplinesqTot[i].getBufferAlignmentBytes());
-    offsets2[i] = buffSize;
-    buffSize += mCalibSplinesqTot[i].getFlatBufferSize();
-  }
-
-  FlatObject::finishConstruction(buffSize);
-
-  for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqMax[i].moveBufferTo(mFlatBufferPtr + offsets1[i]);
-  }
-  for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqTot[i].moveBufferTo(mFlatBufferPtr + offsets2[i]);
-  }
+//   /// Default constructor
+//
+//   FlatObject::startConstruction();
+//
+//   int buffSize = 0;
+//   int offsets1[FSplines];
+//   int offsets2[FSplines];
+//   for (unsigned int i = 0; i < FSplines; i++) {
+//     mCalibSplinesqMax[i].recreate(nKnotsU1[i], nKnotsU2[i]);
+//
+//     recreate(const int numberOfKnots[/* mXdim */], const int* const knots[/* mXdim */]);
+//
+//     buffSize = alignSize(buffSize, mCalibSplinesqMax[i].getBufferAlignmentBytes());
+//     offsets1[i] = buffSize;
+//     buffSize += mCalibSplinesqMax[i].getFlatBufferSize();
+//   }
+//   for (unsigned int i = 0; i < FSplines; i++) {
+//     mCalibSplinesqTot[i].recreate(nKnotsU1[i], nKnotsU2[i]);
+//     buffSize = alignSize(buffSize, mCalibSplinesqTot[i].getBufferAlignmentBytes());
+//     offsets2[i] = buffSize;
+//     buffSize += mCalibSplinesqTot[i].getFlatBufferSize();
+//   }
+//
+//   FlatObject::finishConstruction(buffSize);
+//
+//   for (unsigned int i = 0; i < FSplines; i++) {
+//     mCalibSplinesqMax[i].moveBufferTo(mFlatBufferPtr + offsets1[i]);
+//   }
+//   for (unsigned int i = 0; i < FSplines; i++) {
+//     mCalibSplinesqTot[i].moveBufferTo(mFlatBufferPtr + offsets2[i]);
+//   }
 }
 
 void TPCdEdxCalibrationSplines::cloneFromObject(const TPCdEdxCalibrationSplines& obj, char* newFlatBufferPtr)
@@ -177,41 +180,41 @@ int TPCdEdxCalibrationSplines::writeToFile(TFile& outf, const char* name)
 
 void TPCdEdxCalibrationSplines::setDefaultSplines()
 {
-  FlatObject::startConstruction();
-
-  int buffSize = 0;
-  int offsets1[FSplines];
-  int offsets2[FSplines];
-
-  auto defaultFnd2D = [&](float x1, float x2, float f[]) {
-    f[0] = 1.f;
-  };
-
-  for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
-    o2::gpu::Spline2D<float, 1> splineTmpqMax;
-    splineTmpqMax.approximateFunction(0., 1., 0., 1., defaultFnd2D);
-    mCalibSplinesqMax[ireg] = splineTmpqMax;
-    buffSize = alignSize(buffSize, mCalibSplinesqMax[ireg].getBufferAlignmentBytes());
-    offsets1[ireg] = buffSize;
-    buffSize += mCalibSplinesqMax[ireg].getFlatBufferSize();
-  }
-
-  for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
-    o2::gpu::Spline2D<float, 1> splineTmpqTot;
-    splineTmpqTot.approximateFunction(0., 1., 0., 1., defaultFnd2D);
-    mCalibSplinesqTot[ireg] = splineTmpqTot;
-    buffSize = alignSize(buffSize, mCalibSplinesqTot[ireg].getBufferAlignmentBytes());
-    offsets2[ireg] = buffSize;
-    buffSize += mCalibSplinesqTot[ireg].getFlatBufferSize();
-  }
-
-  FlatObject::finishConstruction(buffSize);
-
-  for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqMax[i].moveBufferTo(mFlatBufferPtr + offsets1[i]);
-  }
-  for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqTot[i].moveBufferTo(mFlatBufferPtr + offsets2[i]);
-  }
+  // FlatObject::startConstruction();
+  //
+  // int buffSize = 0;
+  // int offsets1[FSplines];
+  // int offsets2[FSplines];
+  //
+  // auto defaultFnd2D = [&](float x1, float x2, float f[]) {
+  //   f[0] = 1.f;
+  // };
+  //
+  // for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
+  //   o2::gpu::Spline2D<float, 1> splineTmpqMax;
+  //   splineTmpqMax.approximateFunction(0., 1., 0., 1., defaultFnd2D);
+  //   mCalibSplinesqMax[ireg] = splineTmpqMax;
+  //   buffSize = alignSize(buffSize, mCalibSplinesqMax[ireg].getBufferAlignmentBytes());
+  //   offsets1[ireg] = buffSize;
+  //   buffSize += mCalibSplinesqMax[ireg].getFlatBufferSize();
+  // }
+  //
+  // for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
+  //   o2::gpu::Spline2D<float, 1> splineTmpqTot;
+  //   splineTmpqTot.approximateFunction(0., 1., 0., 1., defaultFnd2D);
+  //   mCalibSplinesqTot[ireg] = splineTmpqTot;
+  //   buffSize = alignSize(buffSize, mCalibSplinesqTot[ireg].getBufferAlignmentBytes());
+  //   offsets2[ireg] = buffSize;
+  //   buffSize += mCalibSplinesqTot[ireg].getFlatBufferSize();
+  // }
+  //
+  // FlatObject::finishConstruction(buffSize);
+  //
+  // for (unsigned int i = 0; i < FSplines; i++) {
+  //   mCalibSplinesqMax[i].moveBufferTo(mFlatBufferPtr + offsets1[i]);
+  // }
+  // for (unsigned int i = 0; i < FSplines; i++) {
+  //   mCalibSplinesqTot[i].moveBufferTo(mFlatBufferPtr + offsets2[i]);
+  // }
 }
 #endif
