@@ -81,10 +81,10 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::poissonMultiGrid2D(DataContainer& matri
   int tnZColumn = Nz;
 
   // Vector for storing multi grid array
-  std::vector<Matrix3D> tvArrayV(nLoop);    // potential <--> error
-  std::vector<Matrix3D> tvChargeFMG(nLoop); // charge is restricted in full multiGrid
-  std::vector<Matrix3D> tvCharge(nLoop);    // charge <--> residue
-  std::vector<Matrix3D> tvResidue(nLoop);   // residue calculation
+  std::vector<Vector3D> tvArrayV(nLoop);    // potential <--> error
+  std::vector<Vector3D> tvChargeFMG(nLoop); // charge is restricted in full multiGrid
+  std::vector<Vector3D> tvCharge(nLoop);    // charge <--> residue
+  std::vector<Vector3D> tvResidue(nLoop);   // residue calculation
 
   // Allocate memory for temporary grid
   for (int count = 1; count <= nLoop; ++count) {
@@ -232,11 +232,11 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::poissonMultiGrid3D2D(DataContainer& mat
   unsigned int iOne = 1; // index i in gridSize r (original)
   unsigned int jOne = 1; // index j in gridSize z (original)
 
-  std::vector<Matrix3D> tvArrayV(nLoop);     // potential <--> error
-  std::vector<Matrix3D> tvChargeFMG(nLoop);  // charge is restricted in full multiGrid
-  std::vector<Matrix3D> tvCharge(nLoop);     // charge <--> residue
-  std::vector<Matrix3D> tvPrevArrayV(nLoop); // error calculation
-  std::vector<Matrix3D> tvResidue(nLoop);    // residue calculation
+  std::vector<Vector3D> tvArrayV(nLoop);     // potential <--> error
+  std::vector<Vector3D> tvChargeFMG(nLoop);  // charge is restricted in full multiGrid
+  std::vector<Vector3D> tvCharge(nLoop);     // charge <--> residue
+  std::vector<Vector3D> tvPrevArrayV(nLoop); // error calculation
+  std::vector<Vector3D> tvResidue(nLoop);    // residue calculation
 
   for (unsigned int count = 1; count <= nLoop; count++) {
     const unsigned int tnRRow = iOne == 1 ? Nr : Nr / iOne + 1;
@@ -394,11 +394,11 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::poissonMultiGrid3D(DataContainer& matri
   int tPhiSlice = Nphi;
 
   // 1)	Memory allocation for multi grid
-  std::vector<Matrix3D> tvArrayV(nLoop);     // potential <--> error
-  std::vector<Matrix3D> tvChargeFMG(nLoop);  // charge is restricted in full multiGrid
-  std::vector<Matrix3D> tvCharge(nLoop);     // charge <--> residue
-  std::vector<Matrix3D> tvPrevArrayV(nLoop); // error calculation
-  std::vector<Matrix3D> tvResidue(nLoop);    // residue calculation
+  std::vector<Vector3D> tvArrayV(nLoop);     // potential <--> error
+  std::vector<Vector3D> tvChargeFMG(nLoop);  // charge is restricted in full multiGrid
+  std::vector<Vector3D> tvCharge(nLoop);     // charge <--> residue
+  std::vector<Vector3D> tvPrevArrayV(nLoop); // error calculation
+  std::vector<Vector3D> tvResidue(nLoop);    // residue calculation
 
   std::array<DataT, Nr> coefficient1{};        // coefficient1(Nr) for storing (1 + h_{r}/2r_{i}) from central differences in r direction
   std::array<DataT, Nr> coefficient2{};        // coefficient2(Nr) for storing (1 + h_{r}/2r_{i}) from central differences in r direction
@@ -563,7 +563,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::poissonMultiGrid3D(DataContainer& matri
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void PoissonSolver<DataT, Nz, Nr, Nphi>::wCycle2D(const int gridFrom, const int gridTo, const int gamma, const int nPre, const int nPost, const DataT gridSizeR, const DataT ratio,
-                                                  std::vector<Matrix3D>& tvArrayV, std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue)
+                                                  std::vector<Vector3D>& tvArrayV, std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue)
 {
   int iOne = 1 << (gridFrom - 1);
   int jOne = 1 << (gridFrom - 1);
@@ -583,9 +583,9 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::wCycle2D(const int gridFrom, const int 
     const DataT tempFourth = 1.0 / (2.0 + 2.0 * tempRatio);
     const DataT inverseTempFourth = 1.0 / tempFourth;
     calcCoefficients2D(1, tnRRow - 1, h, coefficient1, coefficient2);
-    Matrix3D matricesCurrentV = tvArrayV[count - 1];
-    Matrix3D matricesCurrentCharge = tvCharge[count - 1];
-    Matrix3D residue = tvResidue[count - 1];
+    Vector3D matricesCurrentV = tvArrayV[count - 1];
+    Vector3D matricesCurrentCharge = tvCharge[count - 1];
+    Vector3D residue = tvResidue[count - 1];
 
     // 1) Pre-Smoothing: Gauss-Seidel Relaxation or Jacobi
     for (int jPre = 1; jPre <= nPre; ++jPre) {
@@ -624,9 +624,9 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::wCycle2D(const int gridFrom, const int 
 
     tnRRow = iOne == 1 ? Nr : Nr / iOne + 1;
     tnZColumn = jOne == 1 ? Nz : Nz / jOne + 1;
-    const Matrix3D matricesCurrentCharge = tvCharge[count - 1];
-    Matrix3D matricesCurrentV = tvArrayV[count - 1];
-    const Matrix3D matricesCurrentVC = tvArrayV[count];
+    const Vector3D matricesCurrentCharge = tvCharge[count - 1];
+    Vector3D matricesCurrentV = tvArrayV[count - 1];
+    const Vector3D matricesCurrentVC = tvArrayV[count];
 
     // 6) Interpolation/Prolongation
     addInterp2D(matricesCurrentV, matricesCurrentVC, tnRRow, tnZColumn, 0);
@@ -641,8 +641,8 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::wCycle2D(const int gridFrom, const int 
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle2D(const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT gridSizeR, const DataT ratio, std::vector<Matrix3D>& tvArrayV,
-                                                  std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue)
+void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle2D(const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT gridSizeR, const DataT ratio, std::vector<Vector3D>& tvArrayV,
+                                                  std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue)
 {
   int iOne = 1 << (gridFrom - 1);
   int jOne = 1 << (gridFrom - 1);
@@ -719,7 +719,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle2D(const int gridFrom, const int 
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle3D2D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, const DataT ratioPhi,
-                                                    std::vector<Matrix3D>& tvArrayV, std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue, std::array<DataT, Nr>& coefficient1,
+                                                    std::vector<Vector3D>& tvArrayV, std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue, std::array<DataT, Nr>& coefficient1,
                                                     std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3, std::array<DataT, Nr>& coefficient4, std::array<DataT, Nr>& inverseCoefficient4) const
 {
   int iOne = 1 << (gridFrom - 1);
@@ -801,8 +801,8 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle3D2D(const int symmetry, const in
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, std::vector<Matrix3D>& tvArrayV,
-                                                  std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue, std::array<DataT, Nr>& coefficient1, std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3,
+void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, std::vector<Vector3D>& tvArrayV,
+                                                  std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue, std::array<DataT, Nr>& coefficient1, std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3,
                                                   std::array<DataT, Nr>& coefficient4, std::array<DataT, Nr>& inverseCoefficient4) const
 {
   const DataT gridSpacingR = getSpacingR();
@@ -901,7 +901,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::vCycle3D(const int symmetry, const int 
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::residue2D(Matrix3D& residue, const Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT ih2, const DataT inverseTempFourth,
+void PoissonSolver<DataT, Nz, Nr, Nphi>::residue2D(Vector3D& residue, const Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT ih2, const DataT inverseTempFourth,
                                                    const DataT tempRatio, std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2)
 {
   const int iPhi = 0;
@@ -923,7 +923,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::residue2D(Matrix3D& residue, const Matr
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::residue3D(Matrix3D& residue, const Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int tnPhi, const int symmetry,
+void PoissonSolver<DataT, Nz, Nr, Nphi>::residue3D(Vector3D& residue, const Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int tnPhi, const int symmetry,
                                                    const DataT ih2, const DataT tempRatioZ, const std::array<DataT, Nr>& coefficient1, const std::array<DataT, Nr>& coefficient2, const std::array<DataT, Nr>& coefficient3, const std::array<DataT, Nr>& inverseCoefficient4) const
 {
 #pragma omp parallel for num_threads(sNThreads) // parallising this loop is possible - but using more than 2 cores makes it slower -
@@ -972,7 +972,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::residue3D(Matrix3D& residue, const Matr
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::interp3D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::interp3D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
 {
   // Do restrict 2 D for each slice
   if (newPhiSlice == 2 * oldPhiSlice) {
@@ -1041,7 +1041,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::interp3D(Matrix3D& matricesCurrentV, co
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::interp2D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int iphi) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::interp2D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int iphi) const
 {
   for (int j = 2; j < tnZColumn - 1; j += 2) {
     for (int i = 2; i < tnRRow - 1; i += 2) {
@@ -1078,7 +1078,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::interp2D(Matrix3D& matricesCurrentV, co
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::addInterp3D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::addInterp3D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
 {
   // Do restrict 2 D for each slice
   if (newPhiSlice == 2 * oldPhiSlice) {
@@ -1147,7 +1147,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::addInterp3D(Matrix3D& matricesCurrentV,
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::addInterp2D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int tnPhi) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::addInterp2D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int tnPhi) const
 {
   for (int j = 2; j < tnZColumn - 1; j += 2) {
     for (int i = 2; i < tnRRow - 1; i += 2) {
@@ -1184,7 +1184,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::addInterp2D(Matrix3D& matricesCurrentV,
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::relax3D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int iPhi, const int symmetry, const DataT h2,
+void PoissonSolver<DataT, Nz, Nr, Nphi>::relax3D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int iPhi, const int symmetry, const DataT h2,
                                                  const DataT tempRatioZ, const std::array<DataT, Nr>& coefficient1, const std::array<DataT, Nr>& coefficient2, const std::array<DataT, Nr>& coefficient3, const std::array<DataT, Nr>& coefficient4) const
 {
   // Gauss-Seidel (Read Black}
@@ -1282,7 +1282,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::relax3D(Matrix3D& matricesCurrentV, con
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::relax2D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT h2, const DataT tempFourth, const DataT tempRatio,
+void PoissonSolver<DataT, Nz, Nr, Nphi>::relax2D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT h2, const DataT tempFourth, const DataT tempRatio,
                                                  std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2)
 {
   // Gauss-Seidel
@@ -1312,7 +1312,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::relax2D(Matrix3D& matricesCurrentV, con
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::restrictBoundary3D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::restrictBoundary3D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
 {
   // in case of full 3d and the Nphi is also coarsening
   if (2 * newPhiSlice == oldPhiSlice) {
@@ -1337,7 +1337,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::restrictBoundary3D(Matrix3D& matricesCu
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::restrictBoundary2D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int tnPhi) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::restrictBoundary2D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int tnPhi) const
 {
   // for boundary
   for (int j = 0, jj = 0; j < tnZColumn; ++j, jj += 2) {
@@ -1353,7 +1353,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::restrictBoundary2D(Matrix3D& matricesCu
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::restrict3D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::restrict3D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
 {
   if (2 * newPhiSlice == oldPhiSlice) {
     int mm = 0;
@@ -1411,7 +1411,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::restrict3D(Matrix3D& matricesCurrentCha
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void PoissonSolver<DataT, Nz, Nr, Nphi>::restrict2D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int iphi) const
+void PoissonSolver<DataT, Nz, Nr, Nphi>::restrict2D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int iphi) const
 {
   for (int i = 1, ii = 2; i < tnRRow - 1; ++i, ii += 2) {
     for (int j = 1, jj = 2; j < tnZColumn - 1; ++j, jj += 2) {
@@ -1442,21 +1442,7 @@ void PoissonSolver<DataT, Nz, Nr, Nphi>::restrict2D(Matrix3D& matricesCurrentCha
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-bool PoissonSolver<DataT, Nz, Nr, Nphi>::isPowerOfTwo(int i) const
-{
-  int j = 0;
-  while (i > 0) {
-    j += (i & 1);
-    i = (i >> 1);
-  }
-  if (j == 1) {
-    return true;
-  }
-  return false;
-}
-
-template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-DataT PoissonSolver<DataT, Nz, Nr, Nphi>::getConvergenceError(const Matrix3D& matricesCurrentV, Matrix3D& prevArrayV) const
+DataT PoissonSolver<DataT, Nz, Nr, Nphi>::getConvergenceError(const Vector3D& matricesCurrentV, Vector3D& prevArrayV) const
 {
   std::vector<DataT> errorArr(prevArrayV.getNphi());
 

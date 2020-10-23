@@ -45,7 +45,7 @@ class Vector
 
  public:
   /// default constructor
-  Vector() {}
+  Vector() = default;
 
   /// constructor
   /// \param dataVector data which is assigned to the vector

@@ -8,14 +8,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file O2TPCPoissonSolverStructs.h
+/// \file O2TPCPoissonSolverHelpers.h
 /// \brief This file provides all the necessary structs which are used in the poisson solver
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Aug 21, 2020
 
-#ifndef ALICEO2_TPC_O2TPCPoissonSolverStructs_H_
-#define ALICEO2_TPC_O2TPCPoissonSolverStructs_H_
+#ifndef ALICEO2_TPC_PoissonSolverHelpers_H_
+#define ALICEO2_TPC_PoissonSolverHelpers_H_
 
 #include <vector>
 #include <cmath>
@@ -24,87 +24,6 @@ namespace o2
 {
 namespace tpc
 {
-
-/// this is a simple vector class which is used in the poisson solver class
-
-/// \tparam DataT the data type of the mStorage which is used during the calculations
-template <typename DataT = double>
-class Matrix3D
-{
- public:
-  /// Constructor for a tricubic interpolator
-  /// \param nr number of data points in r directions
-  /// \param nz number of data points in r directions
-  /// \param nphi number of data points in r directions
-  Matrix3D(const unsigned int nr, const unsigned int nz, const unsigned int nphi) : mNr{nr}, mNz{nz}, mNphi{nphi}, mStorage{nr * nz * nphi} {};
-
-  /// default constructor
-  Matrix3D() = default;
-
-  /// operator to set the values
-  DataT& operator()(const unsigned int iR, const unsigned int iZ, const unsigned int iPhi)
-  {
-    return mStorage[iR + mNr * (iZ + mNz * iPhi)];
-  }
-
-  /// operator to read the values
-  const DataT& operator()(const unsigned int iR, const unsigned int iZ, const unsigned int iPhi) const
-  {
-    return mStorage[iR + mNr * (iZ + mNz * iPhi)];
-  }
-
-  /// operator to directly access the values
-  DataT& operator[](const unsigned int index)
-  {
-    return mStorage[index];
-  }
-
-  const DataT& operator[](const unsigned int index) const
-  {
-    return mStorage[index];
-  }
-
-  /// \param iR index in r direction
-  /// \param iZ index in z direction
-  /// \param iPhi index in phi direction
-  /// \return returns the index for given indices
-  int getIndex(const unsigned int iR, const unsigned int iZ, const unsigned int iPhi) const
-  {
-    return iR + mNr * (iZ + mNz * iPhi);
-  }
-
-  /// resize the vector
-  /// \param nr number of data points in r directions
-  /// \param nz number of data points in r directions
-  /// \param nphi number of data points in r directions
-  void resize(const unsigned int nr, const unsigned int nz, const unsigned int nphi)
-  {
-    mNr = nr;
-    mNz = nz;
-    mNphi = nphi;
-    mStorage.resize(nr * nz * nphi);
-  }
-
-  const auto& data() const { return mStorage; }
-  auto& data() { return mStorage; }
-
-  unsigned int getNr() const { return mNr; }          ///< get number of data points in r direction
-  unsigned int getNz() const { return mNz; }          ///< get number of data points in z direction
-  unsigned int getNphi() const { return mNphi; }      ///< get number of data points in phi direction
-  unsigned int size() const { return mStorage.size; } ///< get number of data points
-
-  auto begin() const { return mStorage.begin(); }
-  auto begin() { return mStorage.begin(); }
-
-  auto end() const { return mStorage.end(); }
-  auto end() { return mStorage.end(); }
-
- private:
-  unsigned int mNr{};            ///< number of data points in r direction
-  unsigned int mNz{};            ///< number of data points in z direction
-  unsigned int mNphi{};          ///< number of data points in phi direction
-  std::vector<DataT> mStorage{}; ///< vector containing the data
-};
 
 ///< Enumeration of Cycles Type
 enum class CycleType {
@@ -140,7 +59,7 @@ struct MGParameters {                                             ///< Parameter
 
 template <typename DataT = double>
 struct TPCParameters {
-  static constexpr DataT TPCZ0{249.525};                        ///< nominal gating grid position
+  static constexpr DataT TPCZ0{249.525};                        ///< nominal G1T position
   static constexpr DataT IFCRADIUS{83.5};                       ///< Mean Radius of the Inner Field Cage ( 82.43 min,  83.70 max) (cm)
   static constexpr DataT OFCRADIUS{254.5};                      ///< Mean Radius of the Outer Field Cage (252.55 min, 256.45 max) (cm)
   static constexpr DataT ZOFFSET{0.2};                          ///< Offset from CE: calculate all distortions closer to CE as if at this point

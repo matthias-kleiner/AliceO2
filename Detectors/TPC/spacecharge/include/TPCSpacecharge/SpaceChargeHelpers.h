@@ -8,20 +8,19 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file SpaceChargeStructs.h
-/// \brief This file provides all necesseray structs which are used during the calcution of the distortions and corrections
+/// \file SpaceChargeHelpers.h
+/// \brief This file provides all necesseray classes which are used during the calcution of the distortions and corrections
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Aug 21, 2020
 
-#ifndef ALICEO2_TPC_SpaceChargeStructs_H_
-#define ALICEO2_TPC_SpaceChargeStructs_H_
+#ifndef ALICEO2_TPC_SpaceChargeHelpers_H_
+#define ALICEO2_TPC_SpaceChargeHelpers_H_
 
 #include <functional>
 #include <cmath>
 #include "TPCSpacecharge/TriCubic.h"
 #include "DataFormatsTPC/Defs.h"
-#include "TPCSpacecharge/SpaceChargeStructs.h"
 
 namespace o2
 {
@@ -29,22 +28,35 @@ namespace tpc
 {
 
 ///
-/// this struct contains an analytical description of the space charge, potential and the electric fields.
+/// this class contains an analytical description of the space charge, potential and the electric fields.
 /// The analytical functions can be used to test the poisson solver and the caluclation of distortions/corrections.
 ///
 template <typename DataT = double>
-struct AnalyticalFields {
-
-  DataT parA{1e-5};                     ///< parameter [0] of functions
-  DataT parB{0.5};                      ///< parameter [1] of functions
-  DataT parC{1e-4};                     ///< parameter [2] of functions
-  o2::tpc::Side side{o2::tpc::Side::A}; ///< side of the TPC. Since the absolute value is taken during the calculations the choice of the side is arbitrary.
-
+class AnalyticalFields
+{
+ public:
   AnalyticalFields(const o2::tpc::Side sideTmp = o2::tpc::Side::A) : side{sideTmp} {};
 
   o2::tpc::Side getSide() const { return side; }
 
   void setSide(const o2::tpc::Side sideTmp) { side = sideTmp; }
+
+  /// sets the parameters
+  void setParameters(const DataT parA, const DataT parB, const DataT parC)
+  {
+    mParA = parA;
+    mParB = parB;
+    mParC = parC;
+  }
+
+  /// return parameter A
+  DataT getParA() const { return mParA; }
+
+  /// return parameter B
+  DataT getParB() const { return mParB; }
+
+  /// return parameter C
+  DataT getParC() const { return mParC; }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
@@ -92,48 +104,54 @@ struct AnalyticalFields {
   }
 
   /// analytical potential
-  std::function<DataT(DataT, DataT, DataT)> potentialFunc = [& parA = parA, &parB = parB, &parC = parC](DataT z, DataT r, DataT phi) {
-    return -parA * (std::pow((-r + 254.5 + 83.5), 4) - 338.0 * std::pow((-r + 254.5 + 83.5), 3) + 21250.75 * std::pow((-r + 254.5 + 83.5), 2)) * std::cos(parB * phi) * std::cos(parB * phi) * std::exp(-1 * parC * (z - 125) * (z - 125));
+  std::function<DataT(DataT, DataT, DataT)> potentialFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+    return -mParA * (std::pow((-r + 254.5 + 83.5), 4) - 338.0 * std::pow((-r + 254.5 + 83.5), 3) + 21250.75 * std::pow((-r + 254.5 + 83.5), 2)) * std::cos(mParB * phi) * std::cos(mParB * phi) * std::exp(-1 * mParC * (z - 125) * (z - 125));
   };
 
-  /// analytical space charge - NOTE: if the space charge density is calculated analytical there would be a - sign in the formula (-parA)  - however since its an e- the sign is flipped (IS THIS CORRECT??? see for minus sign: AliTPCSpaceCharge3DCalc::SetPotentialBoundaryAndChargeFormula)-
-  std::function<DataT(DataT, DataT, DataT)> densityFunc = [& parA = parA, &parB = parB, &parC = parC](DataT z, DataT r, DataT phi) {
-    return parA * ((1 / r * 16 * (-3311250 + 90995.5 * r - 570.375 * r * r + r * r * r)) * std::cos(parB * phi) * std::cos(parB * phi) * std::exp(-1 * parC * (z - 125) * (z - 125)) +
-                   (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * std::pow(-r + 254.5 + 83.5, 2)) / (r * r) * std::exp(-1 * parC * (z - 125) * (z - 125)) * -2 * parB * parB * std::cos(2 * parB * phi) +
-                   (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * std::pow(-r + 254.5 + 83.5, 2)) * std::cos(parB * phi) * std::cos(parB * phi) * 2 * parC * std::exp(-1 * parC * (z - 125) * (z - 125)) * (2 * parC * (z - 125) * (z - 125) - 1));
+  /// analytical space charge - NOTE: if the space charge density is calculated analytical there would be a - sign in the formula (-mParA)  - however since its an e- the sign is flipped (IS THIS CORRECT??? see for minus sign: AliTPCSpaceCharge3DCalc::SetPotentialBoundaryAndChargeFormula)-
+  std::function<DataT(DataT, DataT, DataT)> densityFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+    return mParA * ((1 / r * 16 * (-3311250 + 90995.5 * r - 570.375 * r * r + r * r * r)) * std::cos(mParB * phi) * std::cos(mParB * phi) * std::exp(-1 * mParC * (z - 125) * (z - 125)) +
+                    (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * std::pow(-r + 254.5 + 83.5, 2)) / (r * r) * std::exp(-1 * mParC * (z - 125) * (z - 125)) * -2 * mParB * mParB * std::cos(2 * mParB * phi) +
+                    (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * std::pow(-r + 254.5 + 83.5, 2)) * std::cos(mParB * phi) * std::cos(mParB * phi) * 2 * mParC * std::exp(-1 * mParC * (z - 125) * (z - 125)) * (2 * mParC * (z - 125) * (z - 125) - 1));
   };
 
   /// analytical electric field Er
-  std::function<DataT(DataT, DataT, DataT)> erFunc = [& parA = parA, &parB = parB, &parC = parC](DataT z, DataT r, DataT phi) {
-    return parA * 4 * (r * r * r - 760.5 * r * r + 181991 * r - 1.3245 * std::pow(10, 7)) * std::cos(parB * phi) * std::cos(parB * phi) * std::exp(-1 * parC * (z - 125) * (z - 125));
+  std::function<DataT(DataT, DataT, DataT)> erFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+    return mParA * 4 * (r * r * r - 760.5 * r * r + 181991 * r - 1.3245 * std::pow(10, 7)) * std::cos(mParB * phi) * std::cos(mParB * phi) * std::exp(-1 * mParC * (z - 125) * (z - 125));
   };
 
   /// analytical electric field Ephi
-  std::function<DataT(DataT, DataT, DataT)> ephiFunc = [& parA = parA, &parB = parB, &parC = parC](DataT z, DataT r, DataT phi) {
-    return parA * (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * (-r + 254.5 + 83.5) * (-r + 254.5 + 83.5)) / r * std::exp(-1 * parC * (z - 125) * (z - 125)) * -parB * std::sin(2 * parB * phi);
+  std::function<DataT(DataT, DataT, DataT)> ephiFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+    return mParA * (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * (-r + 254.5 + 83.5) * (-r + 254.5 + 83.5)) / r * std::exp(-1 * mParC * (z - 125) * (z - 125)) * -mParB * std::sin(2 * mParB * phi);
   };
 
   /// analytical electric field Ez
-  std::function<DataT(DataT, DataT, DataT)> ezFunc = [& parA = parA, &parB = parB, &parC = parC](DataT z, DataT r, DataT phi) {
-    return parA * (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * (-r + 254.5 + 83.5) * (-r + 254.5 + 83.5)) * std::cos(parB * phi) * std::cos(parB * phi) * -2 * parC * (z - 125) * std::exp(-1 * parC * (z - 125) * (z - 125));
+  std::function<DataT(DataT, DataT, DataT)> ezFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+    return mParA * (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * (-r + 254.5 + 83.5) * (-r + 254.5 + 83.5)) * std::cos(mParB * phi) * std::cos(mParB * phi) * -2 * mParC * (z - 125) * std::exp(-1 * mParC * (z - 125) * (z - 125));
   };
 
   static constexpr unsigned int getID() { return ID; }
 
-  // private:
-  static constexpr unsigned int ID = 0; ///< needed to distinguish between the differrent structs
+ private:
+  static constexpr unsigned int ID = 0; ///< needed to distinguish between the differrent classes
+  DataT mParA{1e-5};                    ///< parameter [0] of functions
+  DataT mParB{0.5};                     ///< parameter [1] of functions
+  DataT mParC{1e-4};                    ///< parameter [2] of functions
+  o2::tpc::Side side{o2::tpc::Side::A}; ///< side of the TPC. Since the absolute value is taken during the calculations the choice of the side is arbitrary.
 };
 
 ///
-/// This struct gives tricubic interpolation of the electric fields and can be used to calculate the distortions/corrections.
+/// This class gives tricubic interpolation of the electric fields and can be used to calculate the distortions/corrections.
 /// The electric fields have to be calculated by the poisson solver or given by the analytical formula.
 ///
 template <typename DataT = double, size_t Nr = 129, size_t Nz = 129, size_t Nphi = 180>
-struct NumericalFields {
+class NumericalFields
+{
   using RegularGrid = o2::tpc::RegularGrid3D<DataT, Nz, Nr, Nphi>;
   using DataContainer = o2::tpc::DataContainer3D<DataT, Nz, Nr, Nphi>;
   using TriCubic = o2::tpc::TriCubicInterpolator<DataT, Nz, Nr, Nphi>;
 
+ public:
   /// constructor
   /// \param dataEr container for the data of the electrical field Er
   /// \param dataEz container for the data of the electrical field Ez
@@ -199,19 +217,21 @@ struct NumericalFields {
   TriCubic interpolatorEz{dataEz, gridProperties};                                         ///< TriCubic interpolator of the electric field Ez
   TriCubic interpolatorEphi{dataEphi, gridProperties};                                     ///< TriCubic interpolator of the electric field Ephi
   typename TriCubic::InterpolationType interpolType = TriCubic::InterpolationType::Sparse; ///< type of TriCubic interpolation
-  static constexpr unsigned int ID = 1;                                                    ///< needed to distinguish between the different structs
+  static constexpr unsigned int ID = 1;                                                    ///< needed to distinguish between the different classes
 };
 
 ///
-/// This struct gives tricubic interpolation of the local distortions or corrections.
+/// This class gives tricubic interpolation of the local distortions or corrections.
 /// The the local distortions or corrections can be used to calculate the global distortions/corrections.
 ///
 template <typename DataT = double, size_t Nr = 129, size_t Nz = 129, size_t Nphi = 180>
-struct DistCorrInterpolator {
+class DistCorrInterpolator
+{
   using RegularGrid = o2::tpc::RegularGrid3D<DataT, Nz, Nr, Nphi>;
   using DataContainer = o2::tpc::DataContainer3D<DataT, Nz, Nr, Nphi>;
   using TriCubic = o2::tpc::TriCubicInterpolator<DataT, Nz, Nr, Nphi>;
 
+ public:
   /// constructor
   /// \param dataDistCorrdR container for the data of the distortions dR
   /// \param dataDistCorrdZ container for the data of the distortions dZ
@@ -277,7 +297,7 @@ struct DistCorrInterpolator {
   TriCubic interpolatorDistCorrdZ{dataDistCorrdZ, gridProperties};                         ///< TriCubic interpolator of distortion or correction dZ
   TriCubic interpolatorDistCorrdRPhi{dataDistCorrdRPhi, gridProperties};                   ///< TriCubic interpolator of distortion or correction dRPhi
   typename TriCubic::InterpolationType interpolType = TriCubic::InterpolationType::Sparse; ///< type of TriCubic interpolation
-  static constexpr unsigned int ID = 2;                                                    ///< needed to distinguish between the different structs
+  static constexpr unsigned int ID = 2;                                                    ///< needed to distinguish between the different classes
 };
 
 } // namespace tpc

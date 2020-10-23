@@ -166,14 +166,17 @@ class TriCubicInterpolator
   /// \return returns the extrapolation technique for missing boundary values
   ExtrapolationType getExtrapolationType() const { return mExtrapolationType; }
 
-  /// \return returns the maximum number of threads the tricubic interpolator can be used with (value should be = omp_get_max_threads())
-  int getNThreads() const { return mNThreads; }
+  /// get the number of threads used for some of the calculations
+  static int getNThreads() { return sNThreads; }
+
+  /// set the number of threads used for some of the calculations
+  static void setNThreads(int nThreads) { sNThreads = nThreads; }
 
   /// \return returns the number of the thread. Each thread should have an individual thread number
   int getThreadNum() const { return sThreadnum; }
 
   /// \return performs a check if the interpolator can be used with maximum number of threads
-  bool checkThreadSafety() const { return mNThreads <= omp_get_max_threads(); }
+  bool checkThreadSafety() const { return sNThreads <= omp_get_max_threads(); }
 
  private:
   // matrix containing the 'relationship between the derivatives at the corners of the elements and the coefficients'
@@ -251,10 +254,10 @@ class TriCubicInterpolator
   const DataContainer& mGridData{};                                                                      ///< adress to the data container of the grid
   const Grid3D& mGridProperties{};                                                                       ///< adress to the properties of the grid
   inline static thread_local const size_t sThreadnum{static_cast<size_t>(omp_get_thread_num())};         ///< save for each thread the thread number to get fast access to the correct array
-  const int mNThreads{omp_get_max_threads()};                                                            ///< number of threads the tricubic interpolator can be used with
-  std::unique_ptr<Vector<DataT, 64>[]> mCoefficients = std::make_unique<Vector<DataT, 64>[]>(mNThreads); ///< coefficients needed to interpolate a value
-  std::unique_ptr<Vector<DataT, FDim>[]> mLastInd = std::make_unique<Vector<DataT, FDim>[]>(mNThreads);  ///< stores the index for the cell, where the coefficients are already evaluated (only the coefficients for the last cell are stored)
-  std::unique_ptr<bool[]> mInitialized = std::make_unique<bool[]>(mNThreads);                            ///< sets the flag if the coefficients are evaluated at least once
+  inline static int sNThreads{omp_get_max_threads()};                                                    ///< number of threads the tricubic interpolator can be used with
+  std::unique_ptr<Vector<DataT, 64>[]> mCoefficients = std::make_unique<Vector<DataT, 64>[]>(sNThreads); ///< coefficients needed to interpolate a value
+  std::unique_ptr<Vector<DataT, FDim>[]> mLastInd = std::make_unique<Vector<DataT, FDim>[]>(sNThreads);  ///< stores the index for the cell, where the coefficients are already evaluated (only the coefficients for the last cell are stored)
+  std::unique_ptr<bool[]> mInitialized = std::make_unique<bool[]>(sNThreads);                            ///< sets the flag if the coefficients are evaluated at least once
   ExtrapolationType mExtrapolationType = ExtrapolationType::Parabola;                                    ///< sets which type of extrapolation for missing points at boundary is used. Linear and Parabola is only supported for perdiodic phi axis and non periodic z and r axis
 
   //                 DEFINITION OF enum GridPos

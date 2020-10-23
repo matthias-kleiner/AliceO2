@@ -18,7 +18,7 @@
 
 #include "TPCSpacecharge/TriCubic.h"
 #include "TPCSpacecharge/PoissonSolver.h"
-#include "TPCSpacecharge/SpaceChargeStructs.h"
+#include "TPCSpacecharge/SpaceChargeHelpers.h"
 #include "TPCSpacecharge/RegularGrid3D.h"
 #include "TPCSpacecharge/DataContainer3D.h"
 
@@ -78,10 +78,25 @@ class SpaceCharge
     Corrections = 1  ///< corrections
   };
 
+  enum class GlobalDistType {
+    Standard = 0, ///< classical method (start calculation of global distortion at each voxel in the tpc and follow electron drift to readout -slow-)
+    Fast = 1      ///< interpolation of global corrections (use the global corrections to apply an iterative approach to obtain the global distortions -fast-)
+  };
+
+  enum class GlobalDistCorrMethod {
+    LocalDistCorr,  ///< using local dis/corr interpolator for calculation of global distortions/corrections
+    ElectricalField ///< using electric field for calculation of global distortions/corrections
+  };
+
   /// step 0: set the charge density from TH3 histogram containing the space charge density
   /// \param fInp input file containing a histogram for the space charge density
   /// \param name the name of the space charge density histogram in the file
   void fillChargeDensityFromHisto(TFile& fInp, const char* name);
+
+  /// \param side side of the TPC
+  /// \param globalDistType the algorithm which is used to calculate the global distortions
+  /// \param globalDistCorrMethod the setting if local distortions/corrections or the electrical field will be used for the calculation of the global distortions/corrections
+  void calculateDistortionsCorrections(const o2::tpc::Side side, const GlobalDistType globalDistType = GlobalDistType::Fast, const GlobalDistCorrMethod globalDistCorrMethod = GlobalDistCorrMethod::LocalDistCorr);
 
   /// step 0: this function fills the internal storage for the charge density using an analytical formula
   /// \param formulaStruct struct containing a method to evaluate the density
@@ -353,6 +368,16 @@ class SpaceCharge
   /// \param nSteps number of steps per z bin
   void setNStep(const int nSteps) { mSteps = nSteps; }
 
+  /// get the number of threads used for some of the calculations
+  static int getNThreads() { return sNThreads; }
+
+  /// set the number of threads used for some of the calculations
+  static void setNThreads(const int nThreads)
+  {
+    sNThreads = nThreads;
+    o2::tpc::TriCubicInterpolator<DataT, Nz, Nr, Nphi>::setNThreads(nThreads);
+  }
+
   /// set which kind of numerical integration is used for calcution of the integrals int Er/Ez dz, int Ephi/Ez dz, int Ez dz
   /// \param strategy numerical integration strategy. see enum IntegrationStrategy for the different types
   void setNumericalIntegrationStrategy(const IntegrationStrategy strategy) { mNumericalIntegrationStrategy = strategy; }
@@ -442,6 +467,8 @@ class SpaceCharge
  private:
   using ASolv = o2::tpc::PoissonSolver<DataT, Nz, Nr, Nphi>;
 
+  inline static int sNThreads{omp_get_max_threads()}; ///< number of threads which are used during the calculations
+
   IntegrationStrategy mNumericalIntegrationStrategy = IntegrationStrategy::SimpsonIterative; ///< numerical integration strategy of integration of the E-Field: 0: trapezoidal, 1: Simpson, 2: Root (only for analytical formula case)
   int mSimpsonNIteratives = 3;                                                               ///< number of iterations which are performed in the iterative simpson calculation of distortions/corrections
   int mSteps = 1;                                                                            ///< during the calculation of the corrections/distortions it is assumed that the electron drifts on a line from deltaZ = z0 -> z1. The value sets the deltaZ width: 1: deltaZ=zBin/1, 5: deltaZ=zBin/5
@@ -455,6 +482,7 @@ class SpaceCharge
   bool mIsLocalDistSet[FNSIDES]{};      ///< flag if local distortions are set
   bool mIsGlobalCorrSet[FNSIDES]{};     ///< flag if global corrections are set
   bool mIsGlobalDistSet[FNSIDES]{};     ///< flag if global distortions are set
+  bool mIsChargeSet[FNSIDES]{};         ///< flag if the charge
 
   RegularGrid mGrid3D{getZMin(), getRMin(), getPhiMin(), getGridSpacingZ(), getGridSpacingR(), getGridSpacingPhi()}; ///< grid properties
 

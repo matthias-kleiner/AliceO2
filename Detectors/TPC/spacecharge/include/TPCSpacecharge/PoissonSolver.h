@@ -21,8 +21,9 @@
 #define ALICEO2_TPC_PoissonSolver_H_
 
 #include "TPCSpacecharge/DataContainer3D.h"
-#include "TPCSpacecharge/PoissonSolverStructs.h"
+#include "TPCSpacecharge/PoissonSolverHelpers.h"
 #include "TPCSpacecharge/RegularGrid3D.h"
+#include "TPCSpacecharge/Vector3D.h"
 
 #ifdef WITH_OPENMP
 #include <omp.h>
@@ -48,7 +49,7 @@ class PoissonSolver
  public:
   using RegularGrid = RegularGrid3D<DataT, Nz, Nr, Nphi>;
   using DataContainer = DataContainer3D<DataT, Nz, Nr, Nphi>;
-  using Matrix3D = Matrix3D<DataT>;
+  using Vector3D = Vector3D<DataT>;
 
   /// default constructor
   PoissonSolver(const RegularGrid& gridProperties) : mGrid3D{gridProperties} {};
@@ -83,15 +84,15 @@ class PoissonSolver
   DataT getSpacingR() const { return mGrid3D.getSpacingY(); }
   DataT getSpacingPhi() const { return mGrid3D.getSpacingZ(); }
 
-  static void setConvergenceError(const DataT error)
-  {
-    sConvergenceError = error;
-  }
+  static void setConvergenceError(const DataT error) { sConvergenceError = error; }
 
-  static DataT getConvergenceError()
-  {
-    return sConvergenceError;
-  }
+  static DataT getConvergenceError() { return sConvergenceError; }
+
+  /// get the number of threads used for some of the calculations
+  static int getNThreads() { return sNThreads; }
+
+  /// set the number of threads used for some of the calculations
+  static void setNThreads(int nThreads) { sNThreads = nThreads; }
 
  private:
   const RegularGrid& mGrid3D{};                      ///< grid properties
@@ -103,7 +104,7 @@ class PoissonSolver
   ///
   /// \param matricesCurrentV current potential (numerical solution)
   /// \param prevArrayV content from matricesCurrentV from previous iteration
-  DataT getConvergenceError(const Matrix3D& matricesCurrentV, Matrix3D& prevArrayV) const;
+  DataT getConvergenceError(const Vector3D& matricesCurrentV, Vector3D& prevArrayV) const;
 
   /// 3D - Solve Poisson's Equation in 3D by MultiGrid with constant phi slices
   ///
@@ -181,7 +182,7 @@ class PoissonSolver
   /// \param tnRRow number of vertices in r direction of TPC
   /// \param tnZColumn number of vertices in z direction of TPC
   /// \param iphi phi vertex
-  void restrict2D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int iphi) const;
+  void restrict2D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int iphi) const;
 
   /// Restriction in 3D
   ///
@@ -200,7 +201,7 @@ class PoissonSolver
   /// \param tnZColumn number of grid in Nz (in z-direction) for coarser grid should be  2^M + 1, finer grid in 2^{M+1} + 1
   /// \param newPhiSlice number of Nphi (in phi-direction) for coarser grid
   /// \param oldPhiSlice number of Nphi (in phi-direction) for finer grid
-  void restrict3D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
+  void restrict3D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
 
   /// Restrict Boundary in 3D
   ///
@@ -212,7 +213,7 @@ class PoissonSolver
   /// \param tnZColumn number of grid in Nz (in z-direction) for coarser grid should be  2^M + 1, finer grid in 2^{M+1} + 1
   /// \param newPhiSlice number of Nphi (in phi-direction) for coarser grid
   /// \param oldPhiSlice number of Nphi (in phi-direction) for finer grid
-  void restrictBoundary3D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
+  void restrictBoundary3D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
 
   ///    Relaxation operation for multiGrid
   ///		 relaxation used 7 stencil in cylindrical coordinate
@@ -232,7 +233,7 @@ class PoissonSolver
   /// \param coefficient2 coefficients for \f$  V_{x-1,y,z} \f$
   /// \param coefficient3 coefficients for z
   /// \param coefficient4 coefficients for f(r,\phi,z)
-  void relax3D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int iPhi, const int symmetry, const DataT h2, const DataT tempRatioZ,
+  void relax3D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int iPhi, const int symmetry, const DataT h2, const DataT tempRatioZ,
                const std::array<DataT, Nr>& coefficient1, const std::array<DataT, Nr>& coefficient2, const std::array<DataT, Nr>& coefficient3, const std::array<DataT, Nr>& coefficient4) const;
 
   /// Relax2D
@@ -252,7 +253,7 @@ class PoissonSolver
   /// \param tempRatio ratio between grid size in z-direction and r-direction
   /// \param coefficient1 coefficient for \f$  V_{x+1,y,z} \f$
   /// \param coefficient2 coefficient for \f$  V_{x-1,y,z} \f$
-  void relax2D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT h2, const DataT tempFourth, const DataT tempRatio,
+  void relax2D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT h2, const DataT tempFourth, const DataT tempRatio,
                std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2);
 
   /// Interpolation/Prolongation in 2D
@@ -270,7 +271,7 @@ class PoissonSolver
   /// \param tnRRow number of grid in r-direction for coarser grid should be 2^N + 1, finer grid in 2^{N+1} + 1
   /// \param tnZColumn number of grid in z-direction for coarser grid should be  2^M + 1, finer grid in 2^{M+1} + 1
   /// \param iphi phi vertex
-  void interp2D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int iphi) const;
+  void interp2D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int iphi) const;
 
   /// Interpolation/Prolongation in 3D
   ///
@@ -289,7 +290,7 @@ class PoissonSolver
   /// \param tnZColumn number of vertices in z-direction for coarser grid should be  2^M + 1, finer grid in 2^{M+1} + 1
   /// \param newPhiSlice number of vertices in phi-direction for coarser grid
   /// \param oldPhiSlice number of vertices in phi-direction for finer grid
-  void interp3D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
+  void interp3D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
 
   /// Prolongation with Addition for 3D
   ///
@@ -303,7 +304,7 @@ class PoissonSolver
   /// \param tnZColumn number of vertices in z-direction for coarser grid should be  2^M + 1, finer grid in 2^{M+1} + 1a
   /// \param newPhiSlice number of vertices in phi-direction for coarser grid
   /// \param oldPhiSlice number of vertices in phi-direction for finer grid
-  void addInterp3D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
+  void addInterp3D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const;
 
   /// Prolongation with Addition for 2D
   ///
@@ -315,7 +316,7 @@ class PoissonSolver
   /// \param tnRRow number of vertices in r-direction for coarser grid should be 2^N + 1, finer grid in 2^{N+1} + 1
   /// \param tnZColumn number of vertices in z-direction for coarser grid should be  2^M + 1, finer grid in 2^{M+1} + 1a
   /// \param tnPhi phi vertices
-  void addInterp2D(Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int tnPhi) const;
+  void addInterp2D(Vector3D& matricesCurrentV, const Vector3D& matricesCurrentVC, const int tnRRow, const int tnZColumn, const int tnPhi) const;
 
   /// VCycle 3D2D, V Cycle 3D in multiGrid with constant Nphi
   /// fine-->coarsest-->fine, propagating the residue to correct initial guess of V
@@ -344,8 +345,8 @@ class PoissonSolver
   /// \param coefficient3 coefficient for relaxation (ratio r/z)
   /// \param coefficient4 coefficient for relaxation (ratio for grid_r)
   /// \param inverseCoefficient4 coefficient for relaxation (inverse coefficient4)
-  void vCycle3D2D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, const DataT ratioPhi, std::vector<Matrix3D>& tvArrayV,
-                  std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue, std::array<DataT, Nr>& coefficient1, std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3,
+  void vCycle3D2D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, const DataT ratioPhi, std::vector<Vector3D>& tvArrayV,
+                  std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue, std::array<DataT, Nr>& coefficient1, std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3,
                   std::array<DataT, Nr>& coefficient4, std::array<DataT, Nr>& inverseCoefficient4) const;
 
   /// VCycle 3D, V Cycle in multiGrid, fine-->coarsest-->fine, propagating the residue to correct initial guess of V
@@ -373,8 +374,8 @@ class PoissonSolver
   /// \param coefficient3 coefficient for relaxation (ratio r/z)
   /// \param coefficient4 coefficient for relaxation (ratio for grid_r)
   /// \param inverseCoefficient4 coefficient for relaxation (inverse coefficient4)
-  void vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, std::vector<Matrix3D>& tvArrayV, std::vector<Matrix3D>& tvCharge,
-                std::vector<Matrix3D>& tvResidue, std::array<DataT, Nr>& coefficient1, std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3,
+  void vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, std::vector<Vector3D>& tvArrayV, std::vector<Vector3D>& tvCharge,
+                std::vector<Vector3D>& tvResidue, std::array<DataT, Nr>& coefficient1, std::array<DataT, Nr>& coefficient2, std::array<DataT, Nr>& coefficient3,
                 std::array<DataT, Nr>& coefficient4, std::array<DataT, Nr>& inverseCoefficient4) const;
 
   /// V-Cycle 2D
@@ -392,8 +393,8 @@ class PoissonSolver
   /// \param tvArrayV vector of V potential in different grids
   /// \param tvCharge vector of charge distribution in different grids
   /// \param tvResidue vector of residue calculation in different grids
-  void vCycle2D(const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT gridSizeR, const DataT ratio, std::vector<Matrix3D>& tvArrayV,
-                std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue);
+  void vCycle2D(const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT gridSizeR, const DataT ratio, std::vector<Vector3D>& tvArrayV,
+                std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue);
 
   /// W-Cycle 2D
   ///
@@ -412,7 +413,7 @@ class PoissonSolver
   /// \param tvCharge vector of charge distribution in different grids
   /// \param tvResidue vector of residue calculation in different grids
   void wCycle2D(const int gridFrom, const int gridTo, const int gamma, const int nPre, const int nPost, const DataT gridSizeR, const DataT ratio,
-                std::vector<Matrix3D>& tvArrayV, std::vector<Matrix3D>& tvCharge, std::vector<Matrix3D>& tvResidue);
+                std::vector<Vector3D>& tvArrayV, std::vector<Vector3D>& tvCharge, std::vector<Vector3D>& tvResidue);
 
   /// Residue3D
   ///
@@ -435,7 +436,7 @@ class PoissonSolver
   /// \param coefficient2 coefficient for \f$  V_{x-1,y,z} \f$
   /// \param coefficient3 coefficient for z
   /// \param inverseCoefficient4 inverse coefficient for f(r,\phi,z)
-  void residue3D(Matrix3D& residue, const Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int tnPhi, const int symmetry, const DataT ih2, const DataT tempRatioZ,
+  void residue3D(Vector3D& residue, const Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int tnPhi, const int symmetry, const DataT ih2, const DataT tempRatioZ,
                  const std::array<DataT, Nr>& coefficient1, const std::array<DataT, Nr>& coefficient2, const std::array<DataT, Nr>& coefficient3, const std::array<DataT, Nr>& inverseCoefficient4) const;
 
   /// Residue2D
@@ -456,7 +457,7 @@ class PoissonSolver
   /// \param tempRatio ratio between grid size in z-direction and r-direction
   /// \param coefficient1 coefficient for \f$  V_{x+1,y,z} \f$
   /// \param coefficient2 coefficient for \f$  V_{x-1,y,z} \f$
-  void residue2D(Matrix3D& residue, const Matrix3D& matricesCurrentV, const Matrix3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT ih2, const DataT inverseTempFourth,
+  void residue2D(Vector3D& residue, const Vector3D& matricesCurrentV, const Vector3D& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const DataT ih2, const DataT inverseTempFourth,
                  const DataT tempRatio, std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2);
 
   ///    Boundary transfer  restrict from fine -> coarse grid
@@ -466,7 +467,7 @@ class PoissonSolver
   /// \param tnRRow number of vertices in the r direction of TPC
   /// \param tnZColumn number of vertices in z direction of TPC
   /// \param tnPhi phi vertices
-  void restrictBoundary2D(Matrix3D& matricesCurrentCharge, const Matrix3D& residue, const int tnRRow, const int tnZColumn, const int tnPhi) const;
+  void restrictBoundary2D(Vector3D& matricesCurrentCharge, const Vector3D& residue, const int tnRRow, const int tnZColumn, const int tnPhi) const;
 
   // calculate coefficients
   void calcCoefficients(unsigned int from, unsigned int to, const DataT h, const DataT tempRatioZ, const DataT tempRatioPhi, std::array<DataT, Nr>& coefficient1,
@@ -478,7 +479,10 @@ class PoissonSolver
   /// Helper function to check if the integer is equal to a power of two
   /// \param i the number
   /// \return 1 if it is a power of two, else 0
-  bool isPowerOfTwo(int i) const;
+  bool isPowerOfTwo(const int i) const
+  {
+    return ((i > 0) && !(i & (i - 1)));
+  };
 };
 
 } // namespace tpc

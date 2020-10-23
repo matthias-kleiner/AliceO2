@@ -15,10 +15,96 @@
 
 #include "TPCSpacecharge/SpaceCharge.h"
 #include "fmt/core.h"
+#include "Framework/Logger.h"
+#include <chrono>
 
 templateClassImp(o2::tpc::SpaceCharge);
 
 using namespace o2::tpc;
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2::tpc::Side side, const GlobalDistType globalDistType, const GlobalDistCorrMethod globalDistCorrMethod)
+{
+  using timer = std::chrono::high_resolution_clock;
+  using SC = o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>;
+  if (!mIsChargeSet[side]) {
+    LOGP(ERROR, "the charge is not set!");
+  }
+
+  const std::array sglobalType{"local distortion/correction interpolator", "Electric fields"};
+  const std::array sglobalDistType{"Standard method", "interpolation of global corrections"};
+
+  LOGP(info, "====== starting calculation of distortions and corrections ======");
+  LOGP(info, "Using {} threads", getNThreads());
+
+  if (globalDistCorrMethod == SC::GlobalDistCorrMethod::LocalDistCorr) {
+    LOGP(info, "calculation of global distortions and corrections are performed by using: {}", sglobalType[0]);
+  } else {
+    LOGP(info, "calculation of global distortions and corrections are performed by using: {}", sglobalType[1]);
+  }
+
+  if (globalDistType == SC::GlobalDistType::Standard) {
+    LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[0]);
+  } else {
+    LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[1]);
+  }
+
+  auto startTotal = timer::now();
+
+  auto start = timer::now();
+  poissonSolver(side);
+  auto stop = timer::now();
+  std::chrono::duration<float> time = stop - start;
+  LOGP(info, "Poisson Solver time: {}", time.count());
+
+  start = timer::now();
+  calcEField(side);
+  stop = timer::now();
+  time = stop - start;
+  LOGP(info, "electric field calculation time: {}", time.count());
+
+  const auto numEFields = getElectricFieldsInterpolator(side);
+  if (globalDistType == SC::GlobalDistType::Standard) {
+    start = timer::now();
+    const auto dist = o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>::Type::Distortions;
+    calcLocalDistortionsCorrections(dist, numEFields); // local distortion calculation
+    stop = timer::now();
+    time = stop - start;
+    LOGP(info, "local distortions time: {}", time.count());
+  } else {
+    LOGP(info, "skipping local distortions (not needed)");
+  }
+
+  start = timer::now();
+  const auto corr = o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>::Type::Corrections;
+  calcLocalDistortionsCorrections(corr, numEFields); // local correction calculation
+  stop = timer::now();
+  time = stop - start;
+  LOGP(info, "local corrections time: {}", time.count());
+
+  start = timer::now();
+  const auto lCorrInterpolator = getLocalCorrInterpolator(side);
+  (globalDistCorrMethod == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalCorrections(lCorrInterpolator) : calcGlobalCorrections(numEFields);
+  stop = timer::now();
+  time = stop - start;
+  LOGP(info, "global corrections time: {}", time.count());
+
+  start = timer::now();
+  if (globalDistType == SC::GlobalDistType::Standard) {
+    const auto lDistInterpolator = getLocalDistInterpolator(side);
+    (globalDistCorrMethod == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalDistortions(lDistInterpolator) : calcGlobalDistortions(numEFields);
+  } else {
+    const auto globalCorrInterpolator = getGlobalCorrInterpolator(side);
+    calcGlobalDistWithGlobalCorrIterative(globalCorrInterpolator);
+  }
+  stop = timer::now();
+  time = stop - start;
+  LOGP(info, "global distortions time: {}", time.count());
+
+  stop = timer::now();
+  time = stop - startTotal;
+  LOGP(info, "everything is done. Total Time: {}", time.count());
+}
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 DataT SpaceCharge<DataT, Nz, Nr, Nphi>::regulateR(const DataT posR) const
@@ -60,6 +146,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setChargeDensityFromFormula(const Analyti
       }
     }
   }
+  mIsChargeSet[side] = true;
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
@@ -153,7 +240,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setEFieldFromFormula(const AnalyticalFiel
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::calcEField(const Side side)
 {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
     const int symmetry = 0;
     size_t tmpPlus = iPhi + 1;
@@ -235,13 +322,13 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistWithGlobalCorrIterative(const DistCorrInterpolator<DataT, Nz, Nr, Nphi>& globCorr, const int maxIter, const DataT approachZ, const DataT approachR, const DataT approachPhi, const DataT diffCorr)
 {
   // for nearest neighbour search see: https://doc.cgal.org/latest/Spatial_searching/Spatial_searching_2searching_with_point_with_info_8cpp-example.html
-  typedef CGAL::Exact_predicates_inexact_constructions_kernel Kernel;
-  typedef Kernel::Point_3 Point_3;
-  typedef boost::tuple<Point_3, std::array<unsigned int, 3>> Point_Index;
-  typedef CGAL::Search_traits_3<Kernel> Traits_base;
-  typedef CGAL::Search_traits_adapter<Point_Index, CGAL::Nth_of_tuple_property_map<0, Point_Index>, Traits_base> Traits;
-  typedef CGAL::Orthogonal_k_neighbor_search<Traits> K_neighbor_search;
-  typedef K_neighbor_search::Tree Tree;
+  using Kernel = CGAL::Exact_predicates_inexact_constructions_kernel;
+  using Point_3 = Kernel::Point_3;
+  using Point_Index = boost::tuple<Point_3, std::array<unsigned int, 3>>;
+  using Traits_base = CGAL::Search_traits_3<Kernel>;
+  using Traits = CGAL::Search_traits_adapter<Point_Index, CGAL::Nth_of_tuple_property_map<0, Point_Index>, Traits_base>;
+  using K_neighbor_search = CGAL::Orthogonal_k_neighbor_search<Traits>;
+  using Tree = K_neighbor_search::Tree;
 
   const Side side = globCorr.getSide();
   const int nPoints = Nz * Nr * Nphi; // maximum number of points
@@ -280,7 +367,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistWithGlobalCorrIterative(con
   // Insert data points in the tree
   Tree tree(boost::make_zip_iterator(boost::make_tuple(points.begin(), indices.begin())), boost::make_zip_iterator(boost::make_tuple(points.end(), indices.end())));
 
-#pragma omp parallel for
+#pragma omp parallel for num_threads(sNThreads)
   for (unsigned int iPhi = 0; iPhi < Nphi; ++iPhi) {
     const DataT phi = getPhiVertex(iPhi);
     for (unsigned int iR = 0; iR < Nr; ++iR) {
@@ -378,7 +465,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 NumericalFields<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getElectricFieldsInterpolator(const Side side) const
 {
   if (!mIsEfieldSet[side]) {
-    LOGP(info, "============== E-Fields are not set! ==============\n");
+    LOGP(warning, "============== E-Fields are not set! ==============\n");
   }
   NumericalFields<DataT, Nz, Nr, Nphi> numFields(mElectricFieldEr[side], mElectricFieldEz[side], mElectricFieldEphi[side], mGrid3D, side);
   return numFields;
@@ -388,7 +475,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getLocalDistInterpolator(const Side side) const
 {
   if (!mIsLocalDistSet[side]) {
-    LOGP(info, "============== local distortions not set! ==============\n");
+    LOGP(warning, "============== local distortions not set! ==============\n");
   }
   DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mLocalDistdR[side], mLocalDistdZ[side], mLocalDistdRPhi[side], mGrid3D, side);
   return numFields;
@@ -398,7 +485,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getLocalCorrInterpolator(const Side side) const
 {
   if (!mIsLocalCorrSet[side]) {
-    LOGP(info, "============== local corrections not set!  ==============\n");
+    LOGP(warning, "============== local corrections not set!  ==============\n");
   }
   DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mLocalCorrdR[side], mLocalCorrdZ[side], mLocalCorrdRPhi[side], mGrid3D, side);
   return numFields;
@@ -408,7 +495,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getGlobalDistInterpolator(const Side side) const
 {
   if (!mIsGlobalDistSet[side]) {
-    LOGP(info, "============== global distortions not set ==============\n");
+    LOGP(warning, "============== global distortions not set ==============\n");
   }
   DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mGlobalDistdR[side], mGlobalDistdZ[side], mGlobalDistdRPhi[side], mGrid3D, side);
   return numFields;
@@ -418,7 +505,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getGlobalCorrInterpolator(const Side side) const
 {
   if (!mIsGlobalCorrSet[side]) {
-    LOGP(info, "============== global corrections not set ==============\n");
+    LOGP(warning, "============== global corrections not set ==============\n");
   }
   DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mGlobalCorrdR[side], mGlobalCorrdZ[side], mGlobalCorrdRPhi[side], mGrid3D, side);
   return numFields;
@@ -428,7 +515,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 int SpaceCharge<DataT, Nz, Nr, Nphi>::dumpElectricFields(TFile& outf, const Side side) const
 {
   if (!mIsEfieldSet[side]) {
-    LOGP(info, "============== E-Fields are not set! returning ==============\n");
+    LOGP(warning, "============== E-Fields are not set! returning ==============\n");
     return 0;
   }
   const std::string sideName = getSideName(side);
@@ -452,7 +539,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 int SpaceCharge<DataT, Nz, Nr, Nphi>::dumpGlobalDistortions(TFile& outf, const Side side) const
 {
   if (!mIsGlobalDistSet[side]) {
-    LOGP(info, "============== global distortions are not set! returning ==============\n");
+    LOGP(warning, "============== global distortions are not set! returning ==============\n");
     return 0;
   }
   const std::string sideName = getSideName(side);
@@ -476,7 +563,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 int SpaceCharge<DataT, Nz, Nr, Nphi>::dumpGlobalCorrections(TFile& outf, const Side side) const
 {
   if (!mIsGlobalCorrSet[side]) {
-    LOGP(info, "============== global corrections are not set! returning ==============\n");
+    LOGP(warning, "============== global corrections are not set! returning ==============\n");
     return 0;
   }
   const std::string sideName = getSideName(side);
@@ -500,7 +587,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 int SpaceCharge<DataT, Nz, Nr, Nphi>::dumpLocalCorrections(TFile& outf, const Side side) const
 {
   if (!mIsLocalCorrSet[side]) {
-    LOGP(info, "============== local corrections are not set! returning ==============\n");
+    LOGP(warning, "============== local corrections are not set! returning ==============\n");
     return 0;
   }
   const std::string sideName = getSideName(side);
@@ -528,7 +615,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 int SpaceCharge<DataT, Nz, Nr, Nphi>::dumpLocalDistortions(TFile& outf, const Side side) const
 {
   if (!mIsLocalDistSet[side]) {
-    LOGP(info, "============== local distortions are not set! returning ==============\n");
+    LOGP(warning, "============== local distortions are not set! returning ==============\n");
     return 0;
   }
   const std::string sideName = getSideName(side);
@@ -567,6 +654,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::fillChargeDensityFromHisto(TFile& fInp, c
         }
       }
     }
+    mIsChargeSet[side] = true;
   }
 }
 
@@ -712,7 +800,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcLocalDistortionsCorrections(const Spa
 {
   const Side side = formulaStruct.getSide();
   // calculate local distortions/corrections for each vertex in the tpc
-#pragma omp parallel for
+#pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
     const DataT phi = getPhiVertex(iPhi);
     for (size_t iR = 0; iR < Nr; ++iR) {
@@ -795,7 +883,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistortions(const Fields& formu
   const Side side = formulaStruct.getSide();
   const DataT stepSize = formulaStruct.getID() == 2 ? getGridSpacingZ() : getGridSpacingZ() / mSteps; // if one used local distortions then no smaller stepsize is needed. if electric fields are used then smaller stepsize can be used
   // loop over tpc volume and let the electron drift from each vertex to the readout of the tpc
-#pragma omp parallel for
+#pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
     const DataT phi0 = getPhiVertex(iPhi);
     for (size_t iR = 0; iR < Nr; ++iR) {
@@ -867,7 +955,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalCorrections(const Formulas& for
   const int iSteps = formulaStruct.getID() == 2 ? 1 : mSteps; // if one used local corrections no step width is needed. since it is already used for calculation of the local corrections
   const DataT stepSize = -getGridSpacingZ() / iSteps;
   // loop over tpc volume and let the electron drift from each vertex to the readout of the tpc
-#pragma omp parallel for
+#pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
     const DataT phi0 = getPhiVertex(iPhi);
     for (size_t iR = 0; iR < Nr; ++iR) {

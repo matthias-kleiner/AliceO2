@@ -18,7 +18,7 @@
 #define BOOST_TEST_DYN_LINK
 #include <boost/test/unit_test.hpp>
 #include "TPCSpacecharge/PoissonSolver.h"
-#include "TPCSpacecharge/SpaceChargeStructs.h"
+#include "TPCSpacecharge/SpaceChargeHelpers.h"
 
 namespace o2
 {

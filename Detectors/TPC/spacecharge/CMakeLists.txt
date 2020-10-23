@@ -24,10 +24,11 @@ o2_target_root_dictionary(TPCSpacecharge
                                   include/TPCSpacecharge/SpaceCharge.h
                                   include/TPCSpacecharge/RegularGrid3D.h
                                   include/TPCSpacecharge/DataContainer3D.h
-                                  include/TPCSpacecharge/PoissonSolverStructs.h
-                                  include/TPCSpacecharge/SpaceChargeStructs.h
+                                  include/TPCSpacecharge/PoissonSolverHelpers.h
+                                  include/TPCSpacecharge/SpaceChargeHelpers.h
                                   include/TPCSpacecharge/TriCubic.h
                                   include/TPCSpacecharge/Vector.h
+                                  include/TPCSpacecharge/Vector3D.h
                           LINKDEF src/TPCSpacechargeLinkDef.h)
 
 o2_add_test_root_macro(macro/calculateDistortionsCorrections.C
