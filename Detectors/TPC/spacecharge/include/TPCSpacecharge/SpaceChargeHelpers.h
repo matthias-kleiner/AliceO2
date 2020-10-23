@@ -35,11 +35,11 @@ template <typename DataT = double>
 class AnalyticalFields
 {
  public:
-  AnalyticalFields(const o2::tpc::Side sideTmp = o2::tpc::Side::A) : side{sideTmp} {};
+  AnalyticalFields(const o2::tpc::Side side = o2::tpc::Side::A) : mSide{side} {};
 
-  o2::tpc::Side getSide() const { return side; }
+  o2::tpc::Side getSide() const { return mSide; }
 
-  void setSide(const o2::tpc::Side sideTmp) { side = sideTmp; }
+  void setSide(const o2::tpc::Side side) { mSide = side; }
 
   /// sets the parameters
   void setParameters(const DataT parA, const DataT parB, const DataT parC)
@@ -62,71 +62,56 @@ class AnalyticalFields
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for electric field Er for given coordinate
-  DataT evalEr(DataT z, DataT r, DataT phi) const
-  {
-    return erFunc(z, r, phi);
-  }
+  DataT evalEr(DataT z, DataT r, DataT phi) const { return mErFunc(z, r, phi); }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for electric field Ez for given coordinate
-  DataT evalEz(DataT z, DataT r, DataT phi) const
-  {
-    return ezFunc(z, r, phi);
-  }
+  DataT evalEz(DataT z, DataT r, DataT phi) const { return mEzFunc(z, r, phi); }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for electric field Ephi for given coordinate
-  DataT evalEphi(DataT z, DataT r, DataT phi) const
-  {
-    return ephiFunc(z, r, phi);
-  }
+  DataT evalEphi(DataT z, DataT r, DataT phi) const { return mEphiFunc(z, r, phi); }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for the potential for given coordinate
-  DataT evalPotential(DataT z, DataT r, DataT phi) const
-  {
-    return potentialFunc(z, r, phi);
-  }
+  DataT evalPotential(DataT z, DataT r, DataT phi) const { return mPotentialFunc(z, r, phi); }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for the space charge density for given coordinate
-  DataT evalDensity(DataT z, DataT r, DataT phi) const
-  {
-    return densityFunc(z, r, phi);
-  }
+  DataT evalDensity(DataT z, DataT r, DataT phi) const { return mDensityFunc(z, r, phi); }
 
   /// analytical potential
-  std::function<DataT(DataT, DataT, DataT)> potentialFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+  std::function<DataT(DataT, DataT, DataT)> mPotentialFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
     return -mParA * (std::pow((-r + 254.5 + 83.5), 4) - 338.0 * std::pow((-r + 254.5 + 83.5), 3) + 21250.75 * std::pow((-r + 254.5 + 83.5), 2)) * std::cos(mParB * phi) * std::cos(mParB * phi) * std::exp(-1 * mParC * (z - 125) * (z - 125));
   };
 
   /// analytical space charge - NOTE: if the space charge density is calculated analytical there would be a - sign in the formula (-mParA)  - however since its an e- the sign is flipped (IS THIS CORRECT??? see for minus sign: AliTPCSpaceCharge3DCalc::SetPotentialBoundaryAndChargeFormula)-
-  std::function<DataT(DataT, DataT, DataT)> densityFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+  std::function<DataT(DataT, DataT, DataT)> mDensityFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
     return mParA * ((1 / r * 16 * (-3311250 + 90995.5 * r - 570.375 * r * r + r * r * r)) * std::cos(mParB * phi) * std::cos(mParB * phi) * std::exp(-1 * mParC * (z - 125) * (z - 125)) +
                     (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * std::pow(-r + 254.5 + 83.5, 2)) / (r * r) * std::exp(-1 * mParC * (z - 125) * (z - 125)) * -2 * mParB * mParB * std::cos(2 * mParB * phi) +
                     (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * std::pow(-r + 254.5 + 83.5, 2)) * std::cos(mParB * phi) * std::cos(mParB * phi) * 2 * mParC * std::exp(-1 * mParC * (z - 125) * (z - 125)) * (2 * mParC * (z - 125) * (z - 125) - 1));
   };
 
   /// analytical electric field Er
-  std::function<DataT(DataT, DataT, DataT)> erFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+  std::function<DataT(DataT, DataT, DataT)> mErFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
     return mParA * 4 * (r * r * r - 760.5 * r * r + 181991 * r - 1.3245 * std::pow(10, 7)) * std::cos(mParB * phi) * std::cos(mParB * phi) * std::exp(-1 * mParC * (z - 125) * (z - 125));
   };
 
   /// analytical electric field Ephi
-  std::function<DataT(DataT, DataT, DataT)> ephiFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+  std::function<DataT(DataT, DataT, DataT)> mEphiFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
     return mParA * (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * (-r + 254.5 + 83.5) * (-r + 254.5 + 83.5)) / r * std::exp(-1 * mParC * (z - 125) * (z - 125)) * -mParB * std::sin(2 * mParB * phi);
   };
 
   /// analytical electric field Ez
-  std::function<DataT(DataT, DataT, DataT)> ezFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
+  std::function<DataT(DataT, DataT, DataT)> mEzFunc = [& mParA = mParA, &mParB = mParB, &mParC = mParC](const DataT z, const DataT r, const DataT phi) {
     return mParA * (std::pow(-r + 254.5 + 83.5, 4) - 338.0 * std::pow(-r + 254.5 + 83.5, 3) + 21250.75 * (-r + 254.5 + 83.5) * (-r + 254.5 + 83.5)) * std::cos(mParB * phi) * std::cos(mParB * phi) * -2 * mParC * (z - 125) * std::exp(-1 * mParC * (z - 125) * (z - 125));
   };
 
@@ -137,7 +122,7 @@ class AnalyticalFields
   DataT mParA{1e-5};                    ///< parameter [0] of functions
   DataT mParB{0.5};                     ///< parameter [1] of functions
   DataT mParC{1e-4};                    ///< parameter [2] of functions
-  o2::tpc::Side side{o2::tpc::Side::A}; ///< side of the TPC. Since the absolute value is taken during the calculations the choice of the side is arbitrary.
+  o2::tpc::Side mSide{o2::tpc::Side::A}; ///< side of the TPC. Since the absolute value is taken during the calculations the choice of the side is arbitrary.
 };
 
 ///
@@ -158,66 +143,48 @@ class NumericalFields
   /// \param dataEphi container for the data of the electrical field Ephi
   /// \param gridProperties properties of the grid
   /// \param side side of the tpc
-  NumericalFields(const DataContainer& dataErA, const DataContainer& dataEzA, const DataContainer& dataEphiA, const RegularGrid& gridPropertiesA, const o2::tpc::Side sideA) : dataEr{dataErA}, dataEz{dataEzA}, dataEphi{dataEphiA}, gridProperties{gridPropertiesA}, side{sideA} {};
+  NumericalFields(const DataContainer& dataEr, const DataContainer& dataEz, const DataContainer& dataEphi, const RegularGrid& gridProperties, const o2::tpc::Side side) : mDataEr{dataEr}, mDataEz{dataEz}, mDataEphi{dataEphi}, mGridProperties{gridProperties}, mSide{side} {};
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for electric field Er for given coordinate
-  DataT evalEr(DataT z, DataT r, DataT phi) const
-  {
-    return interpolatorEr(z, r, phi, interpolType);
-  }
+  DataT evalEr(DataT z, DataT r, DataT phi) const { return mInterpolatorEr(z, r, phi, mInterpolType); }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for electric field Ez for given coordinate
-  DataT evalEz(DataT z, DataT r, DataT phi) const
-  {
-    return interpolatorEz(z, r, phi, interpolType);
-  }
+  DataT evalEz(DataT z, DataT r, DataT phi) const { return mInterpolatorEz(z, r, phi, mInterpolType); }
 
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
   /// \return returns the function value for electric field Ephi for given coordinate
-  DataT evalEphi(DataT z, DataT r, DataT phi) const
-  {
-    return interpolatorEphi(z, r, phi, interpolType);
-  }
+  DataT evalEphi(DataT z, DataT r, DataT phi) const { return mInterpolatorEphi(z, r, phi, mInterpolType); }
 
-  o2::tpc::Side getSide() const
-  {
-    return side;
-  }
+  o2::tpc::Side getSide() const { return mSide; }
 
   static constexpr unsigned int getID() { return ID; }
 
   /// set which kind of TriCubic interpolation algorithm is used
-  void setInterpolationType(const int type)
-  {
-    interpolType = type;
-  }
+  void setInterpolationType(const int type) { mInterpolType = type; }
 
   // \return returns which kind of TriCubic interpolation algorithm is used
-  int getInterpolationType() const
-  {
-    return interpolType;
-  }
+  int getInterpolationType() const { return mInterpolType; }
 
  private:
-  const DataContainer& dataEr{};       ///< adress to the data container of the grid
-  const DataContainer& dataEz{};       ///< adress to the data container of the grid
-  const DataContainer& dataEphi{};     ///< adress to the data container of the grid
-  const RegularGrid& gridProperties{}; ///< properties of the regular grid
-  const o2::tpc::Side side{};          ///< side of the TPC
+  const DataContainer& mDataEr{};       ///< adress to the data container of the grid
+  const DataContainer& mDataEz{};       ///< adress to the data container of the grid
+  const DataContainer& mDataEphi{};     ///< adress to the data container of the grid
+  const RegularGrid& mGridProperties{}; ///< properties of the regular grid
+  const o2::tpc::Side mSide{};          ///< side of the TPC
 
-  TriCubic interpolatorEr{dataEr, gridProperties};                                         ///< TriCubic interpolator of the electric field Er
-  TriCubic interpolatorEz{dataEz, gridProperties};                                         ///< TriCubic interpolator of the electric field Ez
-  TriCubic interpolatorEphi{dataEphi, gridProperties};                                     ///< TriCubic interpolator of the electric field Ephi
-  typename TriCubic::InterpolationType interpolType = TriCubic::InterpolationType::Sparse; ///< type of TriCubic interpolation
-  static constexpr unsigned int ID = 1;                                                    ///< needed to distinguish between the different classes
+  TriCubic mInterpolatorEr{mDataEr, mGridProperties};                                         ///< TriCubic interpolator of the electric field Er
+  TriCubic mInterpolatorEz{mDataEz, mGridProperties};                                         ///< TriCubic interpolator of the electric field Ez
+  TriCubic mInterpolatorEphi{mDataEphi, mGridProperties};                                     ///< TriCubic interpolator of the electric field Ephi
+  typename TriCubic::InterpolationType mInterpolType = TriCubic::InterpolationType::Sparse; ///< type of TriCubic interpolation
+  static constexpr unsigned int ID = 1;                                                     ///< needed to distinguish between the different classes
 };
 
 ///
@@ -238,7 +205,7 @@ class DistCorrInterpolator
   /// \param dataDistCorrdRPhi container for the data of the distortions dPhi
   /// \param gridProperties properties of the grid
   /// \param side side of the tpc
-  DistCorrInterpolator(const DataContainer& dataDistCorrdR, const DataContainer& dataDistCorrdZ, const DataContainer& dataDistCorrdRPhi, const RegularGrid& gridProperties, const o2::tpc::Side side) : dataDistCorrdR{dataDistCorrdR}, dataDistCorrdZ{dataDistCorrdZ}, dataDistCorrdRPhi{dataDistCorrdRPhi}, gridProperties{gridProperties}, side{side} {};
+  DistCorrInterpolator(const DataContainer& dataDistCorrdR, const DataContainer& dataDistCorrdZ, const DataContainer& dataDistCorrdRPhi, const RegularGrid& gridProperties, const o2::tpc::Side side) : mDataDistCorrdR{dataDistCorrdR}, mDataDistCorrdZ{dataDistCorrdZ}, mDataDistCorrdRPhi{dataDistCorrdRPhi}, mGridProperties{gridProperties}, mSide{side} {};
 
   /// \param r r coordinate
   /// \param phi phi coordinate
@@ -246,7 +213,7 @@ class DistCorrInterpolator
   /// \return returns the function value for the local distortion or correction dR for given coordinate
   DataT evaldR(const DataT z, const DataT r, const DataT phi) const
   {
-    return interpolatorDistCorrdR(z, r, phi, interpolType);
+    return interpolatorDistCorrdR(z, r, phi, mInterpolType);
   }
 
   /// \param r r coordinate
@@ -255,7 +222,7 @@ class DistCorrInterpolator
   /// \return returns the function value for the local distortion or correction dZ for given coordinate
   DataT evaldZ(const DataT z, const DataT r, const DataT phi) const
   {
-    return interpolatorDistCorrdZ(z, r, phi, interpolType);
+    return interpolatorDistCorrdZ(z, r, phi, mInterpolType);
   }
 
   /// \param r r coordinate
@@ -264,40 +231,31 @@ class DistCorrInterpolator
   /// \return returns the function value for the local distortion or correction dRPhi for given coordinate
   DataT evaldRPhi(const DataT z, const DataT r, const DataT phi) const
   {
-    return interpolatorDistCorrdRPhi(z, r, phi, interpolType);
+    return interpolatorDistCorrdRPhi(z, r, phi, mInterpolType);
   }
 
-  o2::tpc::Side getSide() const
-  {
-    return side;
-  }
+  o2::tpc::Side getSide() const { return mSide; }
 
   static constexpr unsigned int getID() { return ID; }
 
   /// set which kind of TriCubic interpolation algorithm is used
-  void setInterpolationType(const int type)
-  {
-    interpolType = type;
-  }
+  void setInterpolationType(const int type) { mInterpolType = type; }
 
   /// \return returns which kind of TriCubic interpolation algorithm is used
-  int getInterpolationType() const
-  {
-    return interpolType;
-  }
+  int getInterpolationType() const { return mInterpolType; }
 
  private:
-  const DataContainer& dataDistCorrdR{};    ///< adress to the data container of the grid
-  const DataContainer& dataDistCorrdZ{};    ///< adress to the data container of the grid
-  const DataContainer& dataDistCorrdRPhi{}; ///< adress to the data container of the grid
-  const RegularGrid& gridProperties{};      ///< properties of the regular grid
-  const o2::tpc::Side side{};               ///< side of the TPC.
+  const DataContainer& mDataDistCorrdR{};    ///< adress to the data container of the grid
+  const DataContainer& mDataDistCorrdZ{};    ///< adress to the data container of the grid
+  const DataContainer& mDataDistCorrdRPhi{}; ///< adress to the data container of the grid
+  const RegularGrid& mGridProperties{};      ///< properties of the regular grid
+  const o2::tpc::Side mSide{};               ///< side of the TPC.
 
-  TriCubic interpolatorDistCorrdR{dataDistCorrdR, gridProperties};                         ///< TriCubic interpolator of distortion or correction dR
-  TriCubic interpolatorDistCorrdZ{dataDistCorrdZ, gridProperties};                         ///< TriCubic interpolator of distortion or correction dZ
-  TriCubic interpolatorDistCorrdRPhi{dataDistCorrdRPhi, gridProperties};                   ///< TriCubic interpolator of distortion or correction dRPhi
-  typename TriCubic::InterpolationType interpolType = TriCubic::InterpolationType::Sparse; ///< type of TriCubic interpolation
-  static constexpr unsigned int ID = 2;                                                    ///< needed to distinguish between the different classes
+  TriCubic interpolatorDistCorrdR{mDataDistCorrdR, mGridProperties};                        ///< TriCubic interpolator of distortion or correction dR
+  TriCubic interpolatorDistCorrdZ{mDataDistCorrdZ, mGridProperties};                        ///< TriCubic interpolator of distortion or correction dZ
+  TriCubic interpolatorDistCorrdRPhi{mDataDistCorrdRPhi, mGridProperties};                  ///< TriCubic interpolator of distortion or correction dRPhi
+  typename TriCubic::InterpolationType mInterpolType = TriCubic::InterpolationType::Sparse; ///< type of TriCubic interpolation
+  static constexpr unsigned int ID = 2;                                                     ///< needed to distinguish between the different classes
 };
 
 } // namespace tpc
