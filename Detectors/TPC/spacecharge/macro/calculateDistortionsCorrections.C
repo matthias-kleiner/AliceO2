@@ -1,12 +1,12 @@
 // g++ -o spacecharge ~/alice/O2/Detectors/TPC/spacecharge/macro/calculateDistortionsCorrections.C -I ~/alice/sw/osx_x86-64/FairLogger/latest/include -L ~/alice/sw/osx_x86-64/FairLogger/latest/lib -I$O2_ROOT/include -L$O2_ROOT/lib -lO2TPCSpacecharge -lO2CommonUtils -std=c++17 -I$ROOTSYS/include -L$ROOTSYS/lib -lCore  -L$VC_ROOT/lib -lVc -I$VC_ROOT/include -Xpreprocessor -fopenmp -I/usr/local/include -L/usr/local/lib -lomp -O3 -ffast-math -lFairLogger -lRIO
-#include "TPCSpacecharge/SpaceCharge.h"
+#include "TPCSpaceCharge/SpaceCharge.h"
 #include <iostream>
 #include <chrono>
 #include <array>
 #include "CommonUtils/TreeStreamRedirector.h"
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void calculateDistortionsAnalytical(const int globalEFieldTypeAna = 1, const int globalDistTypeAna = 1, const int eFieldTypeAna = 1, const int usePoissonSolverAna = 1, const int nSteps = 1, const int simpsonIterations = 3, const int nThreads = -1, o2::tpc::Side side = o2::tpc::Side::C);
+void calculateDistortionsAnalytical(const int globalEFieldTypeAna = 1, const int globalDistTypeAna = 1, const int eFieldTypeAna = 1, const int usePoissonSolverAna = 1, const int nSteps = 1, const int simpsonIterations = 3, const int nThreads = -1);
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void calculateDistortionsFromHist(const char* path, const char* histoName, const int globalEFieldType = 1, const int globalDistType = 1, const int nSteps = 1, const int simpsonIterations = 3, const int nThreads = -1);
@@ -19,17 +19,16 @@ void calculateDistortionsFromHist(const char* path, const char* histoName, const
 /// \param nSteps number of which are used for calculation of distortions/corrections per z-bin
 /// \param simpsonIterations number of iterations used in the simpson intergration
 /// \param nThreads number of threads which are used (if the value is -1 all threads should be used)
-/// \param side side of the TPC
-void calcDistAna(const int gridType = 0, const int globalEFieldTypeAna = 1, const int globalDistTypeAna = 1, const int eFieldTypeAna = 1, const int usePoissonSolverAna = 1, const int nSteps = 1, const int simpsonIterations = 3, const int nThreads = -1, o2::tpc::Side side = o2::tpc::Side::C)
+void calcDistAna(const int gridType = 0, const int globalEFieldTypeAna = 1, const int globalDistTypeAna = 1, const int eFieldTypeAna = 1, const int usePoissonSolverAna = 1, const int nSteps = 1, const int simpsonIterations = 3, const int nThreads = -1)
 {
   if (gridType == 0) {
-    calculateDistortionsAnalytical<double, 129, 129, 180>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads, side);
+    calculateDistortionsAnalytical<double, 129, 129, 180>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads);
   } else if (gridType == 1) {
-    calculateDistortionsAnalytical<double, 65, 65, 180>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads, side);
+    calculateDistortionsAnalytical<double, 65, 65, 180>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads);
   } else if (gridType == 2) {
-    calculateDistortionsAnalytical<double, 33, 33, 180>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads, side);
+    calculateDistortionsAnalytical<double, 33, 33, 180>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads);
   } else if (gridType == 3) {
-    calculateDistortionsAnalytical<double, 17, 17, 90>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads, side);
+    calculateDistortionsAnalytical<double, 17, 17, 90>(globalEFieldTypeAna, globalDistTypeAna, eFieldTypeAna, usePoissonSolverAna, nSteps, simpsonIterations, nThreads);
   }
 }
 
@@ -167,9 +166,6 @@ void calculateDistortionsCorrectionsAnalytical(o2::tpc::SpaceCharge<DataT, Nz, N
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void writeToTree(o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>& spaceCharge3D, o2::utils::TreeStreamRedirector& pcstream, const o2::tpc::Side side)
 {
-  const auto anaGlobalDistInterpolator = spaceCharge3D.getGlobalDistInterpolator(side);
-  const auto globalCorrInterpolator = spaceCharge3D.getGlobalCorrInterpolator(side);
-
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
     for (size_t iR = 0; iR < Nr; ++iR) {
       for (size_t iZ = 0; iZ < Nz; ++iZ) {
@@ -188,13 +184,18 @@ void writeToTree(o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>& spaceCharge3D, o2::u
         auto corrRPhi = spaceCharge3D.getGlobalCorrRPhi(iZ, iR, iPhi, side);
 
         // distort then correct
-        auto radius = spaceCharge3D.getRVertex(iR);
-        auto z = spaceCharge3D.getZVertex(iZ);
-        auto phi = spaceCharge3D.getPhiVertex(iPhi);
-        const DataT posDistorted[3] = {z + distZ, radius + distR, spaceCharge3D.regulatePhi(phi + distRPhi / radius)};
-        auto corrRDistPoint = globalCorrInterpolator.evaldR(posDistorted[0], posDistorted[1], posDistorted[2]);
-        auto corrZDistPoint = globalCorrInterpolator.evaldZ(posDistorted[0], posDistorted[1], posDistorted[2]);
-        auto corrRPhiDistPoint = globalCorrInterpolator.evaldRPhi(posDistorted[0], posDistorted[1], posDistorted[2]) / posDistorted[1] * radius;
+        auto radius = spaceCharge3D.getRVertex(iR, side);
+        auto z = spaceCharge3D.getZVertex(iZ, side);
+        auto phi = spaceCharge3D.getPhiVertex(iPhi, side);
+        DataT corrRDistPoint{};
+        DataT corrZDistPoint{};
+        DataT corrRPhiDistPoint{};
+
+        const DataT zDistorted = z + distZ;
+        const DataT radiusDistorted = radius + distR;
+        const DataT phiDistorted = spaceCharge3D.regulatePhi(phi + distRPhi / radius, side);
+        spaceCharge3D.getCorrectionsCyl(zDistorted, radiusDistorted, phiDistorted, side, corrZDistPoint, corrRDistPoint, corrRPhiDistPoint);
+        corrRPhiDistPoint *= radius / radiusDistorted;
 
         auto eZ = spaceCharge3D.getEz(iZ, iR, iPhi, side);
         auto eR = spaceCharge3D.getEr(iZ, iR, iPhi, side);
@@ -202,36 +203,50 @@ void writeToTree(o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>& spaceCharge3D, o2::u
         auto pot = spaceCharge3D.getPotential(iZ, iR, iPhi, side);
         auto charge = spaceCharge3D.getDensity(iZ, iR, iPhi, side);
 
+        auto xPos = spaceCharge3D.getXFromPolar(radius, phi);
+        auto yPos = spaceCharge3D.getYFromPolar(radius, phi);
+
         int nr = Nr;
         int nz = Nz;
         int nphi = Nphi;
         int iSide = side;
 
         pcstream << "distortions"
+                 /// numer of bins
                  << "nR=" << nr
                  << "nPhi=" << nphi
                  << "nZ=" << nz
+                 // bin indices
                  << "ir=" << iR
                  << "iz=" << iZ
                  << "iphi=" << iPhi
+                 // coordinates
                  << "r=" << radius
                  << "z=" << z
+                 << "x=" << xPos
+                 << "y=" << yPos
                  << "phi=" << phi
+                 // local distortions
                  << "ldistR=" << ldistR
                  << "ldistZ=" << ldistZ
                  << "ldistRPhi=" << ldistRPhi
+                 // local corrections
                  << "lcorrR=" << lcorrR
                  << "lcorrZ=" << lcorrZ
                  << "lcorrRPhi=" << lcorrRPhi
+                 // global distortions
                  << "distR=" << distR
                  << "distZ=" << distZ
                  << "distRPhi=" << distRPhi
+                 // global corrections
                  << "corrR=" << corrR
                  << "corrZ=" << corrZ
                  << "corrRPhi=" << corrRPhi
+                 // correction after distortion applied (test for consistency)
                  << "corrRDistortedPoint=" << corrRDistPoint
                  << "corrRPhiDistortedPoint=" << corrRPhiDistPoint
                  << "corrZDistortedPoint=" << corrZDistPoint
+                 // electric fields etc.
                  << "Er=" << eR
                  << "Ez=" << eZ
                  << "Ephi=" << ePhi
@@ -250,11 +265,9 @@ void writeToTree(o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>& spaceCharge3D, o2::u
 /// \param usePoissonSolverAna setting for use poisson solver or analytical formula for potential:  0: analytical formula,   1: poisson solver
 /// \param nSteps number of which are used for calculation of distortions/corrections per z-bin
 /// \param simpsonIterations number of iterations used in the simpson intergration
-/// \param side side of the TPC
 template <typename DataT = double, size_t Nz = 17, size_t Nr = 17, size_t Nphi = 90>
-void calculateDistortionsAnalytical(const int globalEFieldTypeAna, const int globalDistTypeAna, const int eFieldTypeAna, const int usePoissonSolverAna, const int nSteps, const int simpsonIterations, const int nThreads, o2::tpc::Side side)
+void calculateDistortionsAnalytical(const int globalEFieldTypeAna, const int globalDistTypeAna, const int eFieldTypeAna, const int usePoissonSolverAna, const int nSteps, const int simpsonIterations, const int nThreads)
 {
-  o2::tpc::AnalyticalFields<DataT> anaFields(side);
   const auto integrationStrategy = o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>::IntegrationStrategy::SimpsonIterative;
   o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi> spaceCharge3D;
   spaceCharge3D.setOmegaTauT1T2(0.32f, 1, 1);
@@ -265,12 +278,17 @@ void calculateDistortionsAnalytical(const int globalEFieldTypeAna, const int glo
     spaceCharge3D.setNThreads(nThreads);
   }
 
-  calculateDistortionsCorrectionsAnalytical(spaceCharge3D, anaFields, globalEFieldTypeAna, eFieldTypeAna, globalDistTypeAna, usePoissonSolverAna);
-
   // write to root file
   o2::utils::TreeStreamRedirector pcstream(TString::Format("distortions_ana_nR%lu_nZ%lu_nPhi%lu_SimpsonsIter%i.root", Nr, Nz, Nphi, simpsonIterations).Data(), "RECREATE");
-  pcstream.GetFile()->cd();
-  writeToTree(spaceCharge3D, pcstream, side);
+  for (int iside = 0; iside < 2; ++iside) {
+    std::cout << "side: " << iside << std::endl;
+    o2::tpc::Side side = (iside == 0) ? o2::tpc::Side::A : o2::tpc::Side::C;
+    o2::tpc::AnalyticalFields<DataT> anaFields(side);
+    calculateDistortionsCorrectionsAnalytical(spaceCharge3D, anaFields, globalEFieldTypeAna, eFieldTypeAna, globalDistTypeAna, usePoissonSolverAna);
+    pcstream.GetFile()->cd();
+    writeToTree(spaceCharge3D, pcstream, side);
+  }
+
   pcstream.GetFile()->cd();
   pcstream.Close();
 }
@@ -297,7 +315,7 @@ void calculateDistortionsFromHist(const char* path, const char* histoName, const
 
   // set density from input file
   TFile fileOutSCDensity(path, "READ");
-  spaceCharge3D.fillChargeDensityFromHisto(fileOutSCDensity, histoName);
+  spaceCharge3D.fillChargeDensityFromFile(fileOutSCDensity, histoName);
   fileOutSCDensity.Close();
 
   o2::utils::TreeStreamRedirector pcstream(TString::Format("distortions_real_nR%lu_nZ%lu_nPhi%lu_SimpsonsIter%i.root", Nr, Nz, Nphi, simpsonIterations).Data(), "RECREATE");
@@ -305,8 +323,10 @@ void calculateDistortionsFromHist(const char* path, const char* histoName, const
     std::cout << "side: " << iside << std::endl;
     o2::tpc::Side side = (iside == 0) ? o2::tpc::Side::A : o2::tpc::Side::C;
     const auto distType = globalDistType == 0 ? SC::GlobalDistType::Standard : SC ::GlobalDistType::Fast;
+    spaceCharge3D.setGlobalDistType(distType);
     const auto eType = globalEFieldType == 1 ? SC::GlobalDistCorrMethod::LocalDistCorr : SC::GlobalDistCorrMethod::ElectricalField;
-    spaceCharge3D.calculateDistortionsCorrections(side, distType, eType);
+    spaceCharge3D.setGlobalDistCorrMethod(eType);
+    spaceCharge3D.calculateDistortionsCorrections(side);
     // write to root file
     pcstream.GetFile()->cd();
     writeToTree(spaceCharge3D, pcstream, side);

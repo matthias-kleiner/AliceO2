@@ -164,20 +164,21 @@ void Digitizer::flush(std::vector<o2::tpc::Digit>& digits,
   mDigitContainer.fillOutputContainer(digits, labels, commonModeOutput, mSector, sampaProcessing.getTimeBinFromTime(mEventTime), mIsContinuous, finalFlush);
 }
 
-void Digitizer::setUseSCDistortions(SpaceCharge::SCDistortionType distortionType, const TH3* hisInitialSCDensity, int nRBins, int nPhiBins, int nZSlices)
+void Digitizer::setUseSCDistortions(SpaceCharge::SCDistortionType distortionType, const TH3* hisInitialSCDensity)
 {
   mUseSCDistortions = true;
   if (!mSpaceCharge) {
-    mSpaceCharge = std::make_unique<SpaceCharge>(nRBins, nPhiBins, nZSlices);
+    mSpaceCharge = std::make_unique<SpaceCharge>();
   }
   mSpaceCharge->setSCDistortionType(distortionType);
   if (hisInitialSCDensity) {
-    mSpaceCharge->setInitialSpaceChargeDensity(hisInitialSCDensity);
+    mSpaceCharge->fillChargeDensityFromHisto(*hisInitialSCDensity);
+    mSpaceCharge->setUseInitialSCDensity(true);
   }
 }
 
-void Digitizer::setUseSCDistortions(SpaceCharge* spaceCharge)
+void Digitizer::setUseSCDistortions(SpaceCharge* SpaceCharge)
 {
   mUseSCDistortions = true;
-  mSpaceCharge.reset(spaceCharge);
+  mSpaceCharge.reset(SpaceCharge);
 }

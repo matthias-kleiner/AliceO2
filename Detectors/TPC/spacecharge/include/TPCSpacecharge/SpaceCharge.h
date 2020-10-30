@@ -13,14 +13,18 @@
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#ifndef ALICEO2_TPC_SpaceCharge_H_
-#define ALICEO2_TPC_SpaceCharge_H_
+#ifndef ALICEO2_TPC_SPACECHARGE_H_
+#define ALICEO2_TPC_SPACECHARGE_H_
 
-#include "TPCSpacecharge/TriCubic.h"
-#include "TPCSpacecharge/PoissonSolver.h"
-#include "TPCSpacecharge/SpaceChargeHelpers.h"
-#include "TPCSpacecharge/RegularGrid3D.h"
-#include "TPCSpacecharge/DataContainer3D.h"
+#include "TPCSpaceCharge/TriCubic.h"
+#include "TPCSpaceCharge/PoissonSolver.h"
+#include "TPCSpaceCharge/SpaceChargeHelpers.h"
+#include "TPCSpaceCharge/RegularGrid3D.h"
+#include "TPCSpaceCharge/DataContainer3D.h"
+
+#include "TPCBase/ParameterGas.h"
+#include "Field/MagneticField.h"
+#include "TGeoGlobalMagField.h"
 
 #include "DataFormatsTPC/Defs.h"
 #include "Framework/Logger.h"
@@ -66,6 +70,12 @@ class SpaceCharge
   /// default constructor
   SpaceCharge() = default;
 
+  /// Enumerator for setting the space-charge distortion mode
+  enum class SCDistortionType : int {
+    SCDistortionsConstant = 0, // space-charge distortions constant over time
+    SCDistortionsRealistic = 1 // realistic evolution of space-charge distortions over time
+  };
+
   /// numerical integration strategys
   enum class IntegrationStrategy { Trapezoidal = 0,     ///< trapezoidal integration (https://en.wikipedia.org/wiki/Trapezoidal_rule). straight electron drift line assumed: z0->z1, r0->r0, phi0->phi0
                                    Simpson = 1,         ///< simpon integration. see: https://en.wikipedia.org/wiki/Simpson%27s_rule. straight electron drift line assumed: z0->z1, r0->r0, phi0->phi0
@@ -89,14 +99,18 @@ class SpaceCharge
   };
 
   /// step 0: set the charge density from TH3 histogram containing the space charge density
+  /// \param hisSCDensity3D histogram for the space charge density
+  void fillChargeDensityFromHisto(const TH3& hisSCDensity3D);
+
+  /// step 0: set the charge density from TH3 histogram containing the space charge density
   /// \param fInp input file containing a histogram for the space charge density
   /// \param name the name of the space charge density histogram in the file
-  void fillChargeDensityFromHisto(TFile& fInp, const char* name);
+  void fillChargeDensityFromFile(TFile& fInp, const char* name);
 
   /// \param side side of the TPC
   /// \param globalDistType the algorithm which is used to calculate the global distortions
   /// \param globalDistCorrMethod the setting if local distortions/corrections or the electrical field will be used for the calculation of the global distortions/corrections
-  void calculateDistortionsCorrections(const o2::tpc::Side side, const GlobalDistType globalDistType = GlobalDistType::Fast, const GlobalDistCorrMethod globalDistCorrMethod = GlobalDistCorrMethod::LocalDistCorr);
+  void calculateDistortionsCorrections(const o2::tpc::Side side);
 
   /// step 0: this function fills the internal storage for the charge density using an analytical formula
   /// \param formulaStruct struct containing a method to evaluate the density
@@ -141,6 +155,8 @@ class SpaceCharge
   template <typename Fields = AnalyticalFields<DataT>>
   void calcGlobalDistortions(const Fields& formulaStruct);
 
+  void init();
+
   /// step 5: calculate global distortions using the global corrections (FAST)
   /// \param globCorr interpolator for global corrections
   /// \param maxIter maximum iterations per global distortion
@@ -150,46 +166,102 @@ class SpaceCharge
   /// \param diffCorr if the absolute differences from the interpolated values for the global corrections from the last iteration compared to the current iteration is smaller than this value, set converged to true for current global distortion
   void calcGlobalDistWithGlobalCorrIterative(const DistCorrInterpolator<DataT, Nz, Nr, Nphi>& globCorr, const int maxIter = 100, const DataT approachZ = 0.5, const DataT approachR = 0.5, const DataT approachPhi = 0.5, const DataT diffCorr = 1e-6);
 
+  /// get the global correction for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
+  /// \param corrZ returns correction in z direction
+  /// \param corrR returns correction in r direction
+  /// \param corrRPhi returns correction in rphi direction
+  void getCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& corrZ, DataT& corrR, DataT& corrRPhi) const;
+
+  /// get the global corrections for given coordinate
+  /// \param x global x coordinate
+  /// \param y global y coordinate
+  /// \param z global z coordinate
+  /// \param corrX returns corrections in x direction
+  /// \param corrY returns corrections in y direction
+  /// \param corrZ returns corrections in z direction
+  void getCorrections(const DataT x, const DataT y, const DataT z, const Side side, DataT& corrX, DataT& corrY, DataT& corrZ) const;
+
+  /// get the global distortions for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
+  /// \param distZ returns distortion in z direction
+  /// \param distR returns distortion in r direction
+  /// \param distRPhi returns distortion in rphi direction
+  void getDistortionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& distZ, DataT& distR, DataT& distRPhi) const;
+
+  /// get the global distortions for given coordinate
+  /// \param x global x coordinate
+  /// \param y global y coordinate
+  /// \param z global z coordinate
+  /// \param distX returns distortion in x direction
+  /// \param distY returns distortion in y direction
+  /// \param distZ returns distortion in z direction
+  void getDistortions(const DataT x, const DataT y, const DataT z, const Side side, DataT& distX, DataT& distY, DataT& distZ) const;
+
+  /// convert x and y coordinates from cartesian to the radius in polar coordinates
+  static DataT getRadiusFromCartesian(const DataT x, const DataT y) { return std::sqrt(x * x + y * y); }
+
+  /// convert x and y coordinates from cartesian to phi in polar coordinates
+  static DataT getPhiFromCartesian(const DataT x, const DataT y) { return std::atan2(y, x); }
+
+  /// convert radius and phi coordinates from polar coordinates to x cartesian coordinates
+  static DataT getXFromPolar(const DataT r, const DataT phi) { return r * std::cos(phi); }
+
+  /// convert radius and phi coordinates from polar coordinates to y cartesian coordinate
+  static DataT getYFromPolar(const DataT r, const DataT phi) { return r * std::sin(phi); }
+
+  /// Correct electron position using correction lookup tables
+  /// \param point 3D coordinates of the electron
+  void correctElectron(GlobalPosition3D& point);
+
+  /// Distort electron position using distortion lookup tables
+  /// \param point 3D coordinates of the electron
+  void distortElectron(GlobalPosition3D& point) const;
+
   /// set the density, potential, electric fields, local distortions/corrections, global distortions/corrections from a file. Missing objects in the file are ignored.
   /// \file file containing the stored values for the density, potential, electric fields, local distortions/corrections, global distortions/corrections
   /// \param side side of the TPC
   void setFromFile(TFile& file, const Side side);
 
   /// Get grid spacing in r direction
-  static constexpr DataT getGridSpacingR() { return GridProp::GRIDSPACINGR; }
+  DataT getGridSpacingR(const Side side) const { return mGrid3D[side].getSpacingY(); }
 
   /// Get grid spacing in z direction
-  static constexpr DataT getGridSpacingZ() { return GridProp::GRIDSPACINGZ; }
+  DataT getGridSpacingZ(const Side side) const { return mGrid3D[side].getSpacingX(); }
 
   /// Get grid spacing in phi direction
-  static constexpr DataT getGridSpacingPhi() { return GridProp::GRIDSPACINGPHI; }
+  DataT getGridSpacingPhi(const Side side) const { return mGrid3D[side].getSpacingZ(); }
 
   /// Get constant electric field
-  static constexpr DataT getEzField() { return (TPCParameters<DataT>::cathodev - TPCParameters<DataT>::vg1t) / TPCParameters<DataT>::TPCZ0; }
+  static constexpr DataT getEzField(const Side side) { return getSign(side) * (TPCParameters<DataT>::cathodev - TPCParameters<DataT>::vg1t) / TPCParameters<DataT>::TPCZ0; }
 
   /// Get inner radius of tpc
-  static constexpr DataT getRMin() { return GridProp::RMIN; }
+  DataT getRMin(const Side side) const { return mGrid3D[side].getGridMinY(); }
 
   /// Get min z position which is used during the calaculations
-  static constexpr DataT getZMin() { return GridProp::ZMIN; }
+  DataT getZMin(const Side side) const { return mGrid3D[side].getGridMinX(); }
 
   /// Get min phi
-  static constexpr DataT getPhiMin() { return GridProp::PHIMIN; }
+  DataT getPhiMin(const Side side) const { return mGrid3D[side].getGridMinZ(); }
 
   /// Get max r
-  static constexpr DataT getRMax() { return GridProp::RMAX; };
+  DataT getRMax(const Side side) const { return mGrid3D[side].getGridMaxY(); };
 
   /// Get max z
-  static constexpr DataT getZMax() { return GridProp::ZMAX; }
+  DataT getZMax(const Side side) const { return mGrid3D[side].getGridMaxX(); }
 
   /// Get max phi
-  static constexpr DataT getPhiMax() { return GridProp::PHIMAX; }
+  DataT getPhiMax(const Side side) const { return mGrid3D[side].getGridMaxZ(); }
 
   // get side of TPC for z coordinate TODO rewrite this
-  int getSide(const DataT z) const { return z <= 0 ? 0 : 1; }
+  static Side getSide(const DataT z) { return ((z >= 0) ? Side::A : Side::C); }
 
   /// Get the grid object
-  const RegularGrid& getGrid3D() const { return mGrid3D; }
+  const RegularGrid& getGrid3D(const Side side) const { return mGrid3D[side]; }
 
   /// Get struct containing interpolators for the electrical fields
   /// \param side side of the TPC
@@ -331,19 +403,19 @@ class SpaceCharge
   DataT getPotential(const size_t iz, const size_t ir, const size_t iphi, const Side side) const { return mPotential[side](iz, ir, iphi); }
 
   /// Get the step width which is used for the calculation of the correction/distortions in units of the z-bin
-  int getStepWidth() const { return 1 / mSteps; }
+  static int getStepWidth() { return 1 / sSteps; }
 
   /// Get phi vertex position for index in phi direction
   /// \param indexPhi index in phi direction
-  DataT getPhiVertex(const size_t indexPhi) const { return mGrid3D.getZVertex(indexPhi); }
+  DataT getPhiVertex(const size_t indexPhi, const Side side) const { return mGrid3D[side].getZVertex(indexPhi); }
 
   /// Get r vertex position for index in r direction
   /// \param indexR index in r direction
-  DataT getRVertex(const size_t indexR) const { return mGrid3D.getYVertex(indexR); }
+  DataT getRVertex(const size_t indexR, const Side side) const { return mGrid3D[side].getYVertex(indexR); }
 
   /// Get z vertex position for index in z direction
   /// \param indexZ index in z direction
-  DataT getZVertex(const size_t indexZ) const { return mGrid3D.getXVertex(indexZ); }
+  DataT getZVertex(const size_t indexZ, const Side side) const { return mGrid3D[side].getXVertex(indexZ); }
 
   /// \param omegaTau \omega \tau value
   /// \param t1 value for t1 see: ???
@@ -366,7 +438,9 @@ class SpaceCharge
 
   /// set number of steps used for calculation of distortions/corrections per z bin
   /// \param nSteps number of steps per z bin
-  void setNStep(const int nSteps) { mSteps = nSteps; }
+  static void setNStep(const int nSteps) { sSteps = nSteps; }
+
+  static int getNStep() { return sSteps; }
 
   /// get the number of threads used for some of the calculations
   static int getNThreads() { return sNThreads; }
@@ -380,9 +454,25 @@ class SpaceCharge
 
   /// set which kind of numerical integration is used for calcution of the integrals int Er/Ez dz, int Ephi/Ez dz, int Ez dz
   /// \param strategy numerical integration strategy. see enum IntegrationStrategy for the different types
-  void setNumericalIntegrationStrategy(const IntegrationStrategy strategy) { mNumericalIntegrationStrategy = strategy; }
+  static void setNumericalIntegrationStrategy(const IntegrationStrategy strategy) { sNumericalIntegrationStrategy = strategy; }
+  static IntegrationStrategy getNumericalIntegrationStrategy() { return sNumericalIntegrationStrategy; }
 
-  void setSimpsonNIteratives(const int nIter) { mSimpsonNIteratives = nIter; }
+  static void setGlobalDistType(const GlobalDistType globalDistType) { sGlobalDistType = globalDistType; }
+  static GlobalDistType getGlobalDistType() { return sGlobalDistType; }
+
+  static void setGlobalDistCorrMethod(const GlobalDistCorrMethod globalDistCorrMethod) { sGlobalDistCorrCalcMethod = globalDistCorrMethod; }
+  static GlobalDistCorrMethod getGlobalDistCorrMethod() { return sGlobalDistCorrCalcMethod; }
+
+  static void setSimpsonNIteratives(const int nIter) { sSimpsonNIteratives = nIter; }
+  static int getSimpsonNIteratives() { return sSimpsonNIteratives; }
+
+  /// Set the space-charge distortions model
+  /// \param distortionType distortion type (constant or realistic)
+  static void setSCDistortionType(SCDistortionType distortionType) { sSCDistortionType = distortionType; }
+  /// Get the space-charge distortions model
+  static SCDistortionType getSCDistortionType() { return sSCDistortionType; }
+
+  void setUseInitialSCDensity(const bool useInitialSCDensity) { mUseInitialSCDensity = useInitialSCDensity; }
 
   /// write electric fields to root file
   /// \param outf output file where the electrical fields will be written to
@@ -456,22 +546,25 @@ class SpaceCharge
 
   /// set z coordinate between min z max z
   /// \param posZ z position which will be regulated if needed
-  DataT regulateZ(const DataT posZ) const { return mGrid3D.clampToGrid(posZ, 0); }
+  DataT regulateZ(const DataT posZ, const Side side) const { return mGrid3D[side].clampToGrid(posZ, 0); }
 
   /// set r coordinate between 'RMIN - 4 * GRIDSPACINGR' and 'RMAX + 2 * GRIDSPACINGR'. the r coordinate is not clamped to RMIN and RMAX to ensure correct interpolation at the borders of the grid.
-  DataT regulateR(const DataT posR) const;
+  DataT regulateR(const DataT posR, const Side side) const;
 
   /// set phi coordinate between min phi max phi
-  DataT regulatePhi(const DataT posPhi) const { return mGrid3D.clampToGridCircular(posPhi, 2); }
+  DataT regulatePhi(const DataT posPhi, const Side side) const { return mGrid3D[side].clampToGridCircular(posPhi, 2); }
 
  private:
   using ASolv = o2::tpc::PoissonSolver<DataT, Nz, Nr, Nphi>;
 
   inline static int sNThreads{omp_get_max_threads()}; ///< number of threads which are used during the calculations
 
-  IntegrationStrategy mNumericalIntegrationStrategy = IntegrationStrategy::SimpsonIterative; ///< numerical integration strategy of integration of the E-Field: 0: trapezoidal, 1: Simpson, 2: Root (only for analytical formula case)
-  int mSimpsonNIteratives = 3;                                                               ///< number of iterations which are performed in the iterative simpson calculation of distortions/corrections
-  int mSteps = 1;                                                                            ///< during the calculation of the corrections/distortions it is assumed that the electron drifts on a line from deltaZ = z0 -> z1. The value sets the deltaZ width: 1: deltaZ=zBin/1, 5: deltaZ=zBin/5
+  inline static IntegrationStrategy sNumericalIntegrationStrategy{IntegrationStrategy::SimpsonIterative}; ///< numerical integration strategy of integration of the E-Field: 0: trapezoidal, 1: Simpson, 2: Root (only for analytical formula case)
+  inline static int sSimpsonNIteratives{3};                                                               ///< number of iterations which are performed in the iterative simpson calculation of distortions/corrections
+  inline static int sSteps{1};                                                                            ///< during the calculation of the corrections/distortions it is assumed that the electron drifts on a line from deltaZ = z0 -> z1. The value sets the deltaZ width: 1: deltaZ=zBin/1, 5: deltaZ=zBin/5
+  inline static GlobalDistType sGlobalDistType{GlobalDistType::Fast};                                     ///< setting for global distortions: 0: standard method,      1: interpolation of global corrections
+  inline static GlobalDistCorrMethod sGlobalDistCorrCalcMethod{GlobalDistCorrMethod::LocalDistCorr};      ///< setting for  global distortions/corrections: 0: using electric field, 1: using local dis/corr interpolator
+  inline static SCDistortionType sSCDistortionType{SCDistortionType::SCDistortionsConstant};              ///< Type of space-charge distortions
 
   DataT mC0 = 0; ///< coefficient C0 (compare Jim Thomas's notes for definitions)
   DataT mC1 = 0; ///< coefficient C1 (compare Jim Thomas's notes for definitions)
@@ -484,7 +577,12 @@ class SpaceCharge
   bool mIsGlobalDistSet[FNSIDES]{};     ///< flag if global distortions are set
   bool mIsChargeSet[FNSIDES]{};         ///< flag if the charge
 
-  RegularGrid mGrid3D{getZMin(), getRMin(), getPhiMin(), getGridSpacingZ(), getGridSpacingR(), getGridSpacingPhi()}; ///< grid properties
+  bool mUseInitialSCDensity{false}; ///< Flag for the use of an initial space-charge density at the beginning of the simulation
+  bool mInitLookUpTables{false};    ///< Flag to indicate if lookup tables have been calculated
+
+  RegularGrid mGrid3D[FNSIDES]{
+    {GridProp::ZMIN, GridProp::RMIN, GridProp::PHIMIN, getSign(Side::A) * GridProp::GRIDSPACINGZ, GridProp::GRIDSPACINGR, GridProp::GRIDSPACINGPHI},
+    {GridProp::ZMIN, GridProp::RMIN, GridProp::PHIMIN, getSign(Side::C) * GridProp::GRIDSPACINGZ, GridProp::GRIDSPACINGR, GridProp::GRIDSPACINGPHI}}; ///< grid properties
 
   DataContainer mLocalDistdR[FNSIDES]{};    ///< data storage for local distortions dR
   DataContainer mLocalDistdZ[FNSIDES]{};    ///< data storage for local distortions dZ
@@ -509,18 +607,31 @@ class SpaceCharge
   DataContainer mElectricFieldEz[FNSIDES]{};   ///< data storage for the electric field Ez
   DataContainer mElectricFieldEphi[FNSIDES]{}; ///< data storage for the electric field Ephi
 
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> mInterpolatorGlobalCorr[FNSIDES]{
+    {mGlobalCorrdR[Side::A], mGlobalCorrdZ[Side::A], mGlobalCorrdRPhi[Side::A], mGrid3D[Side::A], Side::A},
+    {mGlobalCorrdR[Side::C], mGlobalCorrdZ[Side::C], mGlobalCorrdRPhi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the global corrections
+
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> mInterpolatorGlobalDist[FNSIDES]{
+    {mGlobalDistdR[Side::A], mGlobalDistdZ[Side::A], mGlobalDistdRPhi[Side::A], mGrid3D[Side::A], Side::A},
+    {mGlobalDistdR[Side::C], mGlobalDistdZ[Side::C], mGlobalDistdRPhi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the global distortions
+
   /// rebin the input space charge density histogram to desired binning
   /// \param hOrig original histogram
   TH3D rebinDensityHisto(const TH3& hOrig) const;
 
+  static int getSign(const Side side)
+  {
+    return side == Side::C ? -1 : 1;
+  }
+
   /// get inverse spacing in z direction
-  DataT getInvSpacingZ() const { return mGrid3D.getInvSpacingX(); }
+  DataT getInvSpacingZ(const Side side) const { return mGrid3D[side].getInvSpacingX(); }
 
   /// get inverse spacing in r direction
-  DataT getInvSpacingR() const { return mGrid3D.getInvSpacingY(); }
+  DataT getInvSpacingR(const Side side) const { return mGrid3D[side].getInvSpacingY(); }
 
   /// get inverse spacing in phi direction
-  DataT getInvSpacingPhi() const { return mGrid3D.getInvSpacingZ(); }
+  DataT getInvSpacingPhi(const Side side) const { return mGrid3D[side].getInvSpacingZ(); }
 
   std::string getSideName(const Side side) const { return side == Side::A ? "A" : "C"; }
 
@@ -578,7 +689,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 template <typename Fields>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsRoot(const DataT p1r, const DataT p1phi, const DataT p1z, const DataT p2z, DataT& localIntErOverEz, DataT& localIntEPhiOverEz, DataT& localIntDeltaEz, const Fields& formulaStruct) const
 {
-  const DataT ezField = getEzField();
+  const DataT ezField = getEzField(formulaStruct.getSide());
   TF1 fErOverEz("fErOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEr(static_cast<DataT>(x[0]), p1r, p1phi) / (formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) + ezField)); }, p1z, p2z, 1);
   localIntErOverEz = static_cast<DataT>(fErOverEz.Integral(p1z, p2z));
 
@@ -586,7 +697,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsRoot(const DataT p1r, con
   localIntEPhiOverEz = static_cast<DataT>(fEphiOverEz.Integral(p1z, p2z));
 
   TF1 fEz("fEZOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) - ezField); }, p1z, p2z, 1);
-  localIntDeltaEz = static_cast<DataT>(fEz.Integral(p1z, p2z));
+  localIntDeltaEz = getSign(formulaStruct.getSide()) * static_cast<DataT>(fEz.Integral(p1z, p2z));
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
@@ -602,14 +713,14 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsTrapezoidal(const DataT p
   const DataT fieldez1 = formulaStruct.evalEz(p2z, p1r, p1phi);
   const DataT fieldephi1 = formulaStruct.evalEphi(p2z, p1r, p1phi);
 
-  const DataT ezField = getEzField();
+  const DataT ezField = getEzField(formulaStruct.getSide());
   const DataT eZ0 = 1. / (ezField + fieldez0);
   const DataT eZ1 = 1. / (ezField + fieldez1);
 
   const DataT deltaX = 0.5 * (p2z - p1z);
   localIntErOverEz = deltaX * (fielder0 * eZ0 + fielder1 * eZ1);
   localIntEPhiOverEz = deltaX * (fieldephi0 * eZ0 + fieldephi1 * eZ1);
-  localIntDeltaEz = deltaX * (fieldez0 + fieldez1);
+  localIntDeltaEz = getSign(formulaStruct.getSide()) * deltaX * (fieldez0 + fieldez1);
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
@@ -626,7 +737,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsSimpson(const DataT p1r, 
   const DataT fieldephi1 = formulaStruct.evalEphi(p2z, p1r, p1phi);
 
   const DataT deltaX = p2z - p1z;
-  const DataT ezField = getEzField();
+  const DataT ezField = getEzField(formulaStruct.getSide());
   const DataT xk2N = (p2z - static_cast<DataT>(0.5) * deltaX);
   const DataT ezField2 = formulaStruct.evalEz(xk2N, p1r, p1phi);
   const DataT ezField2Denominator = 1. / (ezField + ezField2);
@@ -639,7 +750,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsSimpson(const DataT p1r, 
   const DataT deltaXSimpsonSixth = deltaX / 6.;
   localIntErOverEz = deltaXSimpsonSixth * (4. * fieldSum2ErOverEz + fielder0 * eZ0 + fielder1 * eZ1);
   localIntEPhiOverEz = deltaXSimpsonSixth * (4. * fieldSum2EphiOverEz + fieldephi0 * eZ0 + fieldephi1 * eZ1);
-  localIntDeltaEz = deltaXSimpsonSixth * (4. * ezField2 + fieldez0 + fieldez1);
+  localIntDeltaEz = getSign(formulaStruct.getSide()) * deltaXSimpsonSixth * (4. * ezField2 + fieldez0 + fieldez1);
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
@@ -647,8 +758,9 @@ template <typename Fields>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsSimpsonIterative(const DataT p1r, const DataT p2r, const DataT p1phi, const DataT p2phi, const DataT p1z, const DataT p2z, DataT& localIntErOverEz, DataT& localIntEPhiOverEz, DataT& localIntDeltaEz, const Fields& formulaStruct) const
 {
   //==========simpsons rule see: https://en.wikipedia.org/wiki/Simpson%27s_rule =============================
-  const DataT ezField = getEzField();
-  const DataT p2phiSave = regulatePhi(p2phi);
+  const Side side = formulaStruct.getSide();
+  const DataT ezField = getEzField(side);
+  const DataT p2phiSave = regulatePhi(p2phi, side);
 
   const DataT fielder0 = formulaStruct.evalEr(p1z, p1r, p1phi);
   const DataT fieldez0 = formulaStruct.evalEz(p1z, p1r, p1phi);
@@ -661,8 +773,8 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsSimpsonIterative(const Da
   const DataT eZ0Inv = 1. / (ezField + fieldez0);
   const DataT eZ1Inv = 1. / (ezField + fieldez1);
 
-  const DataT pHalfZ = 0.5 * (p1z + p2z);                        // dont needs to be regulated since p1z and p2z are already regulated
-  const DataT pHalfPhiSave = regulatePhi(0.5 * (p1phi + p2phi)); // needs to be regulated since p2phi is not regulated
+  const DataT pHalfZ = 0.5 * (p1z + p2z);                              // dont needs to be regulated since p1z and p2z are already regulated
+  const DataT pHalfPhiSave = regulatePhi(0.5 * (p1phi + p2phi), side); // needs to be regulated since p2phi is not regulated
   const DataT pHalfR = 0.5 * (p1r + p2r);
 
   const DataT ezField2 = formulaStruct.evalEz(pHalfZ, pHalfR, pHalfPhiSave);
@@ -673,7 +785,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsSimpsonIterative(const Da
   const DataT deltaXSimpsonSixth = (p2z - p1z) / 6;
   localIntErOverEz = deltaXSimpsonSixth * (4 * fieldSum2ErOverEz * eZHalfInv + fielder0 * eZ0Inv + fielder1 * eZ1Inv);
   localIntEPhiOverEz = deltaXSimpsonSixth * (4 * fieldSum2EphiOverEz * eZHalfInv + fieldephi0 * eZ0Inv + fieldephi1 * eZ1Inv);
-  localIntDeltaEz = deltaXSimpsonSixth * (4 * ezField2 + fieldez0 + fieldez1);
+  localIntDeltaEz = getSign(side) * deltaXSimpsonSixth * (4 * ezField2 + fieldez0 + fieldez1);
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
@@ -687,10 +799,10 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcDistCorr(const DataT p1r, const DataT
   DataT localIntDeltaEz = 0;    // integral_p1z^p2z Ez dz
 
   // there are differentnumerical integration strategys implements. for details see each function.
-  switch (mNumericalIntegrationStrategy) {
-    case IntegrationStrategy::SimpsonIterative:                                // iterative simpson integration (should be more precise at least for the analytical E-Field case but takes alot more time than normal simpson integration)
-      for (int i = 0; i < mSimpsonNIteratives; ++i) {                          // TODO define a convergence criterion to abort the algorithm earlier for speed up.
-        const DataT tmpZ = localDistCorr ? (p2z + ddZ) : regulateZ(p2z + ddZ); // dont regulate for local distortions/corrections! (to get same result as using electric field at last/first bin)
+  switch (sNumericalIntegrationStrategy) {
+    case IntegrationStrategy::SimpsonIterative:                                                         // iterative simpson integration (should be more precise at least for the analytical E-Field case but takes alot more time than normal simpson integration)
+      for (int i = 0; i < sSimpsonNIteratives; ++i) {                                                   // TODO define a convergence criterion to abort the algorithm earlier for speed up.
+        const DataT tmpZ = localDistCorr ? (p2z + ddZ) : regulateZ(p2z + ddZ, formulaStruct.getSide()); // dont regulate for local distortions/corrections! (to get same result as using electric field at last/first bin)
         integrateEFieldsSimpsonIterative(p1r, p1r + ddR, p1phi, p1phi + ddPhi, p1z, tmpZ, localIntErOverEz, localIntEPhiOverEz, localIntDeltaEz, formulaStruct);
         langevinCylindrical(ddR, ddPhi, ddZ, (p1r + 0.5 * ddR), localIntErOverEz, localIntEPhiOverEz, localIntDeltaEz); // using the mean radius '(p1r + 0.5 * ddR)' for calculation of distortions/corections
       }

@@ -20,10 +20,10 @@
 #ifndef ALICEO2_TPC_PoissonSolver_H_
 #define ALICEO2_TPC_PoissonSolver_H_
 
-#include "TPCSpacecharge/DataContainer3D.h"
-#include "TPCSpacecharge/PoissonSolverHelpers.h"
-#include "TPCSpacecharge/RegularGrid3D.h"
-#include "TPCSpacecharge/Vector3D.h"
+#include "TPCSpaceCharge/DataContainer3D.h"
+#include "TPCSpaceCharge/PoissonSolverHelpers.h"
+#include "TPCSpaceCharge/RegularGrid3D.h"
+#include "TPCSpaceCharge/Vector3D.h"
 
 #ifdef WITH_OPENMP
 #include <omp.h>

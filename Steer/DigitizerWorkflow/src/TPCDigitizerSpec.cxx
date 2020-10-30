@@ -38,6 +38,7 @@
 using namespace o2::framework;
 using SubSpecificationType = o2::framework::DataAllocator::SubSpecificationType;
 using DigiGroupRef = o2::dataformats::RangeReference<int, int>;
+using SC = o2::tpc::SpaceCharge<double, 129, 129, 180>;
 
 namespace o2
 {
@@ -89,11 +90,11 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
         readSpaceCharge.push_back(substr);
       }
       if (readSpaceCharge[0].size() != 0) { // use pre-calculated space-charge object
-        std::unique_ptr<o2::tpc::SpaceCharge> spaceCharge;
+        std::unique_ptr<SC> spaceCharge;
         if (!gSystem->AccessPathName(readSpaceCharge[0].data())) {
           auto fileSC = std::unique_ptr<TFile>(TFile::Open(readSpaceCharge[0].data()));
           if (fileSC->FindKey(readSpaceCharge[1].data())) {
-            spaceCharge.reset((o2::tpc::SpaceCharge*)fileSC->Get(readSpaceCharge[1].data()));
+            spaceCharge.reset((SC*)fileSC->Get(readSpaceCharge[1].data()));
           }
         }
         if (spaceCharge.get() != nullptr) {
@@ -103,15 +104,7 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
           LOG(ERROR) << "Space-charge object or file not found!";
         }
       } else { // create new space-charge object either with empty TPC or an initial space-charge density provided by histogram
-        o2::tpc::SpaceCharge::SCDistortionType distortionType = useDistortions == 2 ? o2::tpc::SpaceCharge::SCDistortionType::SCDistortionsConstant : o2::tpc::SpaceCharge::SCDistortionType::SCDistortionsRealistic;
-        auto gridSizeString = ic.options().get<std::string>("gridSize");
-        std::vector<int> gridSize;
-        std::stringstream ss(gridSizeString);
-        while (ss.good()) {
-          std::string substr;
-          getline(ss, substr, ',');
-          gridSize.push_back(std::stoi(substr));
-        }
+        SC::SCDistortionType distortionType = useDistortions == 2 ? SC::SCDistortionType::SCDistortionsConstant : SC::SCDistortionType::SCDistortionsRealistic;
         auto inputHistoString = ic.options().get<std::string>("initialSpaceChargeDensity");
         std::vector<std::string> inputHisto;
         std::stringstream ssHisto(inputHistoString);
@@ -130,9 +123,9 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
         }
         if (hisSCDensity.get() != nullptr) {
           LOG(INFO) << "TPC: Providing initial space-charge density histogram: " << hisSCDensity->GetName();
-          mDigitizer.setUseSCDistortions(distortionType, hisSCDensity.get(), gridSize[0], gridSize[1], gridSize[2]);
+          mDigitizer.setUseSCDistortions(distortionType, hisSCDensity.get());
         } else {
-          if (distortionType == SpaceCharge::SCDistortionType::SCDistortionsConstant) {
+          if (distortionType == SC::SCDistortionType::SCDistortionsConstant) {
             LOG(ERROR) << "Input space-charge density histogram or file not found!";
           }
         }

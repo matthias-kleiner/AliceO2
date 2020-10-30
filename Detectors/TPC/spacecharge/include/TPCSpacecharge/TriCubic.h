@@ -16,9 +16,9 @@
 #ifndef ALICEO2_TPC_TriCubic_H_
 #define ALICEO2_TPC_TriCubic_H_
 
-#include "TPCSpacecharge/Vector.h"
-#include "TPCSpacecharge/RegularGrid3D.h"
-#include "TPCSpacecharge/DataContainer3D.h"
+#include "TPCSpaceCharge/Vector.h"
+#include "TPCSpaceCharge/RegularGrid3D.h"
+#include "TPCSpaceCharge/DataContainer3D.h"
 
 #if defined(WITH_OPENMP) || defined(_OPENMP)
 #include <omp.h>

@@ -13,7 +13,7 @@
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#include "TPCSpacecharge/SpaceCharge.h"
+#include "TPCSpaceCharge/SpaceCharge.h"
 #include "fmt/core.h"
 #include "Framework/Logger.h"
 #include <chrono>
@@ -23,7 +23,7 @@ templateClassImp(o2::tpc::SpaceCharge);
 using namespace o2::tpc;
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2::tpc::Side side, const GlobalDistType globalDistType, const GlobalDistCorrMethod globalDistCorrMethod)
+void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2::tpc::Side side)
 {
   using timer = std::chrono::high_resolution_clock;
   using SC = o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>;
@@ -31,19 +31,20 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2:
     LOGP(ERROR, "the charge is not set!");
   }
 
-  const std::array sglobalType{"local distortion/correction interpolator", "Electric fields"};
-  const std::array sglobalDistType{"Standard method", "interpolation of global corrections"};
+  const std::array<std::string, 2> sglobalType{"local distortion/correction interpolator", "Electric fields"};
+  const std::array<std::string, 2> sglobalDistType{"Standard method", "interpolation of global corrections"};
+  const std::array<std::string, 2> sideName{"A", "C"};
 
-  LOGP(info, "====== starting calculation of distortions and corrections ======");
+  LOGP(info, "====== starting calculation of distortions and corrections for Side {} ======", sideName[side]);
   LOGP(info, "Using {} threads", getNThreads());
 
-  if (globalDistCorrMethod == SC::GlobalDistCorrMethod::LocalDistCorr) {
+  if (getGlobalDistCorrMethod() == SC::GlobalDistCorrMethod::LocalDistCorr) {
     LOGP(info, "calculation of global distortions and corrections are performed by using: {}", sglobalType[0]);
   } else {
     LOGP(info, "calculation of global distortions and corrections are performed by using: {}", sglobalType[1]);
   }
 
-  if (globalDistType == SC::GlobalDistType::Standard) {
+  if (getGlobalDistType() == SC::GlobalDistType::Standard) {
     LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[0]);
   } else {
     LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[1]);
@@ -64,7 +65,7 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2:
   LOGP(info, "electric field calculation time: {}", time.count());
 
   const auto numEFields = getElectricFieldsInterpolator(side);
-  if (globalDistType == SC::GlobalDistType::Standard) {
+  if (getGlobalDistType() == SC::GlobalDistType::Standard) {
     start = timer::now();
     const auto dist = o2::tpc::SpaceCharge<DataT, Nz, Nr, Nphi>::Type::Distortions;
     calcLocalDistortionsCorrections(dist, numEFields); // local distortion calculation
@@ -84,15 +85,14 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2:
 
   start = timer::now();
   const auto lCorrInterpolator = getLocalCorrInterpolator(side);
-  (globalDistCorrMethod == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalCorrections(lCorrInterpolator) : calcGlobalCorrections(numEFields);
+  (getGlobalDistCorrMethod() == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalCorrections(lCorrInterpolator) : calcGlobalCorrections(numEFields);
   stop = timer::now();
   time = stop - start;
   LOGP(info, "global corrections time: {}", time.count());
-
   start = timer::now();
-  if (globalDistType == SC::GlobalDistType::Standard) {
+  if (getGlobalDistType() == SC::GlobalDistType::Standard) {
     const auto lDistInterpolator = getLocalDistInterpolator(side);
-    (globalDistCorrMethod == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalDistortions(lDistInterpolator) : calcGlobalDistortions(numEFields);
+    (getGlobalDistCorrMethod() == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalDistortions(lDistInterpolator) : calcGlobalDistortions(numEFields);
   } else {
     const auto globalCorrInterpolator = getGlobalCorrInterpolator(side);
     calcGlobalDistWithGlobalCorrIterative(globalCorrInterpolator);
@@ -107,13 +107,13 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2:
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-DataT SpaceCharge<DataT, Nz, Nr, Nphi>::regulateR(const DataT posR) const
+DataT SpaceCharge<DataT, Nz, Nr, Nphi>::regulateR(const DataT posR, const Side side) const
 {
-  const DataT minR = getRMin() - 4 * getGridSpacingR();
+  const DataT minR = getRMin(side) - 4 * getGridSpacingR(side);
   if (posR < minR) {
     return minR;
   }
-  const DataT maxR = getRMax() + 2 * getGridSpacingR();
+  const DataT maxR = getRMax(side) + 2 * getGridSpacingR(side);
   if (posR > maxR) {
     return maxR;
   }
@@ -137,11 +137,11 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setChargeDensityFromFormula(const Analyti
 {
   const Side side = formulaStruct.getSide();
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 0; iZ < Nz; ++iZ) {
-        const DataT z = getZVertex(iZ);
+        const DataT z = getZVertex(iZ, side);
         mDensity[side](iZ, iR, iPhi) = formulaStruct.evalDensity(z, radius, phi);
       }
     }
@@ -154,11 +154,11 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setPotentialFromFormula(const AnalyticalF
 {
   const Side side = formulaStruct.getSide();
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 0; iZ < Nz; ++iZ) {
-        const DataT z = getZVertex(iZ);
+        const DataT z = getZVertex(iZ, side);
         mPotential[side](iZ, iR, iPhi) = formulaStruct.evalPotential(z, radius, phi);
       }
     }
@@ -170,41 +170,41 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setPotentialBoundaryFromFormula(const Ana
 {
   const Side side = formulaStruct.getSide();
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iZ = 0; iZ < Nz; ++iZ) {
-      const DataT z = getZVertex(iZ);
+      const DataT z = getZVertex(iZ, side);
       const size_t iR = 0;
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       mPotential[side](iZ, iR, iPhi) = formulaStruct.evalPotential(z, radius, phi);
     }
   }
 
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iZ = 0; iZ < Nz; ++iZ) {
-      const DataT z = getZVertex(iZ);
+      const DataT z = getZVertex(iZ, side);
       const size_t iR = Nr - 1;
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       mPotential[side](iZ, iR, iPhi) = formulaStruct.evalPotential(z, radius, phi);
     }
   }
 
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       const size_t iZ = 0;
-      const DataT z = getZVertex(iZ);
+      const DataT z = getZVertex(iZ, side);
       mPotential[side](iZ, iR, iPhi) = formulaStruct.evalPotential(z, radius, phi);
     }
   }
 
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       const size_t iZ = Nz - 1;
-      const DataT z = getZVertex(iZ);
+      const DataT z = getZVertex(iZ, side);
       mPotential[side](iZ, iR, iPhi) = formulaStruct.evalPotential(z, radius, phi);
     }
   }
@@ -214,7 +214,7 @@ template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::poissonSolver(const Side side, const int maxIteration, const DataT stoppingConvergence, const int symmetry)
 {
   ASolv::setConvergenceError(stoppingConvergence);
-  ASolv poissonSolver(mGrid3D);
+  ASolv poissonSolver(mGrid3D[0]);
   poissonSolver.poissonSolver3D(mPotential[side], mDensity[side], symmetry);
 }
 
@@ -225,9 +225,9 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setEFieldFromFormula(const AnalyticalFiel
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
     for (size_t iR = 0; iR < Nr; ++iR) {
       for (size_t iZ = 0; iZ < Nz; ++iZ) {
-        const DataT radius = getRVertex(iR);
-        const DataT z = getZVertex(iZ);
-        const DataT phi = getPhiVertex(iPhi);
+        const DataT radius = getRVertex(iR, side);
+        const DataT z = getZVertex(iZ, side);
+        const DataT phi = getPhiVertex(iPhi, side);
         mElectricFieldEr[side](iZ, iR, iPhi) = formulaStruct.evalEr(z, radius, phi);
         mElectricFieldEz[side](iZ, iR, iPhi) = formulaStruct.evalEz(z, radius, phi);
         mElectricFieldEphi[side](iZ, iR, iPhi) = formulaStruct.evalEphi(z, radius, phi);
@@ -271,47 +271,47 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcEField(const Side side)
 
     // for non-boundary V
     for (size_t iR = 1; iR < Nr - 1; iR++) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 1; iZ < Nz - 1; iZ++) {
-        mElectricFieldEr[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ, iR + 1, iPhi) - mPotential[side](iZ, iR - 1, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingR();                                    // r direction
-        mElectricFieldEz[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ + 1, iR, iPhi) - mPotential[side](iZ - 1, iR, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingZ();                                    // z direction
-        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi() / radius; // phi direction
+        mElectricFieldEr[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ, iR + 1, iPhi) - mPotential[side](iZ, iR - 1, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingR(side);                                    // r direction
+        mElectricFieldEz[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ + 1, iR, iPhi) - mPotential[side](iZ - 1, iR, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingZ(side);                                    // z direction
+        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi(side) / radius; // phi direction
       }
     }
 
     // for boundary-r
     for (size_t iZ = 0; iZ < Nz; iZ++) {
-      mElectricFieldEr[side](iZ, 0, iPhi) = -1 * (-static_cast<DataT>(0.5) * mPotential[side](iZ, 2, iPhi) + 2 * mPotential[side](iZ, 1, iPhi) - static_cast<DataT>(1.5) * mPotential[side](iZ, 0, iPhi)) * getInvSpacingR();                    // forward difference
-      mElectricFieldEr[side](iZ, Nr - 1, iPhi) = -1 * (static_cast<DataT>(1.5) * mPotential[side](iZ, Nr - 1, iPhi) - 2 * mPotential[side](iZ, Nr - 2, iPhi) + static_cast<DataT>(0.5) * mPotential[side](iZ, Nr - 3, iPhi)) * getInvSpacingR(); // backward difference
+      mElectricFieldEr[side](iZ, 0, iPhi) = -1 * (-static_cast<DataT>(0.5) * mPotential[side](iZ, 2, iPhi) + 2 * mPotential[side](iZ, 1, iPhi) - static_cast<DataT>(1.5) * mPotential[side](iZ, 0, iPhi)) * getInvSpacingR(side);                    // forward difference
+      mElectricFieldEr[side](iZ, Nr - 1, iPhi) = -1 * (static_cast<DataT>(1.5) * mPotential[side](iZ, Nr - 1, iPhi) - 2 * mPotential[side](iZ, Nr - 2, iPhi) + static_cast<DataT>(0.5) * mPotential[side](iZ, Nr - 3, iPhi)) * getInvSpacingR(side); // backward difference
     }
 
     for (size_t iR = 0; iR < Nr; iR += Nr - 1) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 1; iZ < Nz - 1; iZ++) {
-        mElectricFieldEz[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ + 1, iR, iPhi) - mPotential[side](iZ - 1, iR, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingZ();                                    // z direction
-        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi() / radius; // phi direction
+        mElectricFieldEz[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ + 1, iR, iPhi) - mPotential[side](iZ - 1, iR, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingZ(side);                                    // z direction
+        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi(side) / radius; // phi direction
       }
     }
 
     // for boundary-z
     for (size_t iR = 0; iR < Nr; ++iR) {
-      mElectricFieldEz[side](0, iR, iPhi) = -1 * (-static_cast<DataT>(0.5) * mPotential[side](2, iR, iPhi) + 2 * mPotential[side](1, iR, iPhi) - static_cast<DataT>(1.5) * mPotential[side](0, iR, iPhi)) * getInvSpacingZ();
-      mElectricFieldEz[side](Nz - 1, iR, iPhi) = -1 * (static_cast<DataT>(1.5) * mPotential[side](Nz - 1, iR, iPhi) - 2 * mPotential[side](Nz - 2, iR, iPhi) + static_cast<DataT>(0.5) * mPotential[side](Nz - 3, iR, iPhi)) * getInvSpacingZ();
+      mElectricFieldEz[side](0, iR, iPhi) = -1 * (-static_cast<DataT>(0.5) * mPotential[side](2, iR, iPhi) + 2 * mPotential[side](1, iR, iPhi) - static_cast<DataT>(1.5) * mPotential[side](0, iR, iPhi)) * getInvSpacingZ(side);
+      mElectricFieldEz[side](Nz - 1, iR, iPhi) = -1 * (static_cast<DataT>(1.5) * mPotential[side](Nz - 1, iR, iPhi) - 2 * mPotential[side](Nz - 2, iR, iPhi) + static_cast<DataT>(0.5) * mPotential[side](Nz - 3, iR, iPhi)) * getInvSpacingZ(side);
     }
 
     for (size_t iR = 1; iR < Nr - 1; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 0; iZ < Nz; iZ += Nz - 1) {
-        mElectricFieldEr[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ, iR + 1, iPhi) - mPotential[side](iZ, iR - 1, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingR();                                    // r direction
-        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi() / radius; // phi direction
+        mElectricFieldEr[side](iZ, iR, iPhi) = -1 * (mPotential[side](iZ, iR + 1, iPhi) - mPotential[side](iZ, iR - 1, iPhi)) * static_cast<DataT>(0.5) * getInvSpacingR(side);                                    // r direction
+        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi(side) / radius; // phi direction
       }
     }
 
     // corner points for EPhi
     for (size_t iR = 0; iR < Nr; iR += Nr - 1) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 0; iZ < Nz; iZ += Nz - 1) {
-        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi() / radius; // phi direction
+        mElectricFieldEphi[side](iZ, iR, iPhi) = -1 * (signPlus * mPotential[side](iZ, iR, tmpPlus) - signMinus * mPotential[side](iZ, iR, tmpMinus)) * static_cast<DataT>(0.5) * getInvSpacingPhi(side) / radius; // phi direction
       }
     }
   }
@@ -340,24 +340,25 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistWithGlobalCorrIterative(con
 
   // loop over global corrections and calculate the positions of the global correction
   for (unsigned int iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (unsigned int iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (unsigned int iZ = 0; iZ < Nz; ++iZ) {
-        const DataT z = getZVertex(iZ);
+        const DataT z = getZVertex(iZ, side);
 
         const DataT globalCorrR = mGlobalCorrdR[side](iZ, iR, iPhi);
         const DataT globalCorrRPhi = mGlobalCorrdRPhi[side](iZ, iR, iPhi);
         const DataT globalCorrZ = mGlobalCorrdZ[side](iZ, iR, iPhi);
 
         const DataT posRCorr = radius + globalCorrR; // position of global correction
-        const DataT posPhiCorr = regulatePhi(phi + globalCorrRPhi / radius);
+        const DataT posPhiCorr = regulatePhi(phi + globalCorrRPhi / radius, side);
         const DataT posZCorr = z + globalCorrZ;
 
         // check if the postion lies in the TPC volume
-        if (posRCorr >= getRMin() && posRCorr <= getRMax() && posZCorr >= getZMin() && posZCorr <= getZMax()) {
+        const bool checkZ = side == Side::A ? posZCorr >= getZMin(side) && posZCorr <= getZMax(side) : posZCorr <= getZMin(side) && posZCorr >= getZMax(side);
+        if (posRCorr >= getRMin(side) && posRCorr <= getRMax(side) && checkZ) {
           // normalize coordinates to gridspacing for searching the nearest neighbour. Otherwise one would have to convert the coordinates to x,y,z
-          points.emplace_back(Point_3(posZCorr * getInvSpacingZ(), posRCorr * getInvSpacingR(), posPhiCorr * getInvSpacingPhi()));
+          points.emplace_back(Point_3(posZCorr * getInvSpacingZ(side), posRCorr * getInvSpacingR(side), posPhiCorr * getInvSpacingPhi(side)));
           indices.emplace_back(std::array<unsigned int, 3>{iZ, iR, iPhi});
         }
       }
@@ -369,21 +370,21 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistWithGlobalCorrIterative(con
 
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (unsigned int iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (unsigned int iZ = 0; iZ < Nz; ++iZ) {
-        const DataT z = getZVertex(iZ);
+        const DataT z = getZVertex(iZ, side);
 
         // find nearest neighbour
-        const Point_3 query(z * getInvSpacingZ(), radius * getInvSpacingR(), phi * getInvSpacingPhi());
+        const Point_3 query(z * getInvSpacingZ(side), radius * getInvSpacingR(side), phi * getInvSpacingPhi(side));
         const int neighbors = 1; // we need only one nearest neighbour
         const K_neighbor_search search(tree, query, neighbors);
 
         const K_neighbor_search::iterator it = search.begin();
-        const DataT nearestZ = static_cast<DataT>(boost::get<0>(it->first)[0]) * getGridSpacingZ();
-        const DataT nearestR = static_cast<DataT>(boost::get<0>(it->first)[1]) * getGridSpacingR();
-        const DataT nearestPhi = static_cast<DataT>(boost::get<0>(it->first)[2]) * getGridSpacingPhi();
+        const DataT nearestZ = static_cast<DataT>(boost::get<0>(it->first)[0]) * getGridSpacingZ(side);
+        const DataT nearestR = static_cast<DataT>(boost::get<0>(it->first)[1]) * getGridSpacingR(side);
+        const DataT nearestPhi = static_cast<DataT>(boost::get<0>(it->first)[2]) * getGridSpacingPhi(side);
 
         const unsigned int nearestiZ = boost::get<1>(it->first)[0];
         const unsigned int nearestiR = boost::get<1>(it->first)[1];
@@ -413,9 +414,9 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistWithGlobalCorrIterative(con
 
         for (int iter = 0; iter < maxIter; ++iter) {
           // 2. get new point coordinates
-          const DataT rCurrPos = getRVertex(nearestiR) + stepR;
-          const DataT zCurrPos = getZVertex(nearestiZ) + stepZ;
-          const DataT phiCurrPos = getPhiVertex(nearestiPhi) + stepPhi;
+          const DataT rCurrPos = getRVertex(nearestiR, side) + stepR;
+          const DataT zCurrPos = getZVertex(nearestiZ, side) + stepZ;
+          const DataT phiCurrPos = getPhiVertex(nearestiPhi, side) + stepPhi;
 
           // interpolate global correction at new point and calculate position of global correction
           // corrdR = globCorr.evalSparsedR(zCurrPos, rCurrPos, phiCurrPos);
@@ -467,7 +468,7 @@ NumericalFields<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getElectr
   if (!mIsEfieldSet[side]) {
     LOGP(warning, "============== E-Fields are not set! ==============\n");
   }
-  NumericalFields<DataT, Nz, Nr, Nphi> numFields(mElectricFieldEr[side], mElectricFieldEz[side], mElectricFieldEphi[side], mGrid3D, side);
+  NumericalFields<DataT, Nz, Nr, Nphi> numFields(mElectricFieldEr[side], mElectricFieldEz[side], mElectricFieldEphi[side], mGrid3D[side], side);
   return numFields;
 }
 
@@ -477,7 +478,7 @@ DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getL
   if (!mIsLocalDistSet[side]) {
     LOGP(warning, "============== local distortions not set! ==============\n");
   }
-  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mLocalDistdR[side], mLocalDistdZ[side], mLocalDistdRPhi[side], mGrid3D, side);
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mLocalDistdR[side], mLocalDistdZ[side], mLocalDistdRPhi[side], mGrid3D[side], side);
   return numFields;
 }
 
@@ -487,7 +488,7 @@ DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getL
   if (!mIsLocalCorrSet[side]) {
     LOGP(warning, "============== local corrections not set!  ==============\n");
   }
-  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mLocalCorrdR[side], mLocalCorrdZ[side], mLocalCorrdRPhi[side], mGrid3D, side);
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mLocalCorrdR[side], mLocalCorrdZ[side], mLocalCorrdRPhi[side], mGrid3D[side], side);
   return numFields;
 }
 
@@ -497,7 +498,7 @@ DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getG
   if (!mIsGlobalDistSet[side]) {
     LOGP(warning, "============== global distortions not set ==============\n");
   }
-  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mGlobalDistdR[side], mGlobalDistdZ[side], mGlobalDistdRPhi[side], mGrid3D, side);
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mGlobalDistdR[side], mGlobalDistdZ[side], mGlobalDistdRPhi[side], mGrid3D[side], side);
   return numFields;
 }
 
@@ -507,7 +508,7 @@ DistCorrInterpolator<DataT, Nz, Nr, Nphi> SpaceCharge<DataT, Nz, Nr, Nphi>::getG
   if (!mIsGlobalCorrSet[side]) {
     LOGP(warning, "============== global corrections not set ==============\n");
   }
-  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mGlobalCorrdR[side], mGlobalCorrdZ[side], mGlobalCorrdRPhi[side], mGrid3D, side);
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> numFields(mGlobalCorrdR[side], mGlobalCorrdZ[side], mGlobalCorrdRPhi[side], mGrid3D[side], side);
   return numFields;
 }
 
@@ -639,12 +640,17 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::setLocalDistortionsFromFile(TFile& inpf, 
     mIsLocalDistSet[side] = false;
   }
 }
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::fillChargeDensityFromFile(TFile& fInp, const char* name)
+{
+  const TH3* hisSCDensity3D = (TH3*)fInp.Get(name);
+  fillChargeDensityFromHisto(*hisSCDensity3D);
+}
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
-void SpaceCharge<DataT, Nz, Nr, Nphi>::fillChargeDensityFromHisto(TFile& fInp, const char* name)
+void SpaceCharge<DataT, Nz, Nr, Nphi>::fillChargeDensityFromHisto(const TH3& hisSCDensity3D)
 {
-  TH3* hisSCDensity3D = (TH3*)fInp.Get(name);
-  TH3D hRebin = rebinDensityHisto(*hisSCDensity3D);
+  TH3D hRebin = rebinDensityHisto(hisSCDensity3D);
   for (int side = Side::A; side < SIDES; ++side) {
     for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
       for (size_t iR = 0; iR < Nr; ++iR) {
@@ -802,20 +808,20 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcLocalDistortionsCorrections(const Spa
   // calculate local distortions/corrections for each vertex in the tpc
 #pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi = getPhiVertex(iPhi);
+    const DataT phi = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT radius = getRVertex(iR);
+      const DataT radius = getRVertex(iR, side);
       for (size_t iZ = 0; iZ < Nz - 1; ++iZ) {
         // set z coordinate depending on distortions or correction calculation
-        const DataT z0 = type == Type::Corrections ? getZVertex(iZ + 1) : getZVertex(iZ);
-        const DataT z1 = type == Type::Corrections ? getZVertex(iZ) : getZVertex(iZ + 1);
+        const DataT z0 = type == Type::Corrections ? getZVertex(iZ + 1, side) : getZVertex(iZ, side);
+        const DataT z1 = type == Type::Corrections ? getZVertex(iZ, side) : getZVertex(iZ + 1, side);
 
         DataT drTmp = 0;   // local distortion dR
         DataT dPhiTmp = 0; // local distortion dPhi (multiplication with R has to be done at the end)
         DataT dzTmp = 0;   // local distortion dZ
 
-        const DataT stepSize = (z1 - z0) / mSteps; // the distortions are calculated by leting the elctron drift this distance in z direction
-        for (int iter = 0; iter < mSteps; ++iter) {
+        const DataT stepSize = (z1 - z0) / sSteps; // the distortions are calculated by leting the elctron drift this distance in z direction
+        for (int iter = 0; iter < sSteps; ++iter) {
           const DataT z0Tmp = (z0 + iter * stepSize + dzTmp); // starting z position
           const DataT z1Tmp = (z0Tmp + stepSize);             // electron drifts from z0Tmp to z1Tmp
 
@@ -823,8 +829,8 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcLocalDistortionsCorrections(const Spa
           DataT ddPhi = 0; // distortion dPhi for drift from z0Tmp to z1Tmp
           DataT ddZ = 0;   // distortion dZ for drift from z0Tmp to z1Tmp
 
-          const DataT radiusTmp = regulateR(radius + drTmp); // current radial position
-          const DataT phiTmp = regulatePhi(phi + dPhiTmp);   // current phi position
+          const DataT radiusTmp = regulateR(radius + drTmp, side); // current radial position
+          const DataT phiTmp = regulatePhi(phi + dPhiTmp, side);   // current phi position
 
           // calculate distortions/corrections
           calcDistCorr(radiusTmp, phiTmp, z0Tmp, z1Tmp, ddR, ddPhi, ddZ, formulaStruct, true);
@@ -881,25 +887,25 @@ template <typename Fields>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistortions(const Fields& formulaStruct)
 {
   const Side side = formulaStruct.getSide();
-  const DataT stepSize = formulaStruct.getID() == 2 ? getGridSpacingZ() : getGridSpacingZ() / mSteps; // if one used local distortions then no smaller stepsize is needed. if electric fields are used then smaller stepsize can be used
+  const DataT stepSize = formulaStruct.getID() == 2 ? getGridSpacingZ(side) : getGridSpacingZ(side) / sSteps; // if one used local distortions then no smaller stepsize is needed. if electric fields are used then smaller stepsize can be used
   // loop over tpc volume and let the electron drift from each vertex to the readout of the tpc
 #pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi0 = getPhiVertex(iPhi);
+    const DataT phi0 = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT r0 = getRVertex(iR);
+      const DataT r0 = getRVertex(iR, side);
       for (size_t iZ = 0; iZ < Nz - 1; ++iZ) {
-        const DataT z0 = getZVertex(iZ); // the electron starts at z0, r0, phi0
-        DataT drDist = 0.0;              // global distortion dR
-        DataT dPhiDist = 0.0;            // global distortion dPhi (multiplication with R has to be done at the end)
-        DataT dzDist = 0.0;              // global distortion dZ
+        const DataT z0 = getZVertex(iZ, side); // the electron starts at z0, r0, phi0
+        DataT drDist = 0.0;                    // global distortion dR
+        DataT dPhiDist = 0.0;                  // global distortion dPhi (multiplication with R has to be done at the end)
+        DataT dzDist = 0.0;                    // global distortion dZ
         int iter = 0;
 
         for (;;) {
-          const DataT z0Tmp = z0 + dzDist + iter * stepSize; // starting z position
-          const DataT z1Tmp = regulateZ(z0Tmp + stepSize);   // electron drifts from z0Tmp to z1Tmp
-          const DataT radius = regulateR(r0 + drDist);       // current radial position of the electron
-          const DataT phi = regulatePhi(phi0 + dPhiDist);    // current phi position of the electron
+          const DataT z0Tmp = z0 + dzDist + iter * stepSize;     // starting z position
+          const DataT z1Tmp = regulateZ(z0Tmp + stepSize, side); // electron drifts from z0Tmp to z1Tmp
+          const DataT radius = regulateR(r0 + drDist, side);     // current radial position of the electron
+          const DataT phi = regulatePhi(phi0 + dPhiDist, side);  // current phi position of the electron
 
           DataT ddR = 0;   // distortion dR for drift from z0Tmp to z1Tmp
           DataT ddPhi = 0; // distortion dPhi for drift from z0Tmp to z1Tmp
@@ -910,8 +916,9 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistortions(const Fields& formu
 
           // if one uses local distortions the interpolated value for the last bin has to be scaled.
           // This has to be done because of the interpolated value is defined for a drift length of one z bin, but in the last bin the distance to the readout can be smaller than one z bin.
-          if (formulaStruct.getID() == 2 && z1Tmp >= getZMax()) {
-            const DataT fac = (getZMax() - z0Tmp) * getInvSpacingZ();
+          const bool checkReached = side == Side::A ? z1Tmp >= getZMax(side) : z1Tmp <= getZMax(side);
+          if (formulaStruct.getID() == 2 && checkReached) {
+            const DataT fac = std::abs((getZMax(side) - z0Tmp) * getInvSpacingZ(side));
             ddR *= fac;
             ddZ *= fac;
             ddPhi *= fac;
@@ -924,11 +931,11 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalDistortions(const Fields& formu
 
           // set loop to exit if the readout is reached and approximate distortion of 'missing' (one never ends exactly on the readout: z1Tmp + ddZ != ZMAX) drift distance.
           // approximation is done by the current calculated values of the distortions and scaled linear to the 'missing' distance.
-          if (z1Tmp >= getZMax()) {
+          if (checkReached) {
             const DataT endPoint = z1Tmp + ddZ;
-            const DataT deltaZ = getZMax() - endPoint; // distance from last point to read out
+            const DataT deltaZ = getZMax(side) - endPoint; // distance from last point to read out
             const DataT diff = endPoint - z0Tmp;
-            const DataT fac = diff != 0 ? deltaZ / diff : 0; // approximate the distortions for the 'missing' distance deltaZ
+            const DataT fac = diff != 0 ? std::abs(deltaZ / diff) : 0; // approximate the distortions for the 'missing' distance deltaZ
             drDist += ddR * fac;
             dPhiDist += ddPhi * fac;
             dzDist += ddZ * fac;
@@ -952,43 +959,44 @@ template <typename Formulas>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalCorrections(const Formulas& formulaStruct)
 {
   const Side side = formulaStruct.getSide();
-  const int iSteps = formulaStruct.getID() == 2 ? 1 : mSteps; // if one used local corrections no step width is needed. since it is already used for calculation of the local corrections
-  const DataT stepSize = -getGridSpacingZ() / iSteps;
+  const int iSteps = formulaStruct.getID() == 2 ? 1 : sSteps; // if one used local corrections no step width is needed. since it is already used for calculation of the local corrections
+  const DataT stepSize = -getGridSpacingZ(side) / iSteps;
   // loop over tpc volume and let the electron drift from each vertex to the readout of the tpc
 #pragma omp parallel for num_threads(sNThreads)
   for (size_t iPhi = 0; iPhi < Nphi; ++iPhi) {
-    const DataT phi0 = getPhiVertex(iPhi);
+    const DataT phi0 = getPhiVertex(iPhi, side);
     for (size_t iR = 0; iR < Nr; ++iR) {
-      const DataT r0 = getRVertex(iR);
+
+      const DataT r0 = getRVertex(iR, side);
       DataT drCorr = 0;
       DataT dPhiCorr = 0;
       DataT dzCorr = 0;
 
       // start at the readout and follow electron towards central electrode
       for (size_t iZ = Nz - 1; iZ >= 1; --iZ) {
-        const DataT z0 = getZVertex(iZ); // the electron starts at z0, r0, phi0
+        const DataT z0 = getZVertex(iZ, side); // the electron starts at z0, r0, phi0
         // flag which is set when the central electrode is reached. if the central electrode is reached the calculation of the global corrections is aborted and the value set is the last calculated value.
         bool centralElectrodeReached = false;
         for (int iter = 0; iter < iSteps; ++iter) {
           if (centralElectrodeReached) {
             break;
           }
-          const DataT radius = regulateR(r0 + drCorr);       // current radial position of the electron
-          const DataT phi = regulatePhi(phi0 + dPhiCorr);    // current phi position of the electron
-          const DataT z0Tmp = z0 + dzCorr + iter * stepSize; // starting z position
-          const DataT z1Tmp = regulateZ(z0Tmp + stepSize);   // follow electron from z0Tmp to z1Tmp
-
-          DataT ddR = 0;   // distortion dR for z0Tmp to z1Tmp
-          DataT ddPhi = 0; // distortion dPhi for z0Tmp to z1Tmp
-          DataT ddZ = 0;   // distortion dZ for z0Tmp to z1Tmp
+          const DataT radius = regulateR(r0 + drCorr, side);     // current radial position of the electron
+          const DataT phi = regulatePhi(phi0 + dPhiCorr, side);  // current phi position of the electron
+          const DataT z0Tmp = z0 + dzCorr + iter * stepSize;     // starting z position
+          const DataT z1Tmp = regulateZ(z0Tmp + stepSize, side); // follow electron from z0Tmp to z1Tmp
+          DataT ddR = 0;                                         // distortion dR for z0Tmp to z1Tmp
+          DataT ddPhi = 0;                                       // distortion dPhi for z0Tmp to z1Tmp
+          DataT ddZ = 0;                                         // distortion dZ for z0Tmp to z1Tmp
 
           // get the distortion from interpolation of local distortions or calculate distortions with the electric field
           processGlobalDistCorr(radius, phi, z0Tmp, z1Tmp, ddR, ddPhi, ddZ, formulaStruct);
 
           // if one uses local corrections the interpolated value for the first bin has to be scaled.
           // This has to be done because of the interpolated value is defined for a drift length of one z bin, but in the first bin the distance to the readout can be smaller than one z bin.
-          if (formulaStruct.getID() == 2 && z1Tmp <= getZMin()) {
-            const DataT fac = (z0Tmp - getZMin()) * getInvSpacingZ();
+          centralElectrodeReached = getSign(side) * z1Tmp <= getZMin(side);
+          if (formulaStruct.getID() == 2 && centralElectrodeReached) {
+            const DataT fac = (z0Tmp - getZMin(side)) * getInvSpacingZ(side);
             ddR *= fac;
             ddZ *= fac;
             ddPhi *= fac;
@@ -1001,15 +1009,14 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalCorrections(const Formulas& for
 
           // set loop to exit if the central electrode is reached and approximate correction of 'missing' (one never ends exactly on the central electrode: z1Tmp + ddZ != ZMIN) distance.
           // approximation is done by the current calculated values of the corrections and scaled linear to the 'missing' distance deltaZ. (NOT TESTED)
-          if (z1Tmp <= getZMin()) {
+          if (centralElectrodeReached) {
             const DataT endPoint = z1Tmp + ddZ;
-            const DataT deltaZ = endPoint - getZMin();
+            const DataT deltaZ = endPoint - getZMin(side);
             const DataT diff = z0Tmp - endPoint;
             const DataT fac = diff != 0 ? deltaZ / diff : 0; // approximate the distortions for the 'missing' distance deltaZ
             drCorr += ddR * fac;
             dPhiCorr += ddPhi * fac;
             dzCorr += ddZ * fac;
-            centralElectrodeReached = true;
             break;
           }
         }
@@ -1022,6 +1029,118 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calcGlobalCorrections(const Formulas& for
   }
   // set flag that global corrections are set to true
   mIsGlobalCorrSet[side] = true;
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::correctElectron(GlobalPosition3D& point)
+{
+  DataT corrX{};
+  DataT corrY{};
+  DataT corrZ{};
+  const Side side = getSide(point.Z());
+
+  // get the distortions for input coordinate
+  getCorrections(point.X(), point.Y(), point.Z(), side, corrX, corrY, corrZ);
+
+  // set distorted coordinates
+  point.SetXYZ(point.X() + corrX, point.Y() + corrY, point.Y() + corrY);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::distortElectron(GlobalPosition3D& point) const
+{
+  DataT distX{};
+  DataT distY{};
+  DataT distZ{};
+  const Side side = getSide(point.Z());
+  // get the distortions for input coordinate
+  getDistortions(point.X(), point.Y(), point.Z(), side, distX, distY, distZ);
+
+  // set distorted coordinates
+  point.SetXYZ(point.X() + distX, point.Y() + distY, point.Y() + distY);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& corrZ, DataT& corrR, DataT& corrRPhi) const
+{
+  corrZ = mInterpolatorGlobalCorr[side].evaldZ(z, r, phi);
+  corrR = mInterpolatorGlobalCorr[side].evaldR(z, r, phi);
+  corrRPhi = mInterpolatorGlobalCorr[side].evaldRPhi(z, r, phi);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getCorrections(const DataT x, const DataT y, const DataT z, const Side side, DataT& corrX, DataT& corrY, DataT& corrZ) const
+{
+  // convert cartesian to polar
+  const DataT radius = getRadiusFromCartesian(x, y);
+  const DataT phi = getPhiFromCartesian(x, y);
+
+  DataT corrR{};
+  DataT corrRPhi{};
+  getCorrectionsCyl(z, radius, phi, side, corrZ, corrR, corrRPhi);
+
+  // Calculate corrected position
+  const DataT radiusCorr = radius + corrR;
+  const DataT phiCorr = phi + corrRPhi / radius;
+
+  corrX = getXFromPolar(radiusCorr, phiCorr) - x; // difference between corrected and original x coordinate
+  corrY = getYFromPolar(radiusCorr, phiCorr) - y; // difference between corrected and original y coordinate
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getDistortionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& distZ, DataT& distR, DataT& distRPhi) const
+{
+  distZ = mInterpolatorGlobalDist[side].evaldZ(z, r, phi);
+  distR = mInterpolatorGlobalDist[side].evaldR(z, r, phi);
+  distRPhi = mInterpolatorGlobalDist[side].evaldRPhi(z, r, phi);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getDistortions(const DataT x, const DataT y, const DataT z, const Side side, DataT& distX, DataT& distY, DataT& distZ) const
+{
+  // convert cartesian to polar
+  const DataT radius = getRadiusFromCartesian(x, y);
+  const DataT phi = getPhiFromCartesian(x, y);
+
+  DataT distR{};
+  DataT distRPhi{};
+  getDistortionsCyl(z, radius, phi, side, distZ, distR, distRPhi);
+
+  // Calculate distorted position
+  const DataT radiusDist = radius + distR;
+  const DataT phiDist = phi + distRPhi / radius;
+
+  distX = getXFromPolar(radiusDist, phiDist) - x; // difference between distorted and original x coordinate
+  distY = getYFromPolar(radiusDist, phiDist) - y; // difference between distorted and original y coordinate
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::init()
+{
+  using timer = std::chrono::high_resolution_clock;
+  if (!mInitLookUpTables) {
+    auto start = timer::now();
+    auto o2field = static_cast<o2::field::MagneticField*>(TGeoGlobalMagField::Instance()->GetField());
+    const float bzField = o2field->solenoidField(); // magnetic field in kGauss
+    /// TODO is there a faster way to get the drift velocity
+    auto& gasParam = ParameterGas::Instance();
+    float vDrift = gasParam.DriftV; // drift velocity in cm/us
+    /// TODO fix hard coded values (ezField, t1, t2): export to Constants.h or get from somewhere?
+    const float t1 = 1.;
+    const float t2 = 1.;
+    /// TODO use this parameterization or fixed value(s) from Magboltz calculations?
+    const float omegaTau = -10. * bzField * vDrift / std::abs(getEzField(Side::A));
+    setOmegaTauT1T2(omegaTau, t1, t2);
+    if (mUseInitialSCDensity) {
+      LOG(WARNING) << "mUseInitialSCDensity" << mUseInitialSCDensity;
+      calculateDistortionsCorrections(Side::A);
+      calculateDistortionsCorrections(Side::C);
+      mInitLookUpTables = true;
+    }
+    auto stop = timer::now();
+    std::chrono::duration<float> time = stop - start;
+    LOGP(info, "Total Time Distortions and Corrections for A and C Side: {}", time.count());
+  }
 }
 
 using DataTD = double;

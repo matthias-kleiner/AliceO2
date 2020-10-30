@@ -10,7 +10,7 @@
 
 find_package(CGAL)
 
-o2_add_library(TPCSpacecharge
+o2_add_library(TPCSpaceCharge
                TARGETVARNAME targetName
                SOURCES src/SpaceCharge.cxx
                        src/PoissonSolver.cxx
@@ -19,24 +19,24 @@ o2_add_library(TPCSpacecharge
                                      ROOT::Core
                                      CGAL::CGAL)
 
-o2_target_root_dictionary(TPCSpacecharge
-                          HEADERS include/TPCSpacecharge/PoissonSolver.h
-                                  include/TPCSpacecharge/SpaceCharge.h
-                                  include/TPCSpacecharge/RegularGrid3D.h
-                                  include/TPCSpacecharge/DataContainer3D.h
-                                  include/TPCSpacecharge/PoissonSolverHelpers.h
-                                  include/TPCSpacecharge/SpaceChargeHelpers.h
-                                  include/TPCSpacecharge/TriCubic.h
-                                  include/TPCSpacecharge/Vector.h
-                                  include/TPCSpacecharge/Vector3D.h
+o2_target_root_dictionary(TPCSpaceCharge
+                          HEADERS include/TPCSpaceCharge/PoissonSolver.h
+                                  include/TPCSpaceCharge/SpaceCharge.h
+                                  include/TPCSpaceCharge/RegularGrid3D.h
+                                  include/TPCSpaceCharge/DataContainer3D.h
+                                  include/TPCSpaceCharge/PoissonSolverHelpers.h
+                                  include/TPCSpaceCharge/SpaceChargeHelpers.h
+                                  include/TPCSpaceCharge/TriCubic.h
+                                  include/TPCSpaceCharge/Vector.h
+                                  include/TPCSpaceCharge/Vector3D.h
                           LINKDEF src/TPCSpacechargeLinkDef.h)
 
 o2_add_test_root_macro(macro/calculateDistortionsCorrections.C
-                       PUBLIC_LINK_LIBRARIES O2::TPCSpacecharge)
+                       PUBLIC_LINK_LIBRARIES O2::TPCSpaceCharge)
 
 o2_add_test(PoissonSolver
             COMPONENT_NAME spacecharge
-            PUBLIC_LINK_LIBRARIES O2::TPCSpacecharge
+            PUBLIC_LINK_LIBRARIES O2::TPCSpaceCharge
             SOURCES test/testO2TPCPoissonSolver.cxx
             ENVIRONMENT O2_ROOT=${CMAKE_BINARY_DIR}/stage
             LABELS tpc)

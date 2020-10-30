@@ -18,7 +18,7 @@
 #include "TPCSimulation/DigitContainer.h"
 #include "TPCSimulation/PadResponse.h"
 #include "TPCSimulation/Point.h"
-#include "TPCSimulation/SpaceCharge.h"
+#include "TPCSpacecharge/SpaceCharge.h"
 
 #include "TPCBase/Mapper.h"
 
@@ -52,6 +52,8 @@ class DigitContainer;
 class Digitizer
 {
  public:
+  using SpaceCharge = SpaceCharge<double, 129, 129, 180>;
+
   /// Default constructor
   Digitizer() = default;
 
@@ -109,7 +111,7 @@ class Digitizer
   /// \param nZSlices number of grid points in z, must be (2**N)+1
   /// \param nPhiBins number of grid points in phi
   /// \param nRBins number of grid points in r, must be (2**N)+1
-  void setUseSCDistortions(SpaceCharge::SCDistortionType distortionType, const TH3* hisInitialSCDensity, int nRBins, int nPhiBins, int nZSlices);
+  void setUseSCDistortions(SpaceCharge::SCDistortionType distortionType, const TH3* hisInitialSCDensity);
   /// Enable the use of space-charge distortions and provide SpaceCharge object as input
   /// \param spaceCharge unique pointer to spaceCharge object
   void setUseSCDistortions(SpaceCharge* spaceCharge);
@@ -122,7 +124,6 @@ class Digitizer
   // FIXME: whats the reason for hving this static?
   static bool mIsContinuous;      ///< Switch for continuous readout
   bool mUseSCDistortions = false; ///< Flag to switch on the use of space-charge distortions
-
   ClassDefNV(Digitizer, 1);
 };
 } // namespace tpc

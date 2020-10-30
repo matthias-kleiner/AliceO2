@@ -16,7 +16,7 @@
 #ifndef ALICEO2_TPC_RegularGrid3D_H_
 #define ALICEO2_TPC_RegularGrid3D_H_
 
-#include "TPCSpacecharge/Vector.h"
+#include "TPCSpaceCharge/Vector.h"
 #include "Rtypes.h" // for ClassDefNV
 
 namespace o2
@@ -163,10 +163,19 @@ struct RegularGrid3D {
 template <typename DataT, unsigned int Nx, unsigned int Ny, unsigned int Nz>
 DataT RegularGrid3D<DataT, Nx, Ny, Nz>::clampToGrid(const DataT pos, const unsigned int dim) const
 {
-  if (pos < mMin[dim]) {
-    return mMin[dim];
-  } else if (pos > mMax[dim]) {
-    return mMax[dim];
+  if(mMin[dim] < mMax[dim]){
+    if (pos < mMin[dim]) {
+      return mMin[dim];
+    } else if (pos > mMax[dim]) {
+      return mMax[dim];
+    }
+  }
+  else{
+    if (pos > mMin[dim]) {
+      return mMin[dim];
+    } else if (pos < mMax[dim]) {
+      return mMax[dim];
+    }
   }
   return pos;
 }
