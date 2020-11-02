@@ -65,6 +65,7 @@ class SpaceCharge
   using RegularGrid = RegularGrid3D<DataT, Nz, Nr, Nphi>;
   using DataContainer = DataContainer3D<DataT, Nz, Nr, Nphi>;
   using GridProp = GridProperties<DataT, Nr, Nz, Nphi>;
+  using TriCubic = TriCubicInterpolator<DataT, Nz, Nr, Nphi>;
 
  public:
   /// default constructor
@@ -171,6 +172,36 @@ class SpaceCharge
   /// \param z global z coordinate
   /// \param r global r coordinate
   /// \param phi global phi coordinate
+  DataT getChargeCyl(const DataT z, const DataT r, const DataT phi, const Side side) const;
+
+  /// get the global correction for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
+  DataT getPotentialCyl(const DataT z, const DataT r, const DataT phi, const Side side) const;
+
+  /// get the global correction for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
+  /// \param eZ returns correction in z direction
+  /// \param eR returns correction in r direction
+  /// \param ePhi returns correction in phi direction
+  void getElectricFieldsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& eZ, DataT& eR, DataT& ePhi) const;
+
+  /// get the global correction for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
+  /// \param lcorrZ returns local correction in z direction
+  /// \param lcorrR returns local correction in r direction
+  /// \param lcorrRPhi returns local correction in rphi direction
+  void getLocalCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& lcorrZ, DataT& lcorrR, DataT& lcorrRPhi) const;
+
+  /// get the global correction for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
   /// \param corrZ returns correction in z direction
   /// \param corrR returns correction in r direction
   /// \param corrRPhi returns correction in rphi direction
@@ -184,6 +215,15 @@ class SpaceCharge
   /// \param corrY returns corrections in y direction
   /// \param corrZ returns corrections in z direction
   void getCorrections(const DataT x, const DataT y, const DataT z, const Side side, DataT& corrX, DataT& corrY, DataT& corrZ) const;
+
+  /// get the global distortions for given coordinate
+  /// \param z global z coordinate
+  /// \param r global r coordinate
+  /// \param phi global phi coordinate
+  /// \param ldistZ returns local distortion in z direction
+  /// \param ldistR returns local distortion in r direction
+  /// \param ldistRPhi returns local distortion in rphi direction
+  void getLocalDistortionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& ldistZ, DataT& ldistR, DataT& ldistRPhi) const;
 
   /// get the global distortions for given coordinate
   /// \param z global z coordinate
@@ -581,7 +621,7 @@ class SpaceCharge
   bool mUseInitialSCDensity{false}; ///< Flag for the use of an initial space-charge density at the beginning of the simulation
   bool mInitLookUpTables{false};    ///< Flag to indicate if lookup tables have been calculated
 
-  RegularGrid mGrid3D[FNSIDES]{
+  const RegularGrid mGrid3D[FNSIDES]{
     {GridProp::ZMIN, GridProp::RMIN, GridProp::PHIMIN, getSign(Side::A) * GridProp::GRIDSPACINGZ, GridProp::GRIDSPACINGR, GridProp::GRIDSPACINGPHI},
     {GridProp::ZMIN, GridProp::RMIN, GridProp::PHIMIN, getSign(Side::C) * GridProp::GRIDSPACINGZ, GridProp::GRIDSPACINGR, GridProp::GRIDSPACINGPHI}}; ///< grid properties
 
@@ -608,13 +648,33 @@ class SpaceCharge
   DataContainer mElectricFieldEz[FNSIDES]{};   ///< data storage for the electric field Ez
   DataContainer mElectricFieldEphi[FNSIDES]{}; ///< data storage for the electric field Ephi
 
+  TriCubic mInterpolatorPotential[FNSIDES]{
+    {mPotential[Side::A], mGrid3D[Side::A]},
+    {mPotential[Side::C], mGrid3D[Side::C]}}; ///< interpolator for the potenial
+
+  TriCubic mInterpolatorDensity[FNSIDES]{
+    {mDensity[Side::A], mGrid3D[Side::A]},
+    {mDensity[Side::C], mGrid3D[Side::C]}}; ///< interpolator for the charge
+
   DistCorrInterpolator<DataT, Nz, Nr, Nphi> mInterpolatorGlobalCorr[FNSIDES]{
     {mGlobalCorrdR[Side::A], mGlobalCorrdZ[Side::A], mGlobalCorrdRPhi[Side::A], mGrid3D[Side::A], Side::A},
     {mGlobalCorrdR[Side::C], mGlobalCorrdZ[Side::C], mGlobalCorrdRPhi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the global corrections
 
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> mInterpolatorLocalCorr[FNSIDES]{
+    {mLocalCorrdR[Side::A], mLocalCorrdZ[Side::A], mLocalCorrdRPhi[Side::A], mGrid3D[Side::A], Side::A},
+    {mLocalCorrdR[Side::C], mLocalCorrdZ[Side::C], mLocalCorrdRPhi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the local corrections
+
   DistCorrInterpolator<DataT, Nz, Nr, Nphi> mInterpolatorGlobalDist[FNSIDES]{
     {mGlobalDistdR[Side::A], mGlobalDistdZ[Side::A], mGlobalDistdRPhi[Side::A], mGrid3D[Side::A], Side::A},
     {mGlobalDistdR[Side::C], mGlobalDistdZ[Side::C], mGlobalDistdRPhi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the global distortions
+
+  DistCorrInterpolator<DataT, Nz, Nr, Nphi> mInterpolatorLocalDist[FNSIDES]{
+    {mLocalDistdR[Side::A], mLocalDistdZ[Side::A], mLocalDistdRPhi[Side::A], mGrid3D[Side::A], Side::A},
+    {mLocalDistdR[Side::C], mLocalDistdZ[Side::C], mLocalDistdRPhi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the local distortions
+
+  NumericalFields<DataT, Nz, Nr, Nphi> mInterpolatorEField[FNSIDES]{
+    {mElectricFieldEr[Side::A], mElectricFieldEz[Side::A], mElectricFieldEphi[Side::A], mGrid3D[Side::A], Side::A},
+    {mElectricFieldEr[Side::C], mElectricFieldEz[Side::C], mElectricFieldEphi[Side::C], mGrid3D[Side::C], Side::C}}; ///< interpolator for the electric fields
 
   /// rebin the input space charge density histogram to desired binning
   /// \param hOrig original histogram

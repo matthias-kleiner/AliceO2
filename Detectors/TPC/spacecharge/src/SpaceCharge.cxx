@@ -1065,6 +1065,34 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::distortElectron(GlobalPosition3D& point) 
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+DataT SpaceCharge<DataT, Nz, Nr, Nphi>::getChargeCyl(const DataT z, const DataT r, const DataT phi, const Side side) const
+{
+  return mInterpolatorDensity[side](z, r, phi);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+DataT SpaceCharge<DataT, Nz, Nr, Nphi>::getPotentialCyl(const DataT z, const DataT r, const DataT phi, const Side side) const
+{
+  return mInterpolatorPotential[side](z, r, phi);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getElectricFieldsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& eZ, DataT& eR, DataT& ePhi) const
+{
+  eZ = mInterpolatorEField[side].evalEz(z, r, phi);
+  eR = mInterpolatorEField[side].evalEr(z, r, phi);
+  ePhi = mInterpolatorEField[side].evalEphi(z, r, phi);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getLocalCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& lcorrZ, DataT& lcorrR, DataT& lcorrRPhi) const
+{
+  lcorrZ = mInterpolatorLocalCorr[side].evaldZ(z, r, phi);
+  lcorrR = mInterpolatorLocalCorr[side].evaldR(z, r, phi);
+  lcorrRPhi = mInterpolatorLocalCorr[side].evaldRPhi(z, r, phi);
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::getCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& corrZ, DataT& corrR, DataT& corrRPhi) const
 {
   corrZ = mInterpolatorGlobalCorr[side].evaldZ(z, r, phi);
@@ -1089,6 +1117,14 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::getCorrections(const DataT x, const DataT
 
   corrX = getXFromPolar(radiusCorr, phiCorr) - x; // difference between corrected and original x coordinate
   corrY = getYFromPolar(radiusCorr, phiCorr) - y; // difference between corrected and original y coordinate
+}
+
+template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>
+void SpaceCharge<DataT, Nz, Nr, Nphi>::getLocalDistortionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& ldistZ, DataT& ldistR, DataT& ldistRPhi) const
+{
+  ldistZ = mInterpolatorLocalDist[side].evaldZ(z, r, phi);
+  ldistR = mInterpolatorLocalDist[side].evaldR(z, r, phi);
+  ldistRPhi = mInterpolatorLocalDist[side].evaldRPhi(z, r, phi);
 }
 
 template <typename DataT, size_t Nz, size_t Nr, size_t Nphi>

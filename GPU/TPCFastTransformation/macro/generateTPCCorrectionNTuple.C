@@ -34,7 +34,7 @@
 // o2::tpc::SpaceCharge<double, nZ, nR, nPhi>
 // for valid values see the definitions in TPCSpacechargeLinkDef.h
 using SC = o2::tpc::SpaceCharge<double, 129, 129, 180>;
-SC* sc = 0;
+SC* sc = nullptr;
 
 using namespace o2::tpc;
 using namespace o2::gpu;
