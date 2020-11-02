@@ -90,16 +90,9 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
         readSpaceCharge.push_back(substr);
       }
       if (readSpaceCharge[0].size() != 0) { // use pre-calculated space-charge object
-        std::unique_ptr<SC> spaceCharge;
         if (!gSystem->AccessPathName(readSpaceCharge[0].data())) {
-          auto fileSC = std::unique_ptr<TFile>(TFile::Open(readSpaceCharge[0].data()));
-          if (fileSC->FindKey(readSpaceCharge[1].data())) {
-            spaceCharge.reset((SC*)fileSC->Get(readSpaceCharge[1].data()));
-          }
-        }
-        if (spaceCharge.get() != nullptr) {
-          LOG(INFO) << "Using pre-calculated space-charge object: " << readSpaceCharge[1].data();
-          mDigitizer.setUseSCDistortions(spaceCharge.release());
+          TFile fileSC(readSpaceCharge[0].data(), "READ");
+          mDigitizer.setUseSCDistortions(fileSC);
         } else {
           LOG(ERROR) << "Space-charge object or file not found!";
         }
@@ -361,7 +354,6 @@ o2::framework::DataProcessorSpec getTPCDigitizerSpec(int channel, bool writeGRP,
     outputs,
     AlgorithmSpec{adaptFromTask<TPCDPLDigitizerTask>()},
     Options{{"distortionType", VariantType::Int, 0, {"Distortion type to be used. 0 = no distortions (default), 1 = realistic distortions (not implemented yet), 2 = constant distortions"}},
-            {"gridSize", VariantType::String, "129,144,129", {"Comma separated list of number of bins in (r,phi,z) for distortion lookup tables (r and z can only be 2**N + 1, N=1,2,3,...)"}},
             {"initialSpaceChargeDensity", VariantType::String, "", {"Path to root file containing TH3 with initial space-charge density and name of the TH3 (comma separated)"}},
             {"readSpaceCharge", VariantType::String, "", {"Path to root file containing pre-calculated space-charge object and name of the object (comma separated)"}},
             {"TPCtriggered", VariantType::Bool, false, {"Impose triggered RO mode (default: continuous)"}}}};

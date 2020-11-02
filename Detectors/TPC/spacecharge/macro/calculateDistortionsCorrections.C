@@ -333,4 +333,12 @@ void calculateDistortionsFromHist(const char* path, const char* histoName, const
   }
   pcstream.GetFile()->cd();
   pcstream.Close();
+
+  // write global corrections and distortions to file
+  TFile fOut("spacecharge.root", "RECREATE");
+  spaceCharge3D.dumpGlobalDistortions(fOut, o2::tpc::Side::A);
+  spaceCharge3D.dumpGlobalDistortions(fOut, o2::tpc::Side::C);
+  spaceCharge3D.dumpGlobalCorrections(fOut, o2::tpc::Side::A);
+  spaceCharge3D.dumpGlobalCorrections(fOut, o2::tpc::Side::C);
+  fOut.Close();
 }

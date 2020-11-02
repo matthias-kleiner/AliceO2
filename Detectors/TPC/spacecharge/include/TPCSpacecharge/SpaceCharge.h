@@ -90,7 +90,8 @@ class SpaceCharge
 
   enum class GlobalDistType {
     Standard = 0, ///< classical method (start calculation of global distortion at each voxel in the tpc and follow electron drift to readout -slow-)
-    Fast = 1      ///< interpolation of global corrections (use the global corrections to apply an iterative approach to obtain the global distortions -fast-)
+    Fast = 1,     ///< interpolation of global corrections (use the global corrections to apply an iterative approach to obtain the global distortions -fast-)
+    None = 2      ///< dont calculate global distortions
   };
 
   enum class GlobalDistCorrMethod {

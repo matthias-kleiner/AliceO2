@@ -18,7 +18,7 @@
 #include "TPCSimulation/DigitContainer.h"
 #include "TPCSimulation/PadResponse.h"
 #include "TPCSimulation/Point.h"
-#include "TPCSpacecharge/SpaceCharge.h"
+#include "TPCSpaceCharge/SpaceCharge.h"
 
 #include "TPCBase/Mapper.h"
 
@@ -115,6 +115,11 @@ class Digitizer
   /// Enable the use of space-charge distortions and provide SpaceCharge object as input
   /// \param spaceCharge unique pointer to spaceCharge object
   void setUseSCDistortions(SpaceCharge* spaceCharge);
+
+  /// Enable the use of space-charge distortions by providing global distortions and global corrections stored in a ROOT file
+  /// The storage of the values should be done by the methods provided in the SpaceCharge class
+  /// \param TFile file containing distortions and corrections
+  void setUseSCDistortions(TFile& finp);
 
  private:
   DigitContainer mDigitContainer;            ///< Container for the Digits

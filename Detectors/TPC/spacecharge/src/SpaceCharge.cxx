@@ -44,10 +44,12 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2:
     LOGP(info, "calculation of global distortions and corrections are performed by using: {}", sglobalType[1]);
   }
 
-  if (getGlobalDistType() == SC::GlobalDistType::Standard) {
+  if (getGlobalDistType() == SC::GlobalDistType::Fast) {
+    LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[1]);
+  } else if (getGlobalDistType() == SC::GlobalDistType::Standard) {
     LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[0]);
   } else {
-    LOGP(info, "calculation of global distortions performed by following method: {}", sglobalDistType[1]);
+    LOGP(info, "skipping calculation of global distortions");
   }
 
   auto startTotal = timer::now();
@@ -90,13 +92,15 @@ void SpaceCharge<DataT, Nz, Nr, Nphi>::calculateDistortionsCorrections(const o2:
   time = stop - start;
   LOGP(info, "global corrections time: {}", time.count());
   start = timer::now();
-  if (getGlobalDistType() == SC::GlobalDistType::Standard) {
+  if (getGlobalDistType() == SC::GlobalDistType::Fast) {
+    const auto globalCorrInterpolator = getGlobalCorrInterpolator(side);
+    calcGlobalDistWithGlobalCorrIterative(globalCorrInterpolator);
+  } else if (getGlobalDistType() == SC::GlobalDistType::Standard) {
     const auto lDistInterpolator = getLocalDistInterpolator(side);
     (getGlobalDistCorrMethod() == SC::GlobalDistCorrMethod::LocalDistCorr) ? calcGlobalDistortions(lDistInterpolator) : calcGlobalDistortions(numEFields);
   } else {
-    const auto globalCorrInterpolator = getGlobalCorrInterpolator(side);
-    calcGlobalDistWithGlobalCorrIterative(globalCorrInterpolator);
   }
+
   stop = timer::now();
   time = stop - start;
   LOGP(info, "global distortions time: {}", time.count());

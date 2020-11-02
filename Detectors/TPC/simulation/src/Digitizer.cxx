@@ -182,3 +182,15 @@ void Digitizer::setUseSCDistortions(SpaceCharge* SpaceCharge)
   mUseSCDistortions = true;
   mSpaceCharge.reset(SpaceCharge);
 }
+
+void Digitizer::setUseSCDistortions(TFile& finp)
+{
+  mUseSCDistortions = true;
+  if (!mSpaceCharge) {
+    mSpaceCharge = std::make_unique<SpaceCharge>();
+  }
+  mSpaceCharge->setGlobalDistortionsFromFile(finp, Side::A);
+  mSpaceCharge->setGlobalDistortionsFromFile(finp, Side::C);
+  mSpaceCharge->setGlobalCorrectionsFromFile(finp, Side::A);
+  mSpaceCharge->setGlobalCorrectionsFromFile(finp, Side::C);
+}
