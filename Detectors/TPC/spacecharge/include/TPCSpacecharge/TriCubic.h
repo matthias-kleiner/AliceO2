@@ -13,8 +13,8 @@
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#ifndef ALICEO2_TPC_TriCubic_H_
-#define ALICEO2_TPC_TriCubic_H_
+#ifndef ALICEO2_TPC_TRICUBIC_H_
+#define ALICEO2_TPC_TRICUBIC_H_
 
 #include "TPCSpaceCharge/Vector.h"
 #include "TPCSpaceCharge/RegularGrid3D.h"

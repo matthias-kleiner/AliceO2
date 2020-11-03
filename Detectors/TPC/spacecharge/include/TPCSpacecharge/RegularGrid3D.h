@@ -13,8 +13,8 @@
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#ifndef ALICEO2_TPC_RegularGrid3D_H_
-#define ALICEO2_TPC_RegularGrid3D_H_
+#ifndef ALICEO2_TPC_REGULARGRID3D_H_
+#define ALICEO2_TPC_REGULARGRID3D_H_
 
 #include "TPCSpaceCharge/Vector.h"
 #include "Rtypes.h" // for ClassDefNV
@@ -163,14 +163,13 @@ struct RegularGrid3D {
 template <typename DataT, unsigned int Nx, unsigned int Ny, unsigned int Nz>
 DataT RegularGrid3D<DataT, Nx, Ny, Nz>::clampToGrid(const DataT pos, const unsigned int dim) const
 {
-  if(mMin[dim] < mMax[dim]){
+  if (mMin[dim] < mMax[dim]) {
     if (pos < mMin[dim]) {
       return mMin[dim];
     } else if (pos > mMax[dim]) {
       return mMax[dim];
     }
-  }
-  else{
+  } else {
     if (pos > mMin[dim]) {
       return mMin[dim];
     } else if (pos < mMax[dim]) {

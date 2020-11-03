@@ -751,13 +751,16 @@ template <typename Fields>
 void SpaceCharge<DataT, Nz, Nr, Nphi>::integrateEFieldsRoot(const DataT p1r, const DataT p1phi, const DataT p1z, const DataT p2z, DataT& localIntErOverEz, DataT& localIntEPhiOverEz, DataT& localIntDeltaEz, const Fields& formulaStruct) const
 {
   const DataT ezField = getEzField(formulaStruct.getSide());
-  TF1 fErOverEz("fErOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEr(static_cast<DataT>(x[0]), p1r, p1phi) / (formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) + ezField)); }, p1z, p2z, 1);
+  TF1 fErOverEz(
+    "fErOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEr(static_cast<DataT>(x[0]), p1r, p1phi) / (formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) + ezField)); }, p1z, p2z, 1);
   localIntErOverEz = static_cast<DataT>(fErOverEz.Integral(p1z, p2z));
 
-  TF1 fEphiOverEz("fEPhiOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEphi(static_cast<DataT>(x[0]), p1r, p1phi) / (formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) + ezField)); }, p1z, p2z, 1);
+  TF1 fEphiOverEz(
+    "fEPhiOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEphi(static_cast<DataT>(x[0]), p1r, p1phi) / (formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) + ezField)); }, p1z, p2z, 1);
   localIntEPhiOverEz = static_cast<DataT>(fEphiOverEz.Integral(p1z, p2z));
 
-  TF1 fEz("fEZOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) - ezField); }, p1z, p2z, 1);
+  TF1 fEz(
+    "fEZOverEz", [&](double* x, double* p) { (void)p; return static_cast<double>(formulaStruct.evalEz(static_cast<DataT>(x[0]), p1r, p1phi) - ezField); }, p1z, p2z, 1);
   localIntDeltaEz = getSign(formulaStruct.getSide()) * static_cast<DataT>(fEz.Integral(p1z, p2z));
 }
 

@@ -14,8 +14,8 @@
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Aug 21, 2020
 
-#ifndef ALICEO2_TPC_DataContainer3D_H_
-#define ALICEO2_TPC_DataContainer3D_H_
+#ifndef ALICEO2_TPC_DATACONTAINER3D_H_
+#define ALICEO2_TPC_DATACONTAINER3D_H_
 
 #include <memory>
 #include "TFile.h"

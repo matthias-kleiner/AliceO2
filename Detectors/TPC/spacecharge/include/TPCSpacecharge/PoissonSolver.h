@@ -17,8 +17,8 @@
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Aug 21, 2020
 
-#ifndef ALICEO2_TPC_PoissonSolver_H_
-#define ALICEO2_TPC_PoissonSolver_H_
+#ifndef ALICEO2_TPC_POISSONSOLVER_H_
+#define ALICEO2_TPC_POISSONSOLVER_H_
 
 #include "TPCSpaceCharge/DataContainer3D.h"
 #include "TPCSpaceCharge/PoissonSolverHelpers.h"

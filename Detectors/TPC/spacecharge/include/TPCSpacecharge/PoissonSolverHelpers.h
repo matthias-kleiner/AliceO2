@@ -14,8 +14,8 @@
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Aug 21, 2020
 
-#ifndef ALICEO2_TPC_PoissonSolverHelpers_H_
-#define ALICEO2_TPC_PoissonSolverHelpers_H_
+#ifndef ALICEO2_TPC_POISSONSOLVERHELPERS_H_
+#define ALICEO2_TPC_POISSONSOLVERHELPERS_H_
 
 #include <vector>
 #include <cmath>

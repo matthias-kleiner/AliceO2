@@ -57,7 +57,7 @@ void generateTPCCorrectionNTuple(const char* path = "InputSCDensityHistograms.ro
   std::unique_ptr<TH3> mHisSCDensity3D = std::unique_ptr<TH3>((TH3*)mFileSCDensity->Get(histoName));
 
   if (!mHisSCDensity3D) {
-    std::cout << Form("%s histogramm does not exist!",histoName) << std::endl;
+    std::cout << Form("%s histogramm does not exist!", histoName) << std::endl;
     return;
   }
 

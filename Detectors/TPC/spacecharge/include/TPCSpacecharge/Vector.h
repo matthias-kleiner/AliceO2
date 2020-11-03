@@ -13,8 +13,8 @@
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#ifndef ALICEO2_TPC_Vector_H_
-#define ALICEO2_TPC_Vector_H_
+#ifndef ALICEO2_TPC_VECTOR_H_
+#define ALICEO2_TPC_VECTOR_H_
 
 #include <Vc/Vc>
 
