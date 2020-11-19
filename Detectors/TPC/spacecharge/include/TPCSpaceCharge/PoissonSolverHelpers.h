@@ -17,7 +17,7 @@
 #ifndef ALICEO2_TPC_POISSONSOLVERHELPERS_H_
 #define ALICEO2_TPC_POISSONSOLVERHELPERS_H_
 
-#include "CommonConstants/MathConstants.h"
+// #include "CommonConstants/MathConstants.h"
 
 namespace o2
 {
@@ -71,15 +71,16 @@ struct TPCParameters {
 
 template <typename DataT = double, size_t Nr = 129, size_t Nz = 129, size_t Nphi = 180>
 struct GridProperties {
-  static constexpr DataT RMIN{TPCParameters<DataT>::IFCRADIUS};                  ///< min radius
-  static constexpr DataT ZMIN{0};                                                ///< min z coordinate
-  static constexpr DataT PHIMIN{0};                                              ///< min phi coordinate
-  static constexpr DataT RMAX{TPCParameters<DataT>::OFCRADIUS};                  ///< max radius
-  static constexpr DataT ZMAX{TPCParameters<DataT>::TPCZ0};                      ///< max z coordinate
-  static constexpr DataT PHIMAX{static_cast<DataT>(o2::constants::math::TwoPI)}; ///< max phi coordinate
-  static constexpr DataT GRIDSPACINGR{(RMAX - RMIN) / (Nr - 1)};                 ///< grid spacing in r direction
-  static constexpr DataT GRIDSPACINGZ{(ZMAX - ZMIN) / (Nz - 1)};                 ///< grid spacing in z direction
-  static constexpr DataT GRIDSPACINGPHI{PHIMAX / Nphi};                          ///< grid spacing in phi direction
+  static constexpr DataT RMIN{TPCParameters<DataT>::IFCRADIUS}; ///< min radius
+  static constexpr DataT ZMIN{0};                               ///< min z coordinate
+  static constexpr DataT PHIMIN{0};                             ///< min phi coordinate
+  static constexpr DataT RMAX{TPCParameters<DataT>::OFCRADIUS}; ///< max radius
+  static constexpr DataT ZMAX{TPCParameters<DataT>::TPCZ0};     ///< max z coordinate
+  // static constexpr DataT PHIMAX{static_cast<DataT>(o2::constants::math::TwoPI)}; ///< max phi coordinate
+  static constexpr DataT PHIMAX{3.1415927};                      ///< max phi coordinate
+  static constexpr DataT GRIDSPACINGR{(RMAX - RMIN) / (Nr - 1)}; ///< grid spacing in r direction
+  static constexpr DataT GRIDSPACINGZ{(ZMAX - ZMIN) / (Nz - 1)}; ///< grid spacing in z direction
+  static constexpr DataT GRIDSPACINGPHI{PHIMAX / Nphi};          ///< grid spacing in phi direction
 };
 
 } // namespace tpc

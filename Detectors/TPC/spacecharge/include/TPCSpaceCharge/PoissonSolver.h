@@ -24,7 +24,7 @@
 #include "TPCSpaceCharge/PoissonSolverHelpers.h"
 #include "TPCSpaceCharge/RegularGrid3D.h"
 #include "TPCSpaceCharge/Vector3D.h"
-#include "CommonConstants/MathConstants.h"
+// #include "CommonConstants/MathConstants.h"
 
 namespace o2
 {
@@ -92,10 +92,11 @@ class PoissonSolver
   static void setNThreads(int nThreads) { sNThreads = nThreads; }
 
  private:
-  const RegularGrid& mGrid3D{};                                      ///< grid properties
-  inline static DataT sConvergenceError{1e-6};                       ///< Error tolerated
-  static constexpr DataT INVTWOPI = 1. / o2::constants::math::TwoPI; ///< inverse of 2*pi
-  inline static int sNThreads{4};                                    ///< number of threads which are used during some of the calculations (increasing this number has no big impact)
+  const RegularGrid& mGrid3D{};                ///< grid properties
+  inline static DataT sConvergenceError{1e-6}; ///< Error tolerated
+  // static constexpr DataT INVTWOPI = 1. / o2::constants::math::TwoPI; ///< inverse of 2*pi
+  static constexpr DataT INVTWOPI = 1. / 3.1415927; ///< inverse of 2*pi
+  inline static int sNThreads{4};                   ///< number of threads which are used during some of the calculations (increasing this number has no big impact)
 
   /// Relative error calculation: comparison with exact solution
   ///

@@ -14,6 +14,7 @@ o2_add_library(TPCSpaceCharge
                TARGETVARNAME targetName
                SOURCES src/SpaceCharge.cxx
                        src/PoissonSolver.cxx
+		       src/Dummy.cxx
                PUBLIC_LINK_LIBRARIES O2::TPCBase
                                      Vc::Vc
                                      ROOT::Core
@@ -29,6 +30,7 @@ o2_target_root_dictionary(TPCSpaceCharge
                                   include/TPCSpaceCharge/TriCubic.h
                                   include/TPCSpaceCharge/Vector.h
                                   include/TPCSpaceCharge/Vector3D.h
+			          include/TPCSpaceCharge/Dummy.h
                           LINKDEF src/TPCSpacechargeLinkDef.h)
 
 o2_add_test_root_macro(macro/calculateDistortionsCorrections.C
