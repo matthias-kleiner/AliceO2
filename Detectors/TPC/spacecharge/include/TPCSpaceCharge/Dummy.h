@@ -30,6 +30,10 @@ class Dummy
 
  private:
   int mDummy = 0;
+  static constexpr DataT DUMMY1{1. / 3.1415927};
+  constexpr DataT DUMMY2{1. / 3.1415927};
+  static constexpr DataT DUMMY3 = 1. / 3.1415927;
+
 };
 
 } // namespace tpc
