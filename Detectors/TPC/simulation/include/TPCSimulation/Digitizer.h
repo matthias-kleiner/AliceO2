@@ -123,7 +123,7 @@ class Digitizer
 
  private:
   DigitContainer mDigitContainer;            ///< Container for the Digits
-  std::unique_ptr<SC> mSpaceCharge; ///< Handler of space-charge distortions
+  std::unique_ptr<SC> mSpaceCharge;          ///< Handler of space-charge distortions
   Sector mSector = -1;                       ///< ID of the currently processed sector
   float mEventTime = 0.f;                    ///< Time of the currently processed event
   // FIXME: whats the reason for hving this static?
