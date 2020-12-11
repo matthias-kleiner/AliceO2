@@ -297,16 +297,20 @@ GPUd() bool GPUTPCGMTrackParam::Fit(const GPUTPCGMMerger* GPUrestrict() merger, 
           prop.SetTrack(this, prop.GetAlpha());
         }
         if (dEdxOut && iWay == nWays - 1 && clusters[ihit].leg == clusters[maxN - 1].leg) {
-          float qtot, qmax;
+          float qtot, qmax, relPad, relTime;
           if (merger->GetConstantMem()->ioPtrs.clustersNative == nullptr) {
             qtot = clustersXYZ[ihit].amp;
             qmax = 0;
+            relPad = 0;
+            relTime = 0;
           } else {
             const ClusterNative& cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[clusters[ihit].num];
             qtot = cl.qTot;
             qmax = cl.qMax;
+            relPad = cl.getPad() - int(cl.getPad() + 0.5f);
+            relTime = cl.getTime() - int(cl.getTime() + 0.5f);
           }
-          dEdx.fillCluster(qtot, qmax, clusters[ihit].row, mP[2], mP[3], param, merger->GetConstantMem()->calibObjects.dEdxSplines, zz);
+          dEdx.fillCluster(qtot, qmax, clusters[ihit].row, mP[2], mP[3], param, merger->GetConstantMem()->calibObjects.dEdxSplines, zz, relPad, relTime);
         }
       } else if (retVal == 2) { // cluster far away form the track
         if (allowModification) {

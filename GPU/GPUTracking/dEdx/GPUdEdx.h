@@ -33,7 +33,7 @@ class GPUdEdx
 {
  public:
   GPUd() void clear() {}
-  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, const TPCdEdxCalibrationSplines* splines, float z) {}
+  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, const TPCdEdxCalibrationSplines* splines, float z, const float relPad, const float relTime) {}
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param) {}
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param) {}
 };
@@ -45,7 +45,7 @@ class GPUdEdx
  public:
   // The driver must call clear(), fill clusters row by row outside-in, then run computedEdx() to get the result
   GPUd() void clear();
-  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, const TPCdEdxCalibrationSplines* splines, float z);
+  GPUd() void fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& param, const TPCdEdxCalibrationSplines* splines, float z, const float relPad, const float relTime);
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param);
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param);
 
@@ -105,7 +105,7 @@ GPUdi() void GPUdEdx::checkSubThresh(int roc)
   mLastROC = roc;
 }
 
-GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& GPUrestrict() param, const TPCdEdxCalibrationSplines* splines, float z)
+GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float trackSnp, float trackTgl, const GPUParam& GPUrestrict() param, const TPCdEdxCalibrationSplines* splines, float z, const float relPad, const float relTime)
 {
   if (mCount >= MAX_NCL) {
     return;
@@ -117,24 +117,25 @@ GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, float tr
     snp2 = GPUCA_MAX_SIN_PHI_LOW;
   }
   const float tgl2 = trackTgl * trackTgl;
-  float factor = CAMath::Sqrt((1 - snp2) / (1 + tgl2));
-  factor /= param.tpcGeometry.PadHeight(padRow);
-  qtot *= factor;
-  qmax *= factor;
-
   const float sec2 = 1.f / (1.f - snp2);
+
   // angleZ local dip angle: z angle - dz/dx (cm/cm)
   float angleZ = CAMath::Sqrt(tgl2 * sec2);
   if (angleZ > 3) {
     angleZ = 3;
   }
 
+  float angleY = CAMath::Sqrt(snp2 * sec2);
+  if (angleY > 2) {
+    angleY = 2; // maximum value for the splines is angleY (this could be further improved)
+  }
+
   const int region = param.tpcGeometry.GetRegion(padRow);
   z = CAMath::Abs(z);
 
   // get the correction for qMax and qTot from the splines for given angle and drift length
-  const float qMaxCorr = splines->interpolateqMax(region, angleZ, z);
-  const float qTotCorr = splines->interpolateqTot(region, angleZ, z);
+  const float qMaxCorr = splines->interpolateqMax(region, relPad, relTime, z, angleZ, angleY);
+  const float qTotCorr = splines->interpolateqTot(region, relPad, relTime, z, angleZ, angleY);
   qmax /= qMaxCorr;
   qtot /= qTotCorr;
 
