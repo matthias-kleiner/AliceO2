@@ -77,6 +77,7 @@
 - [#5168](https://github.com/AliceO2Group/AliceO2/pull/5168) 2021-01-13: DPL: increase max size of string metrics to 256 bytes by [@ktf](https://github.com/ktf)
 - [#5183](https://github.com/AliceO2Group/AliceO2/pull/5183) 2021-01-14: Adding opening and run time metrics by [@jgrosseo](https://github.com/jgrosseo)
 - [#5159](https://github.com/AliceO2Group/AliceO2/pull/5159) 2021-01-14: fix to allow iteratorAt on filtered tables by [@jgrosseo](https://github.com/jgrosseo)
+- [#5189](https://github.com/AliceO2Group/AliceO2/pull/5189) 2021-01-15: DPL: add `--forwarding-policy none` to help message by [@ktf](https://github.com/ktf)
 ## Changes in Generators
 
 - [#5114](https://github.com/AliceO2Group/AliceO2/pull/5114) 2021-01-06: Rdev evgen updates by [@preghenella](https://github.com/preghenella)
@@ -96,3 +97,4 @@
 - [#5156](https://github.com/AliceO2Group/AliceO2/pull/5156) 2021-01-12: o2-sim: Better signal propagation; small fix in jobutils by [@sawenzel](https://github.com/sawenzel)
 - [#5169](https://github.com/AliceO2Group/AliceO2/pull/5169) 2021-01-13: jobutils: exit workflows on first task error by [@sawenzel](https://github.com/sawenzel)
 - [#5172](https://github.com/AliceO2Group/AliceO2/pull/5172) 2021-01-14: Fix o2_add_dpl_workflow on Ubuntu and some other systems by [@davidrohr](https://github.com/davidrohr)
+- [#5196](https://github.com/AliceO2Group/AliceO2/pull/5196) 2021-01-15: small fix in jobutils by [@sawenzel](https://github.com/sawenzel)
