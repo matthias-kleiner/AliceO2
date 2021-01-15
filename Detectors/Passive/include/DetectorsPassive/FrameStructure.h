@@ -17,7 +17,7 @@
 #ifndef O2_PASSIVE_FRAMESTRUCTURE_H
 #define O2_PASSIVE_FRAMESTRUCTURE_H
 
-#include <FairModule.h>
+#include "DetectorsPassive/PassiveBase.h"
 
 class TGeoCompositeShape;
 
@@ -26,13 +26,13 @@ namespace o2
 namespace passive
 {
 // class supposed to provide the frame support structure common to TOF and TRD
-class FrameStructure : public FairModule
+class FrameStructure : public PassiveBase
 {
  public:
-  FrameStructure(const char* name, const char* title = "FrameStruct");
+  FrameStructure(const char* name, const char* title = "FRAME");
 
   /**  default constructor    */
-  FrameStructure() = default;
+  FrameStructure();
 
   /**  destructor     */
   ~FrameStructure() override = default;
@@ -47,6 +47,7 @@ class FrameStructure : public FairModule
   bool hasHoles() const { return mWithHoles; }
   // set if to be constructed with/without holes
   void setHoles(bool flag) { mWithHoles = true; }
+
  private:
   /**  copy constructor (used in MT mode only)   */
   FrameStructure(const FrameStructure& rhs);
@@ -63,14 +64,14 @@ class FrameStructure : public FairModule
     true; //!< if holes are enabled (just a central place for other to query; no influence on frame structure)
 
   // medium IDs for the Frame
-  int mAirMedID = -1; //!
+  int mAirMedID = -1;   //!
   int mSteelMedID = -1; //!
-  int mAluMedID = -1; //!
-  int mG10MedID = -1; //!
+  int mAluMedID = -1;   //!
+  int mG10MedID = -1;   //!
 
   ClassDefOverride(FrameStructure, 1);
 };
-}
-}
+} // namespace passive
+} // namespace o2
 
 #endif

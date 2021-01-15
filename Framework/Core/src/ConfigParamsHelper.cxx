@@ -17,31 +17,31 @@
 
 namespace bpo = boost::program_options;
 
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
 /// this creates the boost program options description from the ConfigParamSpec
 /// taking the VariantType into account
 void ConfigParamsHelper::populateBoostProgramOptions(
-    bpo::options_description &options,
-    const std::vector<ConfigParamSpec> &specs,
-    bpo::options_description vetos
-  ) {
+  bpo::options_description& options,
+  const std::vector<ConfigParamSpec>& specs,
+  bpo::options_description vetos)
+{
   auto proxy = options.add_options();
-  for (auto & spec : specs) {
+  for (auto const& spec : specs) {
     // skip everything found in the veto definition
-    if (vetos.find_nothrow(spec.name, false)) continue;
-    const char *name = spec.name.c_str();
-    const char *help = spec.help.c_str();
+    if (vetos.find_nothrow(spec.name, false) != nullptr) {
+      continue;
+    }
 
-    switch(spec.type) {
+    switch (spec.type) {
       // FIXME: Should we handle int and size_t diffently?
       // FIXME: We should probably raise an error if the type is unknown
       case VariantType::Int:
-      case VariantType::Int64:
         addConfigSpecOption<VariantType::Int>(spec, options);
+        break;
+      case VariantType::Int64:
+        addConfigSpecOption<VariantType::Int64>(spec, options);
         break;
       case VariantType::Float:
         addConfigSpecOption<VariantType::Float>(spec, options);
@@ -54,6 +54,30 @@ void ConfigParamsHelper::populateBoostProgramOptions(
         break;
       case VariantType::Bool:
         addConfigSpecOption<VariantType::Bool>(spec, options);
+        break;
+      case VariantType::ArrayInt:
+        addConfigSpecOption<VariantType::ArrayInt>(spec, options);
+        break;
+      case VariantType::ArrayFloat:
+        addConfigSpecOption<VariantType::ArrayFloat>(spec, options);
+        break;
+      case VariantType::ArrayDouble:
+        addConfigSpecOption<VariantType::ArrayDouble>(spec, options);
+        break;
+      case VariantType::ArrayBool:
+        addConfigSpecOption<VariantType::ArrayBool>(spec, options);
+        break;
+      case VariantType::ArrayString:
+        addConfigSpecOption<VariantType::ArrayString>(spec, options);
+        break;
+      case VariantType::MatrixInt:
+        addConfigSpecOption<VariantType::MatrixInt>(spec, options);
+        break;
+      case VariantType::MatrixFloat:
+        addConfigSpecOption<VariantType::MatrixFloat>(spec, options);
+        break;
+      case VariantType::MatrixDouble:
+        addConfigSpecOption<VariantType::MatrixDouble>(spec, options);
         break;
       case VariantType::Unknown:
       case VariantType::Empty:
@@ -72,10 +96,11 @@ bool ConfigParamsHelper::dpl2BoostOptions(const std::vector<ConfigParamSpec>& sp
   for (const auto& configSpec : spec) {
     // skip everything found in the veto definition
     try {
-      if (vetos.find_nothrow(configSpec.name, false))
+      if (vetos.find_nothrow(configSpec.name, false) != nullptr) {
         continue;
+      }
     } catch (boost::program_options::ambiguous_option& e) {
-      for (auto& alternative : e.alternatives()) {
+      for (auto const& alternative : e.alternatives()) {
         std::cerr << alternative << std::endl;
       }
       throw;
@@ -85,18 +110,29 @@ bool ConfigParamsHelper::dpl2BoostOptions(const std::vector<ConfigParamSpec>& sp
     std::stringstream defaultValue;
     defaultValue << configSpec.defaultValue;
     if (configSpec.type != VariantType::Bool) {
-      options.add_options()(configSpec.name.c_str(),
-                            bpo::value<std::string>()->default_value(defaultValue.str().c_str()),
-                            configSpec.help.c_str());
+      if (configSpec.defaultValue.type() != VariantType::Empty) {
+        options.add_options()(configSpec.name.c_str(),
+                              bpo::value<std::string>()->default_value(defaultValue.str()),
+                              configSpec.help.c_str());
+      } else {
+        options.add_options()(configSpec.name.c_str(),
+                              bpo::value<std::string>(),
+                              configSpec.help.c_str());
+      }
     } else {
-      options.add_options()(configSpec.name.c_str(),
-                            bpo::value<bool>()->zero_tokens()->default_value(configSpec.defaultValue.get<bool>()),
-                            configSpec.help.c_str());
+      if (configSpec.defaultValue.type() != VariantType::Empty) {
+        options.add_options()(configSpec.name.c_str(),
+                              bpo::value<bool>()->zero_tokens()->default_value(configSpec.defaultValue.get<bool>()),
+                              configSpec.help.c_str());
+      } else {
+        options.add_options()(configSpec.name.c_str(),
+                              bpo::value<bool>()->zero_tokens(),
+                              configSpec.help.c_str());
+      }
     }
   }
 
   return haveOption;
 }
 
-}
-}
+} // namespace o2::framework

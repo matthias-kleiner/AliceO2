@@ -22,13 +22,13 @@ namespace o2
 {
 namespace its
 {
-namespace GPU
+namespace gpu
 {
 
-namespace Utils
+namespace utils
 {
 
-namespace Host
+namespace host
 {
 
 #ifdef __CUDACC__
@@ -47,19 +47,19 @@ void gpuMemset(void*, int, int);
 void gpuMemcpyHostToDevice(void*, const void*, int);
 void gpuMemcpyHostToDeviceAsync(void*, const void*, int, Stream&);
 void gpuMemcpyDeviceToHost(void*, const void*, int);
-void gpuStartProfiler();
-void gpuStopProfiler();
-}
+// void gpuStartProfiler();
+// void gpuStopProfiler();
+} // namespace host
 
-namespace Device
+namespace device
 {
 GPUd() int getLaneIndex();
 GPUd() int shareToWarp(const int, const int);
 GPUd() int gpuAtomicAdd(int*, const int);
-}
-}
-}
-}
-}
+} // namespace device
+} // namespace Utils
+} // namespace gpu
+} // namespace its
+} // namespace o2
 
 #endif /* TRACKINGITSU_INCLUDE_GPU_UTILS_H_ */

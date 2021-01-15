@@ -11,14 +11,14 @@
 #ifndef ALICEO2_PASSIVE_DIPOLE_H
 #define ALICEO2_PASSIVE_DIPOLE_H
 
-#include "FairModule.h"
+#include "DetectorsPassive/PassiveBase.h"
 #include "Rtypes.h"
 
 namespace o2
 {
 namespace passive
 {
-class Dipole : public FairModule
+class Dipole : public PassiveBase
 {
  public:
   Dipole(const char* name, const char* Title = "ALICE Dipole");
@@ -36,9 +36,9 @@ class Dipole : public FairModule
   void createMaterials();
   void createSpectrometerDipole();
 
-  ClassDefOverride(o2::passive::Dipole, 1)
+  ClassDefOverride(o2::passive::Dipole, 1);
 };
-}
-}
+} // namespace passive
+} // namespace o2
 
 #endif // DIPOLE_H

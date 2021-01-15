@@ -8,8 +8,8 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include <SimConfig/ConfigurableParam.h>
-#include <SimConfig/ConfigurableParamHelper.h>
+#include <CommonUtils/ConfigurableParam.h>
+#include <CommonUtils/ConfigurableParamHelper.h>
 #include <SimConfig/SimConfig.h>
 #include <iostream>
 #include <TInterpreter.h>
@@ -21,7 +21,7 @@ class BazParam : public o2::conf::ConfigurableParamHelper<BazParam>
 
  private:
   double mGasDensity = 2.0;
-  std::array<int, 3> mPos = { 1, 2, 3 };
+  std::array<int, 3> mPos = {1, 2, 3};
 
   O2ParamDef(BazParam, "Baz");
 };

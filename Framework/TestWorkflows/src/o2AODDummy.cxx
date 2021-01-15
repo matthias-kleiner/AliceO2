@@ -7,6 +7,7 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
+#include "Framework/TableBuilder.h"
 #include "Framework/runDataProcessing.h"
 
 #include <ROOT/RDataFrame.hxx>
@@ -26,8 +27,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& specs)
         // Dangling inputs of type AOD will be automatically picked up
         // by DPL and an extra reader device will be instanciated to
         // read them.
-        InputSpec{ "TrackPar", "AOD", "TRACKPAR" },
-        InputSpec{ "TrackParCov", "AOD", "TRACKPARCOV" },
+        InputSpec{"TrackPar", "AOD", "TRACKPAR"},
+        InputSpec{"TrackParCov", "AOD", "TRACKPARCOV"},
         // NOTE: Not needed right now. Uncomment if you want to use them
         //        InputSpec{ "TrackExtra", "AOD", "TRACKEXTRA" },
         //        InputSpec{ "Calo", "AOD", "CALO" },
@@ -58,7 +59,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& specs)
             auto source2 = std::make_unique<ROOT::RDF::RArrowDS>(s->asArrowTable(), std::vector<std::string>{});
             ROOT::RDataFrame rdf2(std::move(source2));
           };
-        } } }
-  };
+        }}}};
   return workflow;
 }

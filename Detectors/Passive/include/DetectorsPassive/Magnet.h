@@ -24,14 +24,14 @@
 #ifndef ALICEO2_PASSIVE_MAGNET_H
 #define ALICEO2_PASSIVE_MAGNET_H
 
-#include "FairModule.h" // for FairModule
+#include "DetectorsPassive/PassiveBase.h"
 #include "Rtypes.h"     // for Magnet::Class, Bool_t, etc
 
 namespace o2
 {
 namespace passive
 {
-class Magnet : public FairModule
+class Magnet : public PassiveBase
 {
  public:
   Magnet(const char* name, const char* Title = "ALICE Magnet");
@@ -47,9 +47,9 @@ class Magnet : public FairModule
   Magnet(const Magnet& orig);
   Magnet& operator=(const Magnet&);
 
-  ClassDefOverride(o2::passive::Magnet, 1)
+  ClassDefOverride(o2::passive::Magnet, 1);
 };
-}
-}
+} // namespace passive
+} // namespace o2
 
 #endif // MAGNET_H

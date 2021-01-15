@@ -1,0 +1,32 @@
+{
+  "dataSamplingPolicies": [
+    {
+      "id": "simpleQcTask",
+      "active": "true",
+      "machines": [],
+      "query": "TPC_CLUSTERS_S:TPC/CLUSTERS;TPC_CLUSTERS_P_S/TPC/CLUSTERS_P",
+      "samplingConditions": [
+        {
+          "condition": "random",
+          "fraction": "0.1",
+          "seed": "22222"
+        }
+      ],
+      "blocking": "false"
+    },
+    {
+      "id": "rootQcTask",
+      "active": "true",
+      "machines": [],
+      "query": "TST_HISTOS_S:TST/HISTOS/0;TST_STRING_S/TST/STRING/0",
+      "samplingConditions": [
+        {
+          "condition": "random",
+          "fraction": "0.2",
+          "seed": "3333"
+        }
+      ],
+      "blocking": "false"
+    }
+  ]
+}

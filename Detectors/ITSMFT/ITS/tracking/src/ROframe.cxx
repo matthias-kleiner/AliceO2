@@ -21,27 +21,31 @@ namespace o2
 namespace its
 {
 
-ROframe::ROframe(const int ROframeId) : mROframeId{ ROframeId }
+ROframe::ROframe(int ROframeId, int nLayers) : mROframeId{ROframeId}
 {
+  mClusters.resize(nLayers);
+  mTrackingFrameInfo.resize(nLayers);
+  mClusterLabels.resize(nLayers);
+  mClusterExternalIndices.resize(nLayers);
 }
 
 void ROframe::addPrimaryVertex(const float xCoordinate, const float yCoordinate, const float zCoordinate)
 {
-  mPrimaryVertices.emplace_back(float3{ xCoordinate, yCoordinate, zCoordinate });
+  mPrimaryVertices.emplace_back(float3{xCoordinate, yCoordinate, zCoordinate});
 }
 
 void ROframe::addPrimaryVertices(std::vector<Vertex> vertices)
 {
   for (Vertex& vertex : vertices) {
-    mPrimaryVertices.emplace_back(float3{ vertex.getX(), vertex.getY(), vertex.getZ() });
+    mPrimaryVertices.emplace_back(float3{vertex.getX(), vertex.getY(), vertex.getZ()});
   }
 }
 
 void ROframe::printPrimaryVertices() const
 {
-  const int verticesNum{ static_cast<int>(mPrimaryVertices.size()) };
+  const int verticesNum{static_cast<int>(mPrimaryVertices.size())};
 
-  for (int iVertex{ 0 }; iVertex < verticesNum; ++iVertex) {
+  for (int iVertex{0}; iVertex < verticesNum; ++iVertex) {
 
     const float3& currentVertex = mPrimaryVertices[iVertex];
     std::cout << "-1\t" << currentVertex.x << "\t" << currentVertex.y << "\t" << currentVertex.z << std::endl;
@@ -50,9 +54,10 @@ void ROframe::printPrimaryVertices() const
 
 int ROframe::getTotalClusters() const
 {
-  size_t totalClusters{ 0 };
-  for (auto& clusters : mClusters)
+  size_t totalClusters{0};
+  for (auto& clusters : mClusters) {
     totalClusters += clusters.size();
+  }
   return int(totalClusters);
 }
 } // namespace its

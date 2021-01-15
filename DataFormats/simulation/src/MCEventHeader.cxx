@@ -25,9 +25,11 @@ void MCEventHeader::Reset()
 {
   /** reset **/
 
+  FairMCEventHeader::Reset();
+
+  clearInfo();
   mEmbeddingFileName.clear();
   mEmbeddingEventIndex = 0;
-  FairMCEventHeader::Reset();
 }
 
 /*****************************************************************/
@@ -36,4 +38,4 @@ void MCEventHeader::Reset()
 } /* namespace dataformats */
 } /* namespace o2 */
 
-ClassImp(o2::dataformats::MCEventHeader)
+ClassImp(o2::dataformats::MCEventHeader);

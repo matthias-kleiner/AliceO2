@@ -40,6 +40,9 @@ class Detector : public o2::base::DetImpl<Detector>
 
   void ConstructGeometry() override;
 
+  /// Add alignable top volumes
+  void addAlignableVolumes() const override;
+
   std::vector<o2::mch::Hit>* getHits(int);
 
   void EndOfEvent() override;
@@ -52,7 +55,7 @@ class Detector : public o2::base::DetImpl<Detector>
 
   bool setHits(int i, std::vector<o2::mch::Hit>* ptr);
 
-  o2::mch::Stepper* mStepper{ nullptr }; //!
+  o2::mch::Stepper* mStepper{nullptr}; //!
 
   template <typename Det>
   friend class o2::base::DetImpl;

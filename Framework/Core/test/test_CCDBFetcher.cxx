@@ -12,6 +12,7 @@
 #include "Framework/ControlService.h"
 
 #include <chrono>
+#include <thread>
 
 using namespace o2::framework;
 using namespace o2::header;
@@ -22,9 +23,9 @@ WorkflowSpec defineDataProcessing(ConfigContext const&)
   return WorkflowSpec{
     {
       "A",
-      { InputSpec{ "somecondition", "TST", "FOO", 0, Lifetime::Condition },
-        InputSpec{ "sometimer", "TST", "BAR", 0, Lifetime::Timer } },
-      { OutputSpec{ "TST", "A1", 0, Lifetime::Timeframe } },
+      {InputSpec{"somecondition", "TST", "FOO", 0, Lifetime::Condition},
+       InputSpec{"sometimer", "TST", "BAR", 0, Lifetime::Timer}},
+      {OutputSpec{"TST", "A1", 0, Lifetime::Timeframe}},
       AlgorithmSpec{
         adaptStateless([](DataAllocator& outputs, InputRecord& inputs, ControlService& control) {
           std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -34,11 +35,10 @@ WorkflowSpec defineDataProcessing(ConfigContext const&)
             LOG(ERROR) << "Wrong size for condition payload (expected " << 1024 << ", found " << header->payloadSize;
           }
           header->payloadSize;
-          auto aData = outputs.make<int>(Output{ "TST", "A1", 0 }, 1);
-          control.readyToQuit(true);
-        }) },
+          auto& aData = outputs.make<int>(Output{"TST", "A1", 0}, 1);
+          control.readyToQuit(QuitRequest::All);
+        })},
       Options{
-        { "test-option", VariantType::String, "test", { "A test option" } } },
-    }
-  };
+        {"test-option", VariantType::String, "test", {"A test option"}}},
+    }};
 }

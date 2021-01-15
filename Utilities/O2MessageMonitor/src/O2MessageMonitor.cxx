@@ -45,8 +45,9 @@ void O2MessageMonitor::InitTask()
   mIterations = GetConfig()->GetValue<int>("n");
   mPayload = GetConfig()->GetValue<std::string>("payload");
   std::string tmp = GetConfig()->GetValue<std::string>("name");
-  if (!tmp.empty())
+  if (!tmp.empty()) {
     mName = tmp;
+  }
   mLimitOutputCharacters = GetConfig()->GetValue<int>("limit");
 }
 
@@ -69,7 +70,7 @@ void O2MessageMonitor::Run()
 
     // maybe send a request
     if (type == "req") {
-      addDataBlock(message, { dataResource, DataHeader{ gDataDescriptionInfo, gDataOriginAny, DataHeader::SubSpecificationType{ 0 } } },
+      addDataBlock(message, {dataResource, DataHeader{gDataDescriptionInfo, gDataOriginAny, DataHeader::SubSpecificationType{0}}},
                    NewSimpleMessageFor("data", 0, mPayload));
       Send(message, "data");
       message.fParts.clear();
@@ -87,7 +88,7 @@ void O2MessageMonitor::Run()
     // maybe a reply message
     if (type == "rep") {
       o2::base::addDataBlock(message,
-                             { dataResource, DataHeader{ gDataDescriptionInfo, gDataOriginAny, DataHeader::SubSpecificationType{ 0 } } },
+                             {dataResource, DataHeader{gDataDescriptionInfo, gDataOriginAny, DataHeader::SubSpecificationType{0}}},
                              NewSimpleMessageFor("data", 0, ""));
       Send(message, "data");
     }

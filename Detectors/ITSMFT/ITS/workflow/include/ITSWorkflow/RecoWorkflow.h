@@ -15,14 +15,20 @@
 
 #include "Framework/WorkflowSpec.h"
 
+#include "GPUO2Interface.h"
+#include "GPUReconstruction.h"
+#include "GPUChainITS.h"
+
 namespace o2
 {
 namespace its
 {
 
-namespace RecoWorkflow
+namespace reco_workflow
 {
-framework::WorkflowSpec getWorkflow(bool useMC);
+
+framework::WorkflowSpec getWorkflow(bool useMC, bool useCAtracker, bool async, o2::gpu::GPUDataTypes::DeviceType dType = o2::gpu::GPUDataTypes::DeviceType::CPU,
+                                    bool upstreamDigits = false, bool upstreamClusters = false, bool disableRootOutput = false, bool eencode = false);
 }
 
 } // namespace its

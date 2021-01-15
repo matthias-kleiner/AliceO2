@@ -12,8 +12,8 @@
 #define ALICEO2_ITSMFTDPLDIGITIZERPARAM_H_
 
 #include "DetectorsCommonDataFormats/DetID.h"
-#include "SimConfig/ConfigurableParam.h"
-#include "SimConfig/ConfigurableParamHelper.h"
+#include "CommonUtils/ConfigurableParam.h"
+#include "CommonUtils/ConfigurableParamHelper.h"
 #include <string_view>
 
 namespace o2
@@ -45,7 +45,7 @@ struct DPLDigitizerParam : public o2::conf::ConfigurableParamHelper<DPLDigitizer
   O2ParamDef(DPLDigitizerParam, getParamName().data());
 
  private:
-  static constexpr std::string_view ParamName[2] = { "ITSDigitizerParam", "MFTDigitizerParam" };
+  static constexpr std::string_view ParamName[2] = {"ITSDigitizerParam", "MFTDigitizerParam"};
 };
 
 template <int N>

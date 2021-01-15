@@ -9,11 +9,44 @@
 // or submit itself to any jurisdiction.
 #include "Framework/Variant.h"
 #include <iostream>
+#include <sstream>
 
-namespace o2
+namespace o2::framework
 {
-namespace framework
+
+namespace
 {
+template <typename T>
+void printArray(std::ostream& oss, T* array, size_t size)
+{
+  oss << variant_array_symbol<T>::symbol << "[";
+  oss << array[0];
+  for (auto i = 1U; i < size; ++i) {
+    oss << ", " << array[i];
+  }
+  oss << "]";
+}
+
+template <typename T>
+void printMatrix(std::ostream& oss, Array2D<T> m)
+{
+  oss << variant_array_symbol<T>::symbol << "[[";
+  oss << m(0, 0);
+  for (auto j = 1U; j < m.cols; ++j) {
+    oss << ", " << m(0, j);
+  }
+  oss << "]";
+  for (auto i = 1U; i < m.rows; ++i) {
+    oss << ", [";
+    oss << m(i, 0);
+    for (auto j = 1U; j < m.cols; ++j) {
+      oss << ", " << m(i, j);
+    }
+    oss << "]";
+  }
+  oss << "]";
+}
+} // namespace
 
 std::ostream& operator<<(std::ostream& oss, Variant const& val)
 {
@@ -36,6 +69,30 @@ std::ostream& operator<<(std::ostream& oss, Variant const& val)
     case VariantType::Bool:
       oss << val.get<bool>();
       break;
+    case VariantType::ArrayInt:
+      printArray<int>(oss, val.get<int*>(), val.size());
+      break;
+    case VariantType::ArrayFloat:
+      printArray<float>(oss, val.get<float*>(), val.size());
+      break;
+    case VariantType::ArrayDouble:
+      printArray<double>(oss, val.get<double*>(), val.size());
+      break;
+    case VariantType::ArrayBool:
+      printArray<bool>(oss, val.get<bool*>(), val.size());
+      break;
+    case VariantType::ArrayString:
+      printArray<std::string>(oss, val.get<std::string*>(), val.size());
+      break;
+    case VariantType::MatrixInt:
+      printMatrix<int>(oss, val.get<Array2D<int>>());
+      break;
+    case VariantType::MatrixFloat:
+      printMatrix<float>(oss, val.get<Array2D<float>>());
+      break;
+    case VariantType::MatrixDouble:
+      printMatrix<double>(oss, val.get<Array2D<double>>());
+      break;
     case VariantType::Empty:
       break;
     default:
@@ -45,5 +102,11 @@ std::ostream& operator<<(std::ostream& oss, Variant const& val)
   return oss;
 }
 
-} // namespace framework
-} // namespace o2
+std::string Variant::asString() const
+{
+  std::stringstream ss;
+  ss << *this;
+  return ss.str();
+}
+
+} // namespace o2::framework

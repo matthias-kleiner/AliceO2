@@ -1,135 +1,172 @@
-# **************************************************************************
-# * Copyright(c) 1998-2014, ALICE Experiment at CERN, All rights reserved. *
-# *                                                                        *
-# * Author: The ALICE Off-line Project.                                    *
-# * Contributors are mentioned in the code where appropriate.              *
-# *                                                                        *
-# * Permission to use, copy, modify and distribute this software and its   *
-# * documentation strictly for non-commercial purposes is hereby granted   *
-# * without fee, provided that the above copyright notice appears in all   *
-# * copies and that both the copyright notice and this permission notice   *
-# * appear in the supporting documentation. The authors make no claims     *
-# * about the suitability of this software for any purpose. It is          *
-# * provided "as is" without express or implied warranty.                  *
-# **************************************************************************
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-cmake_minimum_required(VERSION 3.9)
+set(MODULE GPUTrackingCUDA)
 
-# Module
-if(ALIGPU_BUILD_TYPE STREQUAL "O2")
-    set(MODULE O2GPUTrackingCUDA)
-elseif(ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
-    set(MODULE GPUTrackingCUDA)
+if(DEFINED CUDA_COMPUTETARGET)
+  set(TMP_TARGET "(Compute Target ${CUDA_COMPUTETARGET})")
 endif()
-set(DEFINITIONS ${DEFINITIONS} GPUCA_GPULIBRARY=CUDA)
+message(STATUS "Building GPUTracking with CUDA support ${TMP_TARGET}")
 
-option(CUDA_GCCBIN "GCC binary to use for compiling host part of CUDA code for systems with multiple GCC versions installed"   OFF)
+set(SRCS GPUReconstructionCUDA.cu)
+set(HDRS GPUReconstructionCUDA.h GPUReconstructionCUDAInternals.h GPUReconstructionCUDADef.h GPUReconstructionCUDAIncludes.h)
 
-get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
-if (NOT CUDA IN_LIST LANGUAGES) #We need to handle finding CUDA in AliRoot case
-    if(CMAKE_BUILD_TYPE STREQUAL "DEBUG")
-      set(CMAKE_CUDA_FLAGS "-Xptxas -O0 -Xcompiler -O0")
-    else()
-      set(CMAKE_CUDA_FLAGS "-Xptxas -O4 -Xcompiler -O4 -use_fast_math")
-    endif()
-    if(CUDA_GCCBIN)
-      message(STATUS "Using as CUDA GCC version: ${CUDA_GCCBIN}")
-      set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --compiler-bindir ${CUDA_GCCBIN}")
-    endif()
-    enable_language(CUDA)
-    if(CUDA_GCCBIN)
-      #Ugly hack!: Otherwise CUDA includes unwanted old GCC libraries leading to version conflicts
-      set(CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES "$ENV{CUDA_PATH}/lib64")
-    endif()
-    set(CMAKE_CUDA_STANDARD 14)
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr -DENABLE_CUDA --compiler-options \"${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}} -std=c++14\"")
-endif()
+# -------------------------------- Prepare RTC -------------------------------------------------------
+if(NOT ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
+  enable_language(ASM)
+  if(ALIGPU_BUILD_TYPE STREQUAL "O2")
+    set(defineIncludeSrc "O2::${MODULE}")
+  else()
+    set(defineIncludeSrc "${MODULE}")
+  endif()
+  set(CURTC_DEFINES "-D$<JOIN:$<TARGET_PROPERTY:${defineIncludeSrc},COMPILE_DEFINITIONS>,$<SEMICOLON>-D>"
+                    -DGPUCA_GPUCODE_GENRTC
+  )
+  set(CURTC_INCLUDES "-I$<JOIN:$<TARGET_PROPERTY:${defineIncludeSrc},INCLUDE_DIRECTORIES>,$<SEMICOLON>-I>"
+                    -I${CMAKE_SOURCE_DIR}/Detectors/Base/src
+                    -I${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
+  )
+  if(ALIGPU_BUILD_TYPE STREQUAL "O2")
+    set(CURTC_INCLUDES ${CURTC_INCLUDES} "-I$<JOIN:$<TARGET_PROPERTY:O2::ITStrackingCUDA,INCLUDE_DIRECTORIES>,$<SEMICOLON>-I>")
+  endif()
+  #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -keep")
 
-#Another ugly hack!: nvcc dies due to O2 link flags, so we strip them for device linkage
-set(CMAKE_CUDA_DEVICE_LINK_LIBRARY "<CMAKE_CUDA_COMPILER> <LANGUAGE_COMPILE_FLAGS> -Xcompiler=-fPIC -Wno-deprecated-gpu-targets -shared -dlink <OBJECTS> -o <TARGET>")
+  set(CUDARTC_FLAGS "${CMAKE_CUDA_FLAGS} ${CMAKE_CUDA_FLAGS_${CMAKE_BUILD_TYPE}} -std=c++${CMAKE_CUDA_STANDARD}")
+  if(CUDA_COMPUTETARGET)
+      set(CUDARTC_FLAGS "${CUDARTC_FLAGS} -gencode arch=compute_${CUDA_COMPUTETARGET},code=sm_${CUDA_COMPUTETARGET}")
+      set(RTC_CUDA_ARCH "${CUDA_COMPUTETARGET}0")
+  else()
+      set(RTC_CUDA_ARCH "750")
+  endif()
+  separate_arguments(CUDARTC_FLAGS)
+  
+  # convenience variables
+  if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
+    get_filename_component(GPUDIR ${CMAKE_SOURCE_DIR}/../ ABSOLUTE)
+  else()
+    set(GPUDIR ${CMAKE_SOURCE_DIR}/GPU/GPUTracking)
+  endif()
+  set(CURTC_SRC ${GPUDIR}/Base/cuda/GPUReconstructionCUDArtc.cu)
+  set(CURTC_BIN ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionCUDArtc)
 
-get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
-if (NOT CUDA IN_LIST LANGUAGES)
-    message(FATAL_ERROR "CMake could not find CUDA (${LANGUAGES})")
-endif()
-message( STATUS "Building GPUTracking with CUDA support" )
-
-#for convenience
-set(GPUDIR ${CMAKE_SOURCE_DIR}/GPU/GPUTracking)
-
-# Module include folder
-include_directories(${GPUDIR}/Base/cuda)
-
-# Additional include folders in alphabetical order except ROOT
-include_directories(SYSTEM ${ROOT_INCLUDE_DIR})
-if(ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
-    include_directories(${CMAKE_SOURCE_DIR}/HLT/BASE)
-else() #if we do not build for AliRoot, for the time being we still need some dummy headers for some definitions
-    include_directories(${GPUDIR}/HLTHeaders ${GPUDIR}/Standalone/include)
-endif()
-if(ALIGPU_BUILD_TYPE STREQUAL "O2") #We need to add src dirs of O2 to include cxx files for CUDA compilation
-    include_directories(${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src)
-    include_directories(${CMAKE_SOURCE_DIR}/Detectors/Base/src)
-endif()
-
-# Sources in alphabetical order
-set(SRCS
-    GPUReconstructionCUDA.cu
-   )
-
-# Headers from sources
-set(CINTHDRS
-    GPUReconstructionCUDA.h
-    )
-
-set(HDRS
-    ${CINTHDRS}
-    GPUReconstructionCUDAInternals.h
+  # cmake-format: off
+  add_custom_command(
+      OUTPUT ${CURTC_BIN}.src
+      COMMAND cat ${GPUDIR}/Base/cuda/GPUReconstructionCUDAIncludes.h > ${CURTC_BIN}.src
+      COMMAND ${CMAKE_CXX_COMPILER} ${CURTC_DEFINES} ${CURTC_INCLUDES} -std=c++${CMAKE_CUDA_STANDARD} -D__CUDA_ARCH__=${RTC_CUDA_ARCH} -D__CUDACC__ -x c++ -E ${CURTC_SRC} >> ${CURTC_BIN}.src
+      MAIN_DEPENDENCY ${CURTC_SRC}
+      IMPLICIT_DEPENDS CXX ${CURTC_SRC}
+      COMMAND_EXPAND_LISTS
+  )
+  
+  add_custom_command(
+      OUTPUT ${CURTC_BIN}.src.S
+      COMMAND cat ${GPUDIR}/Standalone/makefiles/include.S | sed "s/FILENAMEMOD/_curtc_GPUReconstructionCUDArtc_cu_src/g" | sed "s,FILENAMENORMAL,${CURTC_BIN}.src,g" > ${CURTC_BIN}.src.S
+      MAIN_DEPENDENCY ${GPUDIR}/Standalone/makefiles/include.S
   )
 
-foreach (def ${DEFINITIONS})
-  add_definitions(-D${def})
-endforeach()
-
-#Default cmake build script for AliRoot
-if(ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
-    # Generate the dictionary
-    # It will create G_ARG1.cxx and G_ARG1.h / ARG1 = function first argument
-    get_directory_property(incdirs INCLUDE_DIRECTORIES)
-    generate_dictionary("${MODULE}" "" "${CINTHDRS}" "${incdirs}")
-
-    # Generate the ROOT map
-    # Dependecies
-    generate_rootmap("${MODULE}" "" "")
-
-    # Add a library to the project using the specified source files
-    add_library_tested(${MODULE} SHARED ${SRCS} G__${MODULE}.cxx)
-    #CUDA run-time and driver
-    target_link_libraries(${MODULE} GPUTracking)
-
-    # Additional compilation flags
-    set_target_properties(${MODULE} PROPERTIES COMPILE_FLAGS "")
-
-    # Installation
-    install(TARGETS ${MODULE}
-            ARCHIVE DESTINATION lib
-            LIBRARY DESTINATION lib)
-
-    install(FILES ${HDRS} DESTINATION include)
+  add_custom_command(
+      OUTPUT ${CURTC_BIN}.command
+      COMMAND echo -n "${CMAKE_CUDA_COMPILER} ${CUDARTC_FLAGS} ${CURTC_DEFINES}" > ${CURTC_BIN}.command
+      COMMAND_EXPAND_LISTS
+      VERBATIM
+  )
+  
+  add_custom_command(
+      OUTPUT ${CURTC_BIN}.command.S
+      COMMAND cat ${GPUDIR}/Standalone/makefiles/include.S | sed "s/FILENAMEMOD/_curtc_GPUReconstructionCUDArtc_cu_command/g" | sed "s,FILENAMENORMAL,${CURTC_BIN}.command,g" > ${CURTC_BIN}.command.S
+      MAIN_DEPENDENCY ${GPUDIR}/Standalone/makefiles/include.S
+      DEPENDS ${CURTC_BIN}.command
+  )
+  # cmake-format: on
+  
+  # make cmake compile the assembler file, add proper dependency on included
+  # binary code
+  set_source_files_properties(
+    ${CURTC_BIN}.src.S
+    PROPERTIES
+    LANGUAGE
+    ASM
+    OBJECT_DEPENDS
+    "${CURTC_BIN}.src;${GPUDIR}/Standalone/makefiles/include.S")
+    
+  set_source_files_properties(
+    ${CURTC_BIN}.command.S
+    PROPERTIES
+    LANGUAGE
+    ASM
+  )
+  
+  set(SRCS ${SRCS} ${CURTC_BIN}.src.S ${CURTC_BIN}.command.S)
 endif()
+# -------------------------------- End RTC -------------------------------------------------------
 
-#Default cmake build script for O2
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
-    set(LIBRARY_NAME ${MODULE})
-    set(BUCKET_NAME GPUTrackingCUDA_bucket)
+  o2_add_library(
+    ${MODULE}
+    SOURCES ${SRCS}
+    PRIVATE_INCLUDE_DIRECTORIES
+      ${CMAKE_SOURCE_DIR}/Detectors/Base/src
+      ${CMAKE_SOURCE_DIR}/Detectors/TRD/base/src
+      ${CMAKE_SOURCE_DIR}/DataFormats/Reconstruction/src
+    PUBLIC_LINK_LIBRARIES O2::GPUTracking O2::ITStrackingCUDA
+    TARGETVARNAME targetName)
 
-    O2_GENERATE_LIBRARY()
-    install(FILES ${HDRS} DESTINATION include/GPU)
+  target_compile_definitions(
+    ${targetName} PUBLIC $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
 
-    target_link_libraries(${MODULE} ${CUDA_LIBRARIES} O2GPUTracking)
-    set_target_properties(${MODULE} PROPERTIES LINKER_LANGUAGE CXX)
+  set_target_properties(${targetName} PROPERTIES LINKER_LANGUAGE CXX)
+
+  install(FILES ${HDRS} DESTINATION include/GPU)
 endif()
 
-#Another hack, the above hack removes also the CUDA libraries that are actually needed...
-target_link_libraries(${MODULE} "-lcudart -lcuda -lcudadevrt")
+if(ALIGPU_BUILD_TYPE STREQUAL "ALIROOT")
+  set(targetName Ali${MODULE})
+  # Generate the dictionary
+  get_directory_property(incdirs INCLUDE_DIRECTORIES)
+  generate_dictionary("${targetName}" "" "GPUReconstructionCUDA.h"
+                      "${incdirs} .")
+
+  # Generate the ROOT map Dependecies
+  generate_rootmap("${targetName}" "" "")
+
+  # Add a library to the project using the specified source files
+  add_library_tested(${targetName} SHARED ${SRCS} G__${targetName}.cxx)
+  # CUDA run-time and driver
+  target_link_libraries(${targetName} PUBLIC AliGPUTracking)
+
+  # Additional compilation flags
+  set_target_properties(${targetName} PROPERTIES COMPILE_FLAGS "")
+
+  # Installation
+  install(TARGETS ${targetName} ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
+
+  install(FILES ${HDRS} DESTINATION include)
+
+  
+endif()
+
+if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
+  add_library(${MODULE} SHARED ${SRCS})
+  target_link_libraries(${MODULE} PUBLIC GPUTracking)
+  set(targetName ${MODULE})
+  install(TARGETS GPUTrackingCUDA)
+endif()
+
+# Since
+target_link_libraries(${targetName} PRIVATE cuda cudart nvrtc)
+target_compile_definitions(${targetName} PUBLIC GPUCA_GPULIBRARY=CUDA)
+if(CUDA_COMPUTETARGET AND CUDA_COMPUTETARGET STREQUAL "86")
+target_compile_definitions(${targetName} PUBLIC GPUCA_GPUTYPE_AMPERE)
+elseif(CUDA_COMPUTETARGET AND CUDA_COMPUTETARGET STREQUAL "75")
+target_compile_definitions(${targetName} PUBLIC GPUCA_GPUTYPE_TURING)
+else()
+target_compile_definitions(${targetName} PUBLIC GPUCA_GPUTYPE_AMPERE)
+endif()

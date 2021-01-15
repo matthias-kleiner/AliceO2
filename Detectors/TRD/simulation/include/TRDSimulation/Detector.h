@@ -37,10 +37,10 @@ class HitType : public o2::BasicXYZQHit<float>
   float getLocalT() const { return locT; }
 
  private:
-  bool mInDrift{ false };
-  float locC{ -99 }; // col direction in amplification or drift volume
-  float locR{ -99 }; // row direction in amplification or drift volume
-  float locT{ -99 }; // time direction in amplification or drift volume
+  bool mInDrift{false};
+  float locC{-99}; // col direction in amplification or drift volume
+  float locR{-99}; // row direction in amplification or drift volume
+  float locT{-99}; // time direction in amplification or drift volume
 };
 } // namespace trd
 } // namespace o2
@@ -60,7 +60,7 @@ namespace o2
 namespace trd
 {
 
-class TRDGeometry;
+class Geometry;
 class TRsim;
 
 class Detector : public o2::base::DetImpl<Detector>
@@ -111,11 +111,11 @@ class Detector : public o2::base::DetImpl<Detector>
 
   float mWion; // Ionization potential
 
-  TRDGeometry* mGeom = nullptr;
+  Geometry* mGeom = nullptr;
 
   template <typename Det>
   friend class o2::base::DetImpl;
-  ClassDefOverride(Detector, 1)
+  ClassDefOverride(Detector, 1);
 };
 
 template <typename T>

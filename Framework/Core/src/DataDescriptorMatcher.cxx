@@ -10,7 +10,10 @@
 
 #include "Framework/CompilerBuiltins.h"
 #include "Framework/DataDescriptorMatcher.h"
+#include "Framework/DataMatcherWalker.h"
 #include "Framework/DataProcessingHeader.h"
+#include "Framework/VariantHelpers.h"
+#include "Framework/RuntimeError.h"
 #include <iostream>
 
 namespace o2
@@ -56,12 +59,12 @@ bool OriginValueMatcher::match(header::DataHeader const& header, VariableContext
       return strncmp(header.dataOrigin.str, value->c_str(), 4) == 0;
     }
     auto maxSize = strnlen(header.dataOrigin.str, 4);
-    context.put({ ref->index, std::string(header.dataOrigin.str, maxSize) });
+    context.put({ref->index, std::string(header.dataOrigin.str, maxSize)});
     return true;
   } else if (auto s = std::get_if<std::string>(&mValue)) {
     return strncmp(header.dataOrigin.str, s->c_str(), 4) == 0;
   }
-  throw std::runtime_error("Mismatching type for variable");
+  throw runtime_error("Mismatching type for variable");
 }
 
 bool DescriptionValueMatcher::match(header::DataHeader const& header, VariableContext& context) const
@@ -72,12 +75,12 @@ bool DescriptionValueMatcher::match(header::DataHeader const& header, VariableCo
       return strncmp(header.dataDescription.str, value->c_str(), 16) == 0;
     }
     auto maxSize = strnlen(header.dataDescription.str, 16);
-    context.put({ ref->index, std::string(header.dataDescription.str, maxSize) });
+    context.put({ref->index, std::string(header.dataDescription.str, maxSize)});
     return true;
   } else if (auto s = std::get_if<std::string>(&this->mValue)) {
     return strncmp(header.dataDescription.str, s->c_str(), 16) == 0;
   }
-  throw std::runtime_error("Mismatching type for variable");
+  throw runtime_error("Mismatching type for variable");
 }
 
 bool SubSpecificationTypeValueMatcher::match(header::DataHeader const& header, VariableContext& context) const
@@ -87,12 +90,12 @@ bool SubSpecificationTypeValueMatcher::match(header::DataHeader const& header, V
     if (auto value = std::get_if<header::DataHeader::SubSpecificationType>(&variable)) {
       return header.subSpecification == *value;
     }
-    context.put({ ref->index, header.subSpecification });
+    context.put({ref->index, header.subSpecification});
     return true;
   } else if (auto v = std::get_if<header::DataHeader::SubSpecificationType>(&mValue)) {
     return header.subSpecification == *v;
   }
-  throw std::runtime_error("Mismatching type for variable");
+  throw runtime_error("Mismatching type for variable");
 }
 
 /// This will match the timing information which is currently in
@@ -105,18 +108,18 @@ bool StartTimeValueMatcher::match(DataProcessingHeader const& dph, VariableConte
     if (auto value = std::get_if<uint64_t>(&variable)) {
       return (dph.startTime / mScale) == *value;
     }
-    context.put({ ref->index, dph.startTime / mScale });
+    context.put({ref->index, dph.startTime / mScale});
     return true;
   } else if (auto v = std::get_if<uint64_t>(&mValue)) {
     return (dph.startTime / mScale) == *v;
   }
-  throw std::runtime_error("Mismatching type for variable");
+  throw runtime_error("Mismatching type for variable");
 }
 
 DataDescriptorMatcher::DataDescriptorMatcher(DataDescriptorMatcher const& other)
-  : mOp{ other.mOp },
-    mLeft{ ConstantValueMatcher{ false } },
-    mRight{ ConstantValueMatcher{ false } }
+  : mOp{other.mOp},
+    mLeft{ConstantValueMatcher{false}},
+    mRight{ConstantValueMatcher{false}}
 {
   if (auto pval0 = std::get_if<OriginValueMatcher>(&other.mLeft)) {
     mLeft = *pval0;
@@ -159,9 +162,9 @@ DataDescriptorMatcher& DataDescriptorMatcher::operator=(DataDescriptorMatcher co
 
 /// Unary operator on a node
 DataDescriptorMatcher::DataDescriptorMatcher(Op op, Node&& lhs, Node&& rhs)
-  : mOp{ op },
-    mLeft{ std::move(lhs) },
-    mRight{ std::move(rhs) }
+  : mOp{op},
+    mLeft{std::move(lhs)},
+    mRight{std::move(rhs)}
 {
 }
 
@@ -175,7 +178,22 @@ bool DataDescriptorMatcher::match(ConcreteDataMatcher const& matcher, VariableCo
   dh.subSpecification = matcher.subSpec;
   DataProcessingHeader dph;
   dph.startTime = 0;
-  header::Stack s{ dh, dph };
+  header::Stack s{dh, dph};
+
+  return this->match(reinterpret_cast<char const*>(s.data()), context);
+}
+
+/// @return true if the (sub-)query associated to this matcher will
+/// match the provided @a spec, false otherwise.
+bool DataDescriptorMatcher::match(ConcreteDataTypeMatcher const& matcher, VariableContext& context) const
+{
+  header::DataHeader dh;
+  dh.dataOrigin = matcher.origin;
+  dh.dataDescription = matcher.description;
+  dh.subSpecification = 0;
+  DataProcessingHeader dph;
+  dph.startTime = 0;
+  header::Stack s{dh, dph};
 
   return this->match(reinterpret_cast<char const*>(s.data()), context);
 }
@@ -224,19 +242,19 @@ bool DataDescriptorMatcher::match(char const* d, VariableContext& context) const
   if (auto pval0 = std::get_if<OriginValueMatcher>(&mLeft)) {
     auto dh = o2::header::get<header::DataHeader*>(d);
     if (dh == nullptr) {
-      throw std::runtime_error("Cannot find DataHeader");
+      throw runtime_error("Cannot find DataHeader");
     }
     leftValue = pval0->match(*dh, context);
   } else if (auto pval1 = std::get_if<DescriptionValueMatcher>(&mLeft)) {
     auto dh = o2::header::get<header::DataHeader*>(d);
     if (dh == nullptr) {
-      throw std::runtime_error("Cannot find DataHeader");
+      throw runtime_error("Cannot find DataHeader");
     }
     leftValue = pval1->match(*dh, context);
   } else if (auto pval2 = std::get_if<SubSpecificationTypeValueMatcher>(&mLeft)) {
     auto dh = o2::header::get<header::DataHeader*>(d);
     if (dh == nullptr) {
-      throw std::runtime_error("Cannot find DataHeader");
+      throw runtime_error("Cannot find DataHeader");
     }
     leftValue = pval2->match(*dh, context);
   } else if (auto pval3 = std::get_if<std::unique_ptr<DataDescriptorMatcher>>(&mLeft)) {
@@ -246,11 +264,11 @@ bool DataDescriptorMatcher::match(char const* d, VariableContext& context) const
   } else if (auto pval5 = std::get_if<StartTimeValueMatcher>(&mLeft)) {
     auto dph = o2::header::get<DataProcessingHeader*>(d);
     if (dph == nullptr) {
-      throw std::runtime_error("Cannot find DataProcessingHeader");
+      throw runtime_error("Cannot find DataProcessingHeader");
     }
     leftValue = pval5->match(*dph, context);
   } else {
-    throw std::runtime_error("Bad parsing tree");
+    throw runtime_error("Bad parsing tree");
   }
   // Common speedup.
   if (mOp == Op::And && leftValue == false) {
@@ -292,12 +310,12 @@ bool DataDescriptorMatcher::match(char const* d, VariableContext& context) const
     case Op::Just:
       return leftValue;
   }
-  throw std::runtime_error("Bad parsing tree");
+  throw runtime_error("Bad parsing tree");
 };
 
 bool DataDescriptorMatcher::operator==(DataDescriptorMatcher const& other) const
 {
-  if (mOp != this->mOp) {
+  if (other.mOp != this->mOp) {
     return false;
   }
 
@@ -413,25 +431,30 @@ bool DataDescriptorMatcher::operator==(DataDescriptorMatcher const& other) const
 
 std::ostream& operator<<(std::ostream& os, DataDescriptorMatcher const& matcher)
 {
-  auto printer = [&os](decltype(&matcher.mLeft) v) -> void {
-    if (auto left = std::get_if<std::unique_ptr<DataDescriptorMatcher>>(v)) {
-      os << **left;
-    } else if (auto originMatcher = std::get_if<OriginValueMatcher>(v)) {
-      os << "origin:" << *originMatcher;
-    } else if (auto descriptionMatcher = std::get_if<DescriptionValueMatcher>(v)) {
-      os << "description:" << *descriptionMatcher;
-    } else if (auto subSpecMatcher = std::get_if<SubSpecificationTypeValueMatcher>(v)) {
-      os << "subSpec:" << *subSpecMatcher;
-    } else if (auto startTimeMatcher = std::get_if<StartTimeValueMatcher>(v)) {
-      os << "startTime:" << *startTimeMatcher;
-    }
-  };
-
-  os << "(" << matcher.mOp << " ";
-  printer(&matcher.mLeft);
-  os << " ";
-  printer(&matcher.mRight);
-  os << ")";
+  auto edgeWalker = overloaded{
+    [&os](EdgeActions::EnterNode action) {
+      os << "(" << action.node->mOp;
+      if (action.node->mOp == DataDescriptorMatcher::Op::Just) {
+        return ChildAction::VisitLeft;
+      }
+      return ChildAction::VisitBoth;
+    },
+    [&os](EdgeActions::EnterLeft) { os << " "; },
+    [&os](EdgeActions::ExitLeft) { os << " "; },
+    [&os](EdgeActions::EnterRight) { os << " "; },
+    [&os](EdgeActions::ExitRight) { os << " "; },
+    [&os](EdgeActions::ExitNode) { os << ")"; },
+    [&os](auto) {}};
+  auto leafWalker = overloaded{
+    [&os](OriginValueMatcher const& origin) { os << "origin:" << origin; },
+    [&os](DescriptionValueMatcher const& description) { os << "description:" << description; },
+    [&os](SubSpecificationTypeValueMatcher const& subSpec) { os << "subSpec:" << subSpec; },
+    [&os](StartTimeValueMatcher const& startTime) { os << "startTime:" << startTime; },
+    [&os](ConstantValueMatcher const& constant) {},
+    [&os](auto t) { os << "not implemented " << typeid(decltype(t)).name(); }};
+  DataMatcherWalker::walk(matcher,
+                          edgeWalker,
+                          leafWalker);
 
   return os;
 }

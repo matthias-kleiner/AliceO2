@@ -27,12 +27,14 @@
 class TH1F;
 class TList;
 
+#include "GPUTRDDef.h"
 namespace GPUCA_NAMESPACE
 {
 namespace gpu
 {
-class GPUTRDTracker;
 class GPUTRDGeometry;
+class GPUReconstruction;
+class GPUChainTracking;
 } // namespace gpu
 } // namespace GPUCA_NAMESPACE
 
@@ -129,8 +131,10 @@ class GPUTRDTrackerComponent : public AliHLTProcessor
  *                             Members - private
  * ---------------------------------------------------------------------------------
  */
-  GPUCA_NAMESPACE::gpu::GPUTRDTracker* fTracker; // the tracker itself
-  GPUCA_NAMESPACE::gpu::GPUTRDGeometry* fGeo;    // TRD geometry needed by the tracker
+  GPUCA_NAMESPACE::gpu::GPUTRDTrackerGPU* fTracker; // the tracker itself
+  GPUCA_NAMESPACE::gpu::GPUTRDGeometry* fGeo;     // TRD geometry needed by the tracker
+  GPUCA_NAMESPACE::gpu::GPUReconstruction* fRec;  // GPU Reconstruction object
+  GPUCA_NAMESPACE::gpu::GPUChainTracking* fChain; // Tracking Chain Object
 
   TList* fTrackList;
   bool fDebugTrackOutput;              // output GPUTRDTracks instead AliHLTExternalTrackParam
@@ -138,6 +142,6 @@ class GPUTRDTrackerComponent : public AliHLTProcessor
   bool fRequireITStrack;               // only TPC tracks with ITS match are used as seeds for tracking
   AliHLTComponentBenchmark fBenchmark; // benchmark
 
-  ClassDef(GPUTRDTrackerComponent, 0)
+  ClassDef(GPUTRDTrackerComponent, 0);
 };
 #endif // GPUTRDTRACKERCOMPONENT_H

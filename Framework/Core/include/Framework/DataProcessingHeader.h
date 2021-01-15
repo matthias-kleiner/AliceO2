@@ -13,9 +13,9 @@
 #include "Headers/DataHeader.h"
 
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <cassert>
+#include <chrono>
 
 namespace o2
 {
@@ -37,14 +37,18 @@ namespace framework
 /// concept of time associated to each group of messages being processed,
 /// therefore whenever some data enters the Data Processing layer it needs to
 /// time information to be attached to it.
-/// 
+///
 /// The information consists of two parts: start time id and duration
 ///
 /// @ingroup aliceo2_dataformats_dataheader
-struct DataProcessingHeader : public header::BaseHeader
-{
+struct DataProcessingHeader : public header::BaseHeader {
+
+  static uint64_t getCreationTime()
+  {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::milli>(now.time_since_epoch()).count();
+  }
   // Required to do the lookup
-  static uint64_t getCreationTime();
   constexpr static const o2::header::HeaderType sHeaderType = "DataFlow";
   static const uint32_t sVersion = 1;
 
@@ -70,12 +74,12 @@ struct DataProcessingHeader : public header::BaseHeader
 
   //___the functions:
   DataProcessingHeader()
-  : DataProcessingHeader(0, 0)
+    : DataProcessingHeader(0, 0)
   {
   }
 
   DataProcessingHeader(StartTime s)
-  : DataProcessingHeader(s, 0)
+    : DataProcessingHeader(s, 0)
   {
   }
 
@@ -88,9 +92,9 @@ struct DataProcessingHeader : public header::BaseHeader
   }
 
   DataProcessingHeader(const DataProcessingHeader&) = default;
-  static const DataProcessingHeader* Get(const BaseHeader* baseHeader) {
-    return (baseHeader->description==DataProcessingHeader::sHeaderType)?
-    static_cast<const DataProcessingHeader*>(baseHeader):nullptr;
+  static const DataProcessingHeader* Get(const BaseHeader* baseHeader)
+  {
+    return (baseHeader->description == DataProcessingHeader::sHeaderType) ? static_cast<const DataProcessingHeader*>(baseHeader) : nullptr;
   }
 };
 

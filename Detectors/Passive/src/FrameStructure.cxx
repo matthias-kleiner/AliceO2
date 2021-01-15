@@ -34,15 +34,21 @@ namespace o2
 {
 namespace passive
 {
-const char* TOPNAME = "cave";
+const char* TOPNAME = "barrel";
 #define AliMatrix TVirtualMC::GetMC()->Matrix
 #define kRaddeg TMath::RadToDeg()
 #define kDegrad TMath::DegToRad()
 
-FrameStructure::FrameStructure(const char* name, const char* Title) : FairModule(name, Title) {}
+FrameStructure::FrameStructure() : PassiveBase("FRAME", "")
+{
+}
+FrameStructure::FrameStructure(const char* name, const char* Title) : PassiveBase(name, Title)
+{
+}
 
-FrameStructure::FrameStructure(const FrameStructure& rhs) : FairModule(rhs)
-{}
+FrameStructure::FrameStructure(const FrameStructure& rhs) : PassiveBase(rhs)
+{
+}
 
 FairModule* FrameStructure::CloneModule() const
 {
@@ -153,8 +159,9 @@ void FrameStructure::createWebFrame(const char* name, float dHz, float theta0, f
   float theta = TMath::Pi() / 2.;
   float phi = TMath::ACos(TMath::Cos(theta0) * TMath::Cos(phi0));
 
-  if (phi0 < 0)
+  if (phi0 < 0) {
     phi = -phi;
+  }
 
   phi *= krad2deg;
   theta *= krad2deg;
@@ -232,26 +239,26 @@ void FrameStructure::createMaterials()
   tmaxfd = -20.;  // Maximum angle due to field deflection
   deemax = -.3;   // Maximum fractional energy loss, DLS
   stmin = -.8;
-  int isxfld = 2; // field uniformity value as defined by Geant3
+  int isxfld = 2;     // field uniformity value as defined by Geant3
   float sxmgmx = 10.; // max field
   o2::base::Detector::initFieldTrackingParams(isxfld, sxmgmx);
 
-  float asteel[4] = { 55.847, 51.9961, 58.6934, 28.0855 };
-  float zsteel[4] = { 26., 24., 28., 14. };
-  float wsteel[4] = { .715, .18, .1, .005 };
+  float asteel[4] = {55.847, 51.9961, 58.6934, 28.0855};
+  float zsteel[4] = {26., 24., 28., 14.};
+  float wsteel[4] = {.715, .18, .1, .005};
 
   // Air
 
-  float aAir[4] = { 12.0107, 14.0067, 15.9994, 39.948 };
-  float zAir[4] = { 6., 7., 8., 18. };
-  float wAir[4] = { 0.000124, 0.755267, 0.231781, 0.012827 };
+  float aAir[4] = {12.0107, 14.0067, 15.9994, 39.948};
+  float zAir[4] = {6., 7., 8., 18.};
+  float wAir[4] = {0.000124, 0.755267, 0.231781, 0.012827};
   float dAir = 1.20479E-3;
 
   // G10
   // G10 60% SiO2 40% epoxy
-  float ag10[4] = { 12.01, 1., 15.994, 28.086 };
-  float zg10[4] = { 6., 1., 8., 14. };
-  float wg10[4] = { 0.194, 0.023, 0.443, 0.340 };
+  float ag10[4] = {12.01, 1., 15.994, 28.086};
+  float zg10[4] = {6., 1., 8., 14.};
+  float wg10[4] = {0.194, 0.023, 0.443, 0.340};
 
   matmgr.Mixture("FRAME", 22, "G10", ag10, zg10, 1.7, 4, wg10);
   matmgr.Mixture("FRAME", 65, "STEEL$", asteel, zsteel, 7.88, 4, wsteel);
@@ -390,14 +397,14 @@ void FrameStructure::ConstructGeometry()
   const float dHz = 113. / cos10 - 0.3; // 114.74 (114.5 on drawing)
   // Positions of ring bars (ALIP2A_0008)
   // outer
-  const float dymodU[3] = { 71.5, 228.5, 339.5 };
+  const float dymodU[3] = {71.5, 228.5, 339.5};
   // inner
-  const float dymodL[3] = { 50.0, 175.0, 297.5 };
+  const float dymodL[3] = {50.0, 175.0, 297.5};
   //
   // orientation of web frame elements
-  const float dymodO[5] = { 10., -40., 20., -27.1, 18.4 };
+  const float dymodO[5] = {10., -40., 20., -27.1, 18.4};
   // Position of web frame elements
-  float dymodW[5] = { 70., 73.6, 224.5, 231.4, 340.2 };
+  float dymodW[5] = {70., 73.6, 224.5, 231.4, 340.2};
   for (int ii = 0; ii < 5; ii++) {
     dymodW[ii] = dymodW[ii] - 3. * TMath::Tan(dymodO[ii] * kdeg2rad);
   }
@@ -423,18 +430,22 @@ void FrameStructure::ConstructGeometry()
   //
   TGeoPgon* shB77A = new TGeoPgon(0., 360., 18, 2);
   shB77A->SetName("shB77A");
-  shB77A->DefineSection(0, -zE, 280., 423.7);
-  shB77A->DefineSection(1, zE, 280., 423.7);
+  shB77A->DefineSection(0, -zE, 280., 422.15);
+  shB77A->DefineSection(1, zE, 280., 422.15);
   TGeoBBox* shB77B = new TGeoBBox(3.42, 2., 375.5);
   shB77B->SetName("shB77B");
   TGeoTranslation* trB77A = new TGeoTranslation("trB77A", +283.32, 0., 0.);
   TGeoTranslation* trB77B = new TGeoTranslation("trB77B", -283.32, 0., 0.);
   trB77A->RegisterYourself();
   trB77B->RegisterYourself();
-  TGeoCompositeShape* shB77 = new TGeoCompositeShape("shB77", "shB77A+shB77B:trB77A+shB77B:trB77B");
+  TGeoPgon* shB77C = new TGeoPgon(60., 360., 18, 2);
+  shB77C->SetName("shB77C");
+  shB77C->DefineSection(0, -zE, 422.15, 423.70);
+  shB77C->DefineSection(1, zE, 422.15, 423.70);
+  TGeoCompositeShape* shB77 = new TGeoCompositeShape("shB77", "shB77A+shB77B:trB77A+shB77B:trB77B+shB77C");
   TGeoVolume* voB77 = new TGeoVolume("B077", shB77, gGeoManager->GetMedium("FRAME_Air"));
   voB77->SetName("B077"); // just to avoid a warning
-  vmc->Gspos("B077", 1, TOPNAME, 0., 0., 0., 0, "ONLY");
+  vmc->Gspos("B077", 1, TOPNAME, 0., 30., 0., 0, "ONLY");
   //
   // Reference plane #1 for TRD
   TGeoPgon* shBREFA = new TGeoPgon(0.0, 360., 18, 2);
@@ -668,14 +679,31 @@ void FrameStructure::ConstructGeometry()
   ptrap[9] = ptrap[4];
 
   vmc->Gsvolu("B045", "TRAP", kSteel, ptrap, 11);
+
+  TGeoTrap* b045shape = new TGeoTrap("B045shape", ptrap[0], ptrap[1], ptrap[2], ptrap[3], ptrap[4], ptrap[5], ptrap[6], ptrap[7], ptrap[8], ptrap[9], ptrap[10]);
+  double cutAngle = 43 * TMath::DegToRad();
+  double trd1par[4] = {0., 15 + 0.1, 15, 15 * TMath::Tan(cutAngle) * 0.5 + 0.45};
+  TGeoTranslation* trnsB045cut = new TGeoTranslation("trnsB045cut", ptrap[0] * TMath::Tan(ptrap[1] * TMath::DegToRad()) - trd1par[2] + ptrap[4], -ptrap[3] + 0.5, ptrap[0] + 0.6);
+  TGeoRotation* rotB045cut = new TGeoRotation("rotB045cut");
+  rotB045cut->RotateZ(90);
+  TGeoCombiTrans* moveB045cut = new TGeoCombiTrans(*trnsB045cut, *rotB045cut);
+  moveB045cut->SetName("moveB045cut");
+  moveB045cut->RegisterYourself();
+
   ptrap[3] = doh - ds;
   ptrap[4] = (dol - ds) / x;
   ptrap[5] = ptrap[4];
   ptrap[7] = ptrap[3];
   ptrap[8] = ptrap[4];
   ptrap[9] = ptrap[4];
+
   vmc->Gsvolu("B046", "TRAP", kAir, ptrap, 11);
   vmc->Gspos("B046", 1, "B045", 0.0, 0.0, 0., 0, "ONLY");
+
+  TGeoTrd1* cutOnB045 = new TGeoTrd1("cutOnB045", trd1par[0], trd1par[1], trd1par[2], trd1par[3]);
+
+  TGeoCompositeShape* b045shapeCut = new TGeoCompositeShape("B045shapeCut", "(B045shape)-(cutOnB045:moveB045cut)");
+  TGeoVolume* B045cutVol = new TGeoVolume("B045cut", b045shapeCut, kMedSteel);
 
   //
   // Positioning of diagonal bars
@@ -698,7 +726,7 @@ void FrameStructure::ConstructGeometry()
   vmc->Gspos("B045", 4, "B077", dx, dy, -dz2, idrotm[2029], "ONLY");
 
   vmc->Gspos("B045", 5, "B077", dx, -dy, -dz2, idrotm[2021], "ONLY");
-  vmc->Gspos("B045", 6, "B077", dx, -dy, +dz2, idrotm[2028], "ONLY");
+  vmc->Gspos("B045cut", 6, "B077", dx, -dy, +dz2, idrotm[2028], "ONLY");
   vmc->Gspos("B045", 7, "B077", -dx, -dy, -dz2, idrotm[2022], "ONLY");
   vmc->Gspos("B045", 8, "B077", -dx, -dy, +dz2, idrotm[2029], "ONLY");
 
@@ -774,8 +802,9 @@ void FrameStructure::ConstructGeometry()
     char name[16];
     // official module numbering
     int mod = i + 13;
-    if (mod > 17)
+    if (mod > 17) {
       mod -= 18;
+    }
     snprintf(name, 16, "BSEGMO%d", mod);
     //
     TGeoVolume* voTRD1 = new TGeoVolume(name, shCS, kMedAir);
@@ -783,8 +812,9 @@ void FrameStructure::ConstructGeometry()
     // Place volume i
     float phi1 = i * 20.;
     float phi2 = 270. + phi1;
-    if (phi2 >= 360.)
+    if (phi2 >= 360.) {
       phi2 -= 360.;
+    }
     dx = TMath::Sin(phi1 * kdeg2rad) * r;
     dy = -TMath::Cos(phi1 * kdeg2rad) * r;
 
@@ -1008,34 +1038,42 @@ void FrameStructure::ConstructGeometry()
   vmc->Gsvolu("BTRDR_14", "BOX", kG10, lbox, 3);
   dz = -iFrH0 / 2. + longH / 2. + dext;
   float zpos = 80.;
-  int isec_1[11] = { 0, 1, 2, 3, 4, 5, 13, 14, 15, 16, 17 };
+  int isec_1[11] = {0, 1, 2, 3, 4, 5, 13, 14, 15, 16, 17};
 
   for (int index = 0; index < 11; index++) {
     jmod = isec_1[index];
     float dz1 = dz + 3. + (zpos - 4.);
     dx0 = (hR + dz0 + zpos - 4.) * tan10 - (longW / 2. + 0.2) / cos10 - 0.05;
-    if (jmod != 5)
+    if (jmod != 5) {
       vmc->Gspos("BTRDR_10", 2 * jmod + 1, module[jmod], dx0, 0.0, dz1, idrotm[2096], "ONLY");
-    if (jmod != 13)
+    }
+    if (jmod != 13) {
       vmc->Gspos("BTRDR_10", 2 * jmod + 2, module[jmod], -dx0, 0.0, dz1, idrotm[2086], "ONLY");
+    }
     dx0 -= 0.5;
-    if (jmod != 5)
+    if (jmod != 5) {
       vmc->Gspos("BTRDR_12", 2 * jmod + 1, module[jmod], dx0, 0.0, dz1, idrotm[2096], "ONLY");
-    if (jmod != 13)
+    }
+    if (jmod != 13) {
       vmc->Gspos("BTRDR_12", 2 * jmod + 2, module[jmod], -dx0, 0.0, dz1, idrotm[2087], "ONLY");
+    }
     dz1 += (4 - 0.2);
     dz1 += dext;
     dx0 = (hR + dz0 + zpos - 0.2) * tan10 - (longW / 2. + 3. + 0.4) / cos10;
-    if (jmod != 5)
+    if (jmod != 5) {
       vmc->Gspos("BTRDR_11", 2 * jmod + 1, module[jmod], dx0, 0.0, dz1, 0, "ONLY");
-    if (jmod != 13)
+    }
+    if (jmod != 13) {
       vmc->Gspos("BTRDR_11", 2 * jmod + 2, module[jmod], -dx0, 0.0, dz1, 0, "ONLY");
+    }
     dz1 -= 0.3;
     dx0 -= 0.5;
-    if (jmod != 5)
+    if (jmod != 5) {
       vmc->Gspos("BTRDR_14", 2 * jmod + 1, module[jmod], dx0, 0.0, dz1, 0, "ONLY");
-    if (jmod != 13)
+    }
+    if (jmod != 13) {
       vmc->Gspos("BTRDR_14", 2 * jmod + 2, module[jmod], -dx0, 0.0, dz1, 0, "ONLY");
+    }
   }
 
   // Pos 2
@@ -1050,7 +1088,7 @@ void FrameStructure::ConstructGeometry()
   vmc->Gsvolu("BTRDR_21", "BOX", kG10, lbox, 3);
   vmc->Gspos("BTRDR_21", 1, "BTRDR_2", -0.4, 0.0, 0.0, 0, "ONLY");
 
-  int isec_2a[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17 };
+  int isec_2a[16] = {1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17};
   for (int index = 0; index < 16; index++) {
     jmod = isec_2a[index];
     dx0 = (hR + dz0) * tan10 + 10. * sin10 - (longW / 4. + 0.5) / cos10;
@@ -1061,7 +1099,7 @@ void FrameStructure::ConstructGeometry()
     }
   }
 
-  int isec_2b[6] = { 6, 7, 8, 10, 11, 12 };
+  int isec_2b[6] = {6, 7, 8, 10, 11, 12};
   for (int index = 0; index < 6; index++) {
     jmod = isec_2b[index];
     dx0 = (hR + dz0 + zpos - 3.) * tan10 - (longW / 4. + 0.5) / cos10;
@@ -1085,14 +1123,16 @@ void FrameStructure::ConstructGeometry()
   vmc->Gsvolu("BTRDR_31", "BOX", kG10, lbox, 3);
   vmc->Gspos("BTRDR_31", 1, "BTRDR_3", 0, 0.0, 0.6, 0, "ONLY");
 
-  int isec_3[9] = { 5, 6, 7, 8, 9, 10, 11, 12, 13 };
+  int isec_3[9] = {5, 6, 7, 8, 9, 10, 11, 12, 13};
 
   for (int index = 0; index < 9; index++) {
     jmod = isec_3[index];
-    if (index > 1)
+    if (index > 1) {
       vmc->Gspos("BTRDR_3", 2 * jmod + 1, module[jmod], 50.96 - 5 - 2., 0.0, dz + 3.7, 0, "ONLY");
-    if (index < 7)
+    }
+    if (index < 7) {
       vmc->Gspos("BTRDR_3", 2 * jmod + 2, module[jmod], -50.96 + 5 + 2., 0.0, dz + 3.7, 0, "ONLY");
+    }
   }
   //
   // Fixation Blocks with tie anchors
@@ -1124,8 +1164,8 @@ void FrameStructure::ConstructGeometry()
   TGeoVolume* volFB1 = new TGeoVolume("BTRD_FB1", shFB1, kMedAlu);
   //
   // tie anchors rectangular profile 4 x 8
-  TGeoVolume* volTAR11 = new TGeoVolume("BTRD_TAR11", new TGeoBBox(dyFB / 2., dxFB / 2. - 0.7, 4.), kMedAlu);
-  TGeoVolume* volTAR12 = new TGeoVolume("BTRD_TAR12", new TGeoBBox(dyFB / 2. - 0.25, dxFB / 2., 3. - 0.5), kMedAir);
+  TGeoVolume* volTAR11 = new TGeoVolume("BTRD_TAR11", new TGeoBBox(dyFB / 2., dxFB / 2., 3.), kMedAlu);
+  TGeoVolume* volTAR12 = new TGeoVolume("BTRD_TAR12", new TGeoBBox(dyFB / 2. - 0.25, dxFB / 2. - 0.7, 2.5), kMedAir);
   volTAR11->AddNode(volTAR12, 1, new TGeoTranslation(0.25, 0., 0.0));
   // clamp (about twice the length of the block), 6 mm thick (read off from a foto)
   TGeoVolume* volTAR13 = new TGeoVolume("BTRD_TAR13", new TGeoBBox(0.3, 45., 3.), kMedAlu);
@@ -1147,7 +1187,7 @@ void FrameStructure::ConstructGeometry()
   TGeoVolumeAssembly* asFB1 = new TGeoVolumeAssembly("BTRD_FBAS1");
   TGeoVolumeAssembly* asFB2 = new TGeoVolumeAssembly("BTRD_FBAS2");
   asFB1->AddNode(volFB1, 1, gGeoIdentity);
-  asFB1->AddNode(volTAR11, 1, new TGeoTranslation(0., 0., -dzFB - 3.));
+  asFB1->AddNode(volTAR11, 1, new TGeoTranslation(0., 0., -dzFB - 3.55));
   asFB1->AddNode(volTAR13, 1, new TGeoTranslation(-1.36, 4.5, -dzFB - 3.));
   asFB1->AddNode(volTAR141, 1, new TGeoTranslation(0., dxFB - 2. + 4.5, -dzFB - 3.));
   asFB1->AddNode(volTAR141, 2, new TGeoTranslation(0., -dxFB + 2. + 4.5, -dzFB - 3.));
@@ -1207,29 +1247,37 @@ void FrameStructure::ConstructGeometry()
 
   for (int index = 0; index < 11; index++) {
     int imod = isec_1[index];
-    if (imod != 5)
+    if (imod != 5) {
       vmc->Gspos("BTRD_FBAS2", index, module[imod], dx, -yFB1, zTA1, idrotm[2097], "ONLY");
+    }
 
-    if (imod != 13)
+    if (imod != 13) {
       vmc->Gspos("BTRD_FBAS1", 11 + index, module[imod], -dx, -yFB1, zTA1, idrotm[2087], "ONLY");
+    }
 
-    if (imod != 5)
+    if (imod != 5) {
       vmc->Gspos("BTRD_FBAS1", 22 + index, module[imod], dx, yFB1, zTA1, idrotm[2096], "ONLY");
+    }
 
-    if (imod != 13)
+    if (imod != 13) {
       vmc->Gspos("BTRD_FBAS2", 33 + index, module[imod], -dx, yFB1, zTA1, idrotm[2086], "ONLY");
+    }
 
-    if (imod != 5)
+    if (imod != 5) {
       vmc->Gspos("BTRD_FBAS4", index, module[imod], dx, -yFB2, zTA1, idrotm[2097], "ONLY");
+    }
 
-    if (imod != 13)
+    if (imod != 13) {
       vmc->Gspos("BTRD_FBAS3", 11 + index, module[imod], -dx, -yFB2, zTA1, idrotm[2087], "ONLY");
+    }
 
-    if (imod != 5)
+    if (imod != 5) {
       vmc->Gspos("BTRD_FBAS3", 22 + index, module[imod], dx, yFB2, zTA1, idrotm[2096], "ONLY");
+    }
 
-    if (imod != 13)
+    if (imod != 13) {
       vmc->Gspos("BTRD_FBAS4", 33 + index, module[imod], -dx, yFB2, zTA1, idrotm[2086], "ONLY");
+    }
   }
 
   //
@@ -1280,8 +1328,9 @@ void FrameStructure::ConstructGeometry()
   yxtru1[6] = -6.0;
 
   double xxtru2[7];
-  for (i = 0; i < 7; i++)
+  for (i = 0; i < 7; i++) {
     xxtru2[i] = -xxtru1[i];
+  }
 
   double xxtru3[5];
   double yxtru3[5];
@@ -1292,8 +1341,9 @@ void FrameStructure::ConstructGeometry()
   }
   xxtru3[4] = xxtru1[6];
   yxtru3[4] = yxtru1[6];
-  for (i = 0; i < 5; i++)
+  for (i = 0; i < 5; i++) {
     xxtru4[i] = -xxtru3[i];
+  }
 
   shBTOFS2->DefinePolygon(7, xxtru1, yxtru1);
   shBTOFS2->DefineSection(0, -4.);
@@ -1349,6 +1399,9 @@ void FrameStructure::ConstructGeometry()
   asTOFS01->SetVisibility(1);
 
   for (i = 0; i < 18; i++) {
+    if (i >= 4 && i <= 8) {
+      continue;
+    }
     float phi1 = i * 20.;
     float phi2 = 270. + phi1;
     rot1 = new TGeoRotation(Form("TOFS_R1_%d", i), 90.0, phi1, 90., phi2, 0., 0.);
@@ -1538,16 +1591,16 @@ void FrameStructure::ConstructGeometry()
   vmc->Gspos("BRS2", 1, "BRS1", 0., -27.5 + 3.75, 0., 0, "ONLY");
   vmc->Gspos("BRS2", 2, "BRS1", 0., 27.5 - 3.75, 0., 0, "ONLY");
   vmc->Gspos("BRS3", 1, "BRS1", 0., 0., 0., 0, "ONLY");
-  vmc->Gspos("BRS1", 1, TOPNAME, -430. - 3., -190., 0., 0, "ONLY");
-  vmc->Gspos("BRS1", 2, TOPNAME, 430. + 3., -190., 0., 0, "ONLY");
+  vmc->Gspos("BRS1", 1, TOPNAME, -430. - 3.1 + 30., -190., 0., 0, "ONLY");
+  vmc->Gspos("BRS1", 2, TOPNAME, 430. + 3.1 + 30., -190., 0., 0, "ONLY");
 
   rbox[0] = 3.0;
   rbox[1] = 145. / 4.;
   rbox[2] = 25.0;
   vmc->Gsvolu("BRS4", "BOX", kSteel, rbox, 3);
 
-  vmc->Gspos("BRS4", 1, TOPNAME, 430. + 3., -190. + 55. / 2. + rbox[1], 224., 0, "ONLY");
-  vmc->Gspos("BRS4", 2, TOPNAME, 430. + 3., -190. + 55. / 2. + rbox[1], -224., 0, "ONLY");
+  vmc->Gspos("BRS4", 1, TOPNAME, 430. + 3., -190. + 55. / 2. + rbox[1] + 30., 224., 0, "ONLY");
+  vmc->Gspos("BRS4", 2, TOPNAME, 430. + 3., -190. + 55. / 2. + rbox[1] + 30., -224., 0, "ONLY");
 
   //
   // The Backframe
@@ -1689,7 +1742,7 @@ void FrameStructure::ConstructGeometry()
   vmc->Gsvolu("BFRR", "BOX ", kAir, bpar, 3);
   vmc->Gspos("BFRR", 1, "BFRB", 0., 0., 0., 0, "ONLY");
 
-  int iphi[10] = { 0, 1, 3, 6, 8, 9, 10, 12, 15, 17 };
+  int iphi[10] = {0, 1, 3, 6, 8, 9, 10, 12, 15, 17};
 
   for (i = 0; i < 10; i++) {
     float rb = (kBFMRin + kBFMRou) / 2.;
@@ -1702,7 +1755,7 @@ void FrameStructure::ConstructGeometry()
     vmc->Gspos("BFRB", i + 11, "BFMO", xb, yb, -dz, idrotm[2034 + iphi[i]], "ONLY");
   }
 
-  vmc->Gspos("BFMO", i + 19, TOPNAME, 0, 0, -376. - kBFMdz / 2. - 0.5, 0, "ONLY");
+  vmc->Gspos("BFMO", i + 19, TOPNAME, 0, 30., -376. - kBFMdz / 2. - 0.5, 0, "ONLY");
 
   //
   //
@@ -1890,7 +1943,7 @@ void FrameStructure::ConstructGeometry()
   dy = ((kBBMRou + kBBMRin) / 2) * TMath::Tan(10 * kDegrad) - kBBBdz / 2. / TMath::Cos(10 * kDegrad);
   vmc->Gspos("BBD2", 1, "BBCE", dx, dy, -dz / 2. - kBBBdz / 2., idrotm[2052], "ONLY");
 
-  vmc->Gspos("BBMO", 1, TOPNAME, 0., 0., +376. + kBBMdz / 2. + 0.5, 0, "ONLY");
+  vmc->Gspos("BBMO", 1, TOPNAME, 0., 30., +376. + kBBMdz / 2. + 0.5, 0, "ONLY");
 }
-}
-}
+} // namespace passive
+} // namespace o2

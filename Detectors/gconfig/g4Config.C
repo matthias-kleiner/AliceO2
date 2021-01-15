@@ -10,10 +10,10 @@
 #include <iostream>
 #include "TGeant4.h"
 #include "TString.h"
-#include "TPythia6Decayer.h"
 #include "FairRunSim.h"
 #include "TSystem.h"
 #include "TG4RunConfiguration.h"
+#include "SimConfig/G4Params.h"
 #endif
 #include "commonConfig.C"
 
@@ -55,21 +55,20 @@ void Config()
                                  // one and all of its secondaries have been transported
                                  // any other choice is dangerously inconsistent with the FinishPrimary() interface of VMCApp
 
-  auto runConfiguration = new TG4RunConfiguration("geomRoot", "QGSP_FTFP_BERT+optical", "stepLimiter+specialCuts",
+  auto& physicsSetup = ::o2::conf::G4Params::Instance().getPhysicsConfigString();
+  std::cout << "PhysicsSetup wanted " << physicsSetup << "\n";
+  auto runConfiguration = new TG4RunConfiguration("geomRoot", physicsSetup, "stepLimiter+specialCuts",
                                                   specialStacking, mtMode);
 
   /// Create the G4 VMC
   TGeant4* geant4 = new TGeant4("TGeant4", "The Geant4 Monte Carlo", runConfiguration);
-  cout << "Geant4 has been created." << endl;
+  std::cout << "Geant4 has been created." << std::endl;
 
   // setup the stack
   stackSetup(geant4, FairRunSim::Instance());
 
   // setup decayer
-  if (FairRunSim::Instance()->IsExtDecayer()) {
-    TVirtualMCDecayer* decayer = TPythia6Decayer::Instance();
-    geant4->SetExternalDecayer(decayer);
-  }
+  decayerSetup(geant4);
 
   TString configm(gSystem->Getenv("VMCWORKDIR"));
   auto configm1 = configm + "/Detectors/gconfig/g4config.in";
@@ -81,5 +80,5 @@ void Config()
   // Enter in Geant4 Interactive mode
   // geant4->StartGeantUI();
 
-  cout << "g4Config.C finished" << endl;
+  std::cout << "g4Config.C finished" << std::endl;
 }

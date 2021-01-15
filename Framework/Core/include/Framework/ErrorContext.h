@@ -7,40 +7,38 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#ifndef FRAMEWORK_ERROR_CONTEXT_H
-#define FRAMEWORK_ERROR_CONTEXT_H
+#ifndef O2_FRAMEWORK_ERROR_CONTEXT_H_
+#define O2_FRAMEWORK_ERROR_CONTEXT_H_
 
 #include "Framework/InputRecord.h"
 #include "Framework/ServiceRegistry.h"
+#include "Framework/RuntimeError.h"
 
-#include <exception>
-
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
 // This is a utility class to reduce the amount of boilerplate when defining
 // an error callback.
-class ErrorContext {
-public:
-  ErrorContext(InputRecord &inputs, ServiceRegistry &services, std::exception &e)
-  : mInputs{inputs},
-    mServices{services},
-    mException{e}
+class ErrorContext
+{
+ public:
+  ErrorContext(InputRecord& inputs, ServiceRegistry& services, RuntimeErrorRef e)
+    : mInputs{inputs},
+      mServices{services},
+      mExceptionRef{e}
   {
   }
 
-  InputRecord const &inputs() {return mInputs;}
-  ServiceRegistry const&services() {return mServices;}
-  std::exception const&exception() {return mException;}
+  InputRecord const& inputs() { return mInputs; }
+  ServiceRegistry const& services() { return mServices; }
+  RuntimeErrorRef exception() { return mExceptionRef; }
 
-  InputRecord &mInputs;
-  ServiceRegistry &mServices;
-  std::exception &mException;
+ private:
+  InputRecord& mInputs;
+  ServiceRegistry& mServices;
+  RuntimeErrorRef mExceptionRef;
 };
 
-} // namespace framework
-} // namespace o2
+} // namespace o2::framework
 
-#endif
+#endif // o2::framework

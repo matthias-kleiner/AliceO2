@@ -18,14 +18,15 @@
 
 using namespace o2::framework;
 
-BOOST_AUTO_TEST_CASE(TestTMessageSerializer) {
+BOOST_AUTO_TEST_CASE(TestTMessageSerializer)
+{
   const char* testname = "testname";
   const char* testtitle = "testtitle";
   using namespace o2::framework;
 
   TObjArray array;
   array.SetOwner();
-  array.Add(new TNamed(testname,testtitle));
+  array.Add(new TNamed(testname, testtitle));
 
   FairTMessage msg;
   TMessageSerializer::serialize(msg, &array);
@@ -37,26 +38,33 @@ BOOST_AUTO_TEST_CASE(TestTMessageSerializer) {
   auto out = TMessageSerializer::deserialize(buf);
 
   TObjArray* outarr = dynamic_cast<TObjArray*>(out.get());
-  BOOST_CHECK_EQUAL(out.get(),outarr);
+  BOOST_CHECK_EQUAL(out.get(), outarr);
   TNamed* named = dynamic_cast<TNamed*>(outarr->At(0));
-  BOOST_CHECK_EQUAL(static_cast<void*>(named),static_cast<void*>(outarr->At(0)));
+  BOOST_CHECK_EQUAL(static_cast<void*>(named), static_cast<void*>(outarr->At(0)));
   BOOST_CHECK_EQUAL(named->GetName(), testname);
   BOOST_CHECK_EQUAL(named->GetTitle(), testtitle);
 
   // test deserialization with a wrong target class and check the exception
-  try {
-    auto out2 = TMessageSerializer::deserialize<TNamed>(buf);
-    BOOST_FAIL("here we should never get, the function call must fail with exception");
-  } catch (std::exception& e) {
-    std::string expected("can not convert serialized class TObjArray into target class TNamed");
-    BOOST_CHECK_MESSAGE(expected == e.what(), e.what());
-  }
+  BOOST_CHECK_EXCEPTION(TMessageSerializer::deserialize<TNamed>(buf),
+                        RuntimeErrorRef,
+                        [](RuntimeErrorRef const& ref) {
+                          auto& e = error_from_ref(ref);
+                          std::string expected("can not convert serialized class TObjArray into target class TNamed");
+                          return expected == e.what;
+                        });
 }
+
+bool check_expected(RuntimeErrorRef const& ref)
+{
+  auto& e = error_from_ref(ref);
+  std::string expected("can not convert serialized class vector<o2::test::Polymorphic> into target class TObject");
+  return expected == e.what;
+};
 
 BOOST_AUTO_TEST_CASE(TestTMessageSerializer_NonTObject)
 {
   using namespace o2::framework;
-  std::vector<o2::test::Polymorphic> data{ { 0xaffe }, { 0xd00f } };
+  std::vector<o2::test::Polymorphic> data{{0xaffe}, {0xd00f}};
 
   TClass* cl = TClass::GetClass("std::vector<o2::test::Polymorphic>");
   BOOST_REQUIRE(cl != nullptr);
@@ -72,13 +80,7 @@ BOOST_AUTO_TEST_CASE(TestTMessageSerializer_NonTObject)
   BOOST_CHECK((*out.get())[1] == o2::test::Polymorphic(0xd00f));
 
   // test deserialization with a wrong target class and check the exception
-  try {
-    auto out2 = TMessageSerializer::deserialize(as_span(msg));
-    BOOST_FAIL("here we should never get, the function call must fail with exception");
-  } catch (std::exception& e) {
-    std::string expected("can not convert serialized class vector<o2::test::Polymorphic> into target class TObject");
-    BOOST_CHECK_MESSAGE(expected == e.what(), e.what());
-  }
+  BOOST_CHECK_EXCEPTION(TMessageSerializer::deserialize(as_span(msg)), RuntimeErrorRef, check_expected);
 }
 
 BOOST_AUTO_TEST_CASE(TestTMessageSerializer_InvalidBuffer)
@@ -96,12 +98,12 @@ BOOST_AUTO_TEST_CASE(TestTMessageSerializer_InvalidBuffer)
   }
   */
   // test deserialization of invalid target class and check the exception
-  try {
-    struct Dummy {
-    };
-    auto out = TMessageSerializer::deserialize<Dummy>((o2::byte*)buffer, strlen(buffer));
-    BOOST_ERROR("here we should never get, the function call must fail with exception");
-  } catch (std::exception& e) {
-    BOOST_CHECK_MESSAGE(std::string(e.what()).find("class is not ROOT-serializable") == 0, e.what());
-  }
+  struct Dummy {
+  };
+  BOOST_CHECK_EXCEPTION(TMessageSerializer::deserialize<Dummy>((o2::byte*)buffer, strlen(buffer)),
+                        RuntimeErrorRef,
+                        [](RuntimeErrorRef const& ref) {
+                          auto& err = error_from_ref(ref);
+                          return strcmp(err.what, "class is not ROOT-serializable") != 0;
+                        });
 }

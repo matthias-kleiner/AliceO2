@@ -23,7 +23,7 @@ namespace o2
 {
 namespace its
 {
-namespace GPU
+namespace gpu
 {
 
 struct DeviceProperties final {
@@ -62,8 +62,8 @@ class Context final
   int mDevicesNum;
   std::vector<DeviceProperties> mDeviceProperties;
 };
-}
-}
-}
+} // namespace gpu
+} // namespace its
+} // namespace o2
 
 #endif /* TRAKINGITSU_INCLUDE_GPU_CONTEXT_H_ */

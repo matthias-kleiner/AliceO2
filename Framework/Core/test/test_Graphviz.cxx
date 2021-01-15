@@ -11,6 +11,8 @@
 #define BOOST_TEST_MAIN
 #define BOOST_TEST_DYN_LINK
 
+#include "Mocking.h"
+#include "../src/ComputingResourceHelpers.h"
 #include "../src/DeviceSpecHelpers.h"
 #include "../src/GraphvizHelpers.h"
 #include "../src/SimpleResourceManager.h"
@@ -43,35 +45,35 @@ void lineByLineComparision(const std::string& as, const std::string& bs)
 // This is how you can define your processing in a declarative way
 WorkflowSpec defineDataProcessing()
 {
-  return { { "A", Inputs{},
-             Outputs{ OutputSpec{ "TST", "A1" },
-                      OutputSpec{ "TST", "A2" } } },
-           { "B",
-             { InputSpec{ "x", "TST", "A1" } },
-             Outputs{ OutputSpec{ "TST", "B1" } } },
-           { "C", Inputs{ InputSpec{ "x", "TST", "A2" } },
-             Outputs{ OutputSpec{ "TST", "C1" } } },
-           { "D",
-             Inputs{ InputSpec{ "i1", "TST", "B1" },
-                     InputSpec{ "i2", "TST", "C1" } },
-             Outputs{} } };
+  return {{"A", Inputs{},
+           Outputs{OutputSpec{"TST", "A1"},
+                   OutputSpec{"TST", "A2"}}},
+          {"B",
+           {InputSpec{"x", "TST", "A1"}},
+           Outputs{OutputSpec{"TST", "B1"}}},
+          {"C", Inputs{InputSpec{"x", "TST", "A2"}},
+           Outputs{OutputSpec{"TST", "C1"}}},
+          {"D",
+           Inputs{InputSpec{"i1", "TST", "B1"},
+                  InputSpec{"i2", "TST", "C1"}},
+           Outputs{}}};
 }
 
 WorkflowSpec defineDataProcessing2()
 {
   return {
-    { "A",
-      {},
-      {
-        OutputSpec{ "TST", "A" },
-      } },
-    timePipeline({ "B",
-                   { InputSpec{ "a", "TST", "A" } },
-                   { OutputSpec{ "TST", "B" } } },
+    {"A",
+     {},
+     {
+       OutputSpec{"TST", "A"},
+     }},
+    timePipeline({"B",
+                  {InputSpec{"a", "TST", "A"}},
+                  {OutputSpec{"TST", "B"}}},
                  3),
-    timePipeline({ "C",
-                   { InputSpec{ "b", "TST", "B" } },
-                   { OutputSpec{ "TST", "C" } } },
+    timePipeline({"C",
+                  {InputSpec{"b", "TST", "B"}},
+                  {OutputSpec{"TST", "C"}}},
                  2),
   };
 }
@@ -94,11 +96,12 @@ BOOST_AUTO_TEST_CASE(TestGraphviz)
   for (auto& device : devices) {
     BOOST_CHECK(device.id != "");
   }
-  auto channelPolicies = ChannelConfigurationPolicy::createDefaultPolicies();
+  auto configContext = makeEmptyConfigContext();
+  auto channelPolicies = ChannelConfigurationPolicy::createDefaultPolicies(*configContext);
   auto completionPolicies = CompletionPolicy::createDefaultPolicies();
-  SimpleResourceManager rm(22000, 1000);
-  auto resources = rm.getAvailableResources();
-  DeviceSpecHelpers::dataProcessorSpecs2DeviceSpecs(workflow, channelPolicies, completionPolicies, devices, resources);
+  std::vector<ComputingResource> resources = {ComputingResourceHelpers::getLocalhostResource()};
+  SimpleResourceManager rm(resources);
+  DeviceSpecHelpers::dataProcessorSpecs2DeviceSpecs(workflow, channelPolicies, completionPolicies, devices, rm, "workflow-id");
   str.str("");
   GraphvizHelpers::dumpDeviceSpec2Graphviz(str, devices);
   lineByLineComparision(str.str(), R"EXPECTED(digraph structs {
@@ -132,11 +135,12 @@ BOOST_AUTO_TEST_CASE(TestGraphvizWithPipeline)
   for (auto& device : devices) {
     BOOST_CHECK(device.id != "");
   }
-  auto channelPolicies = ChannelConfigurationPolicy::createDefaultPolicies();
+  auto configContext = makeEmptyConfigContext();
+  auto channelPolicies = ChannelConfigurationPolicy::createDefaultPolicies(*configContext);
   auto completionPolicies = CompletionPolicy::createDefaultPolicies();
-  SimpleResourceManager rm(22000, 1000);
-  auto resources = rm.getAvailableResources();
-  DeviceSpecHelpers::dataProcessorSpecs2DeviceSpecs(workflow, channelPolicies, completionPolicies, devices, resources);
+  std::vector<ComputingResource> resources = {ComputingResourceHelpers::getLocalhostResource()};
+  SimpleResourceManager rm(resources);
+  DeviceSpecHelpers::dataProcessorSpecs2DeviceSpecs(workflow, channelPolicies, completionPolicies, devices, rm, "workflow-id");
   str.str("");
   GraphvizHelpers::dumpDeviceSpec2Graphviz(str, devices);
   lineByLineComparision(str.str(), R"EXPECTED(digraph structs {

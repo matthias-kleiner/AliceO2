@@ -18,9 +18,7 @@
 
 #include <functional>
 
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
 /// This is the class holding the actual algorithm to be used. Notice that the
@@ -42,37 +40,44 @@ namespace framework
 /// FIXME:  we  should  probably  return   also  a  function  to  handle  EXIT
 /// transition...
 struct AlgorithmSpec {
-  using ProcessCallback = std::function<void(ProcessingContext &)>;
+  using ProcessCallback = std::function<void(ProcessingContext&)>;
   using InitCallback = std::function<ProcessCallback(InitContext&)>;
-  using ErrorCallback = std::function<void(ErrorContext &)>;
-  static ErrorCallback &emptyErrorCallback() {
+  using ErrorCallback = std::function<void(ErrorContext&)>;
+
+  static AlgorithmSpec dummyAlgorithm()
+  {
+    return AlgorithmSpec{ProcessCallback{nullptr}};
+  }
+
+  static ErrorCallback& emptyErrorCallback()
+  {
     static ErrorCallback callback = nullptr;
     return callback;
   }
 
   AlgorithmSpec()
-  : onInit{nullptr},
-    onProcess{nullptr},
-    onError{nullptr}
+    : onInit{nullptr},
+      onProcess{nullptr},
+      onError{nullptr}
   {
   }
 
-  AlgorithmSpec(AlgorithmSpec &&) = default;
-  AlgorithmSpec(const AlgorithmSpec &) = default;
-  AlgorithmSpec(AlgorithmSpec &) = default;
-  AlgorithmSpec &operator=(const AlgorithmSpec &) = default;
+  AlgorithmSpec(AlgorithmSpec&&) = default;
+  AlgorithmSpec(const AlgorithmSpec&) = default;
+  AlgorithmSpec(AlgorithmSpec&) = default;
+  AlgorithmSpec& operator=(const AlgorithmSpec&) = default;
 
-  AlgorithmSpec(ProcessCallback process, ErrorCallback &error = emptyErrorCallback())
-  : onInit{nullptr},
-    onProcess{process},
-    onError{error}
+  AlgorithmSpec(ProcessCallback process, ErrorCallback& error = emptyErrorCallback())
+    : onInit{nullptr},
+      onProcess{process},
+      onError{error}
   {
   }
 
-  AlgorithmSpec(InitCallback init, ErrorCallback &error = emptyErrorCallback())
-  : onInit{init},
-    onProcess{nullptr},
-    onError{error}
+  AlgorithmSpec(InitCallback init, ErrorCallback& error = emptyErrorCallback())
+    : onInit{init},
+      onProcess{nullptr},
+      onError{error}
   {
   }
 
@@ -81,13 +86,18 @@ struct AlgorithmSpec {
   ErrorCallback onError = nullptr;
 };
 
+/// Helper class for an algorithm which is loaded as a plugin.
+struct AlgorithmPlugin {
+  virtual AlgorithmSpec create() = 0;
+};
+
 template <typename T>
 struct ContextElementTraits {
-  static T& get(ProcessingContext& ctx)
+  static decltype(auto) get(ProcessingContext& ctx)
   {
     return ctx.services().get<T>();
   }
-  static T& get(InitContext& ctx)
+  static decltype(auto) get(InitContext& ctx)
   {
     return ctx.services().get<T>();
   }
@@ -173,7 +183,6 @@ AlgorithmSpec::InitCallback adaptStateful(LAMBDA l)
   return adaptStatefulF(FFL(l));
 }
 
-} // namespace framework
-} // namespace o2
+} // namespace o2::framework
 
 #endif // FRAMEWORK_ALGORITHMSPEC_H

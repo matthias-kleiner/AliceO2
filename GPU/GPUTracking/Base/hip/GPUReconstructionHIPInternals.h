@@ -11,15 +11,18 @@
 /// \file GPUReconstructionHIPInternals.h
 /// \author David Rohr
 
+// All HIP-header related stuff goes here, so we can run CING over GPUReconstructionHIP
 #ifndef GPURECONSTRUCTIONHIPINTERNALS_H
 #define GPURECONSTRUCTIONHIPINTERNALS_H
+
+#include "GPULogging.h"
 
 namespace GPUCA_NAMESPACE
 {
 namespace gpu
 {
 struct GPUReconstructionHIPInternals {
-  hipStream_t HIPStreams[GPUCA_MAX_STREAMS]; // Pointer to array of HIP Streams
+  hipStream_t Streams[GPUCA_MAX_STREAMS]; // Pointer to array of HIP Streams
 };
 
 #define GPUFailedMsg(x) GPUFailedMsgA(x, __FILE__, __LINE__)
@@ -31,7 +34,7 @@ static int GPUFailedMsgAI(const long long int error, const char* file, int line)
   if (error == hipSuccess) {
     return (0);
   }
-  printf("HIP Error: %lld / %s (%s:%d)\n", error, hipGetErrorString((hipError_t)error), file, line);
+  GPUError("HIP Error: %lld / %s (%s:%d)", error, hipGetErrorString((hipError_t)error), file, line);
   return 1;
 }
 
@@ -43,6 +46,21 @@ static void GPUFailedMsgA(const long long int error, const char* file, int line)
 }
 
 static_assert(std::is_convertible<hipEvent_t, void*>::value, "HIP event type incompatible to deviceEvent");
+
+class ThrustVolatileAsyncAllocator
+{
+ public:
+  typedef char value_type;
+
+  ThrustVolatileAsyncAllocator(GPUReconstruction* r) : mRec(r) {}
+  char* allocate(std::ptrdiff_t n) { return (char*)mRec->AllocateVolatileDeviceMemory(n); }
+
+  void deallocate(char* ptr, size_t) {}
+
+ private:
+  GPUReconstruction* mRec;
+};
+
 } // namespace gpu
 } // namespace GPUCA_NAMESPACE
 

@@ -15,24 +15,25 @@
 #ifndef __ALICEO2__ClustererTask__
 #define __ALICEO2__ClustererTask__
 
-#include "FairTask.h"  // for FairTask, InitStatus
-#include "Rtypes.h"    // for ClustererTask::Class, ClassDef, etc
+#include "FairTask.h" // for FairTask, InitStatus
+#include "Rtypes.h"   // for ClustererTask::Class, ClassDef, etc
 
-#include "TPCBase/Digit.h"
+#include "DataFormatsTPC/Digit.h"
 #include "TPCReconstruction/HwClusterer.h"
-#include "SimulationDataFormat/MCTruthContainer.h"
+#include "SimulationDataFormat/ConstMCTruthContainer.h"
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "DataFormatsTPC/Helpers.h"
 #include "DataFormatsTPC/ClusterHardware.h"
 #include <vector>
 #include <memory>
 
-namespace o2 {
-namespace tpc{
+namespace o2
+{
+namespace tpc
+{
 
-class ClustererTask : public FairTask{
-
-  using MCLabelContainer = o2::dataformats::MCTruthContainer<o2::MCCompLabel>;
+class ClustererTask : public FairTask
+{
   using OutputType = ClusterHardwareContainer8kb;
 
  public:
@@ -65,22 +66,21 @@ class ClustererTask : public FairTask{
 
   // Digit arrays
   std::unique_ptr<const std::vector<Digit>> mDigitsArray;     ///< Array of TPC digits
-  std::unique_ptr<const MCLabelContainer> mDigitMCTruthArray; ///< Array for MCTruth information associated to digits in mDigitsArrray
+  std::unique_ptr<const o2::dataformats::ConstMCLabelContainerView> mDigitMCTruthArray; ///< Array for MCTruth information associated to digits in mDigitsArrray
 
   // Cluster arrays
   std::unique_ptr<std::vector<OutputType>> mHwClustersArray; ///< Array of clusters found by Hw Clusterfinder
-  std::unique_ptr<MCLabelContainer> mHwClustersMCTruthArray; ///< Array for MCTruth information associated to cluster in mHwClustersArrays
+  std::unique_ptr<o2::dataformats::MCLabelContainer> mHwClustersMCTruthArray; ///< Array for MCTruth information associated to cluster in mHwClustersArrays
 
-  ClassDefOverride(ClustererTask, 1)
+  ClassDefOverride(ClustererTask, 1);
 };
 
-inline
-void ClustererTask::setContinuousReadout(bool isContinuous)
+inline void ClustererTask::setContinuousReadout(bool isContinuous)
 {
   mIsContinuousReadout = isContinuous;
 }
 
-}
-}
+} // namespace tpc
+} // namespace o2
 
 #endif

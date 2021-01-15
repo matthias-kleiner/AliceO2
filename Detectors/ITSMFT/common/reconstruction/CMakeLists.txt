@@ -1,39 +1,67 @@
-set(MODULE_NAME "ITSMFTReconstruction")
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-O2_SETUP(NAME ${MODULE_NAME})
+o2_add_library(ITSMFTReconstruction
+               TARGETVARNAME targetName
+               SOURCES src/ChipMappingITS.cxx
+                       src/ChipMappingMFT.cxx
+                       src/DigitPixelReader.cxx
+                       src/Clusterer.cxx
+                       src/ClustererParam.cxx
+                       src/PixelData.cxx
+                       src/BuildTopologyDictionary.cxx
+                       src/LookUp.cxx
+                       src/TopologyFastSimulation.cxx
+                       src/AlpideCoder.cxx
+                       src/PayLoadCont.cxx
+                       src/GBTWord.cxx
+                       src/RUInfo.cxx
+		       src/GBTLink.cxx
+		       src/RUDecodeData.cxx
+		       src/RawPixelDecoder.cxx
+                       src/CTFCoder.cxx
+                       src/DecodingStat.cxx
+               PUBLIC_LINK_LIBRARIES O2::ITSMFTBase
+                                     O2::CommonDataFormat
+	                             O2::DetectorsRaw
+                                     O2::SimulationDataFormat 
+                                     O2::DataFormatsITSMFT
+				     O2::DPLUtils
+                                     O2::rANS
+                                     O2::Headers)
 
-set(SRCS
-  src/ChipMappingITS.cxx
-  src/ChipMappingMFT.cxx
-  src/DigitPixelReader.cxx	
-  src/Clusterer.cxx
-  src/PixelData.cxx
-  src/BuildTopologyDictionary.cxx
-  src/LookUp.cxx
-  src/TopologyFastSimulation.cxx
-  src/AlpideCoder.cxx
-  src/PayLoadCont.cxx
-  src/GBTWord.cxx
-  src/RUInfo.cxx
-)
-set(HEADERS
-  include/${MODULE_NAME}/PixelReader.h
-  include/${MODULE_NAME}/DigitPixelReader.h
-  include/${MODULE_NAME}/RawPixelReader.h
-  include/${MODULE_NAME}/PixelData.h
-  include/${MODULE_NAME}/Clusterer.h
-  include/${MODULE_NAME}/BuildTopologyDictionary.h
-  include/${MODULE_NAME}/LookUp.h
-  include/${MODULE_NAME}/TopologyFastSimulation.h
-  include/${MODULE_NAME}/ChipMappingITS.h
-  include/${MODULE_NAME}/ChipMappingMFT.h
-  include/${MODULE_NAME}/AlpideCoder.h
-  include/${MODULE_NAME}/GBTWord.h
-  include/${MODULE_NAME}/PayLoadCont.h
-  include/${MODULE_NAME}/PayLoadSG.h
-  include/${MODULE_NAME}/RUInfo.h
-)
-Set(LINKDEF src/ITSMFTReconstructionLinkDef.h)
-Set(LIBRARY_NAME ${MODULE_NAME})
-Set(BUCKET_NAME itsmft_reconstruction_bucket)
-O2_GENERATE_LIBRARY()
+o2_target_root_dictionary(
+  ITSMFTReconstruction
+  HEADERS include/ITSMFTReconstruction/PixelReader.h
+          include/ITSMFTReconstruction/GBTLink.h
+          include/ITSMFTReconstruction/RUDecodeData.h
+	  include/ITSMFTReconstruction/RawPixelDecoder.h
+          include/ITSMFTReconstruction/DigitPixelReader.h
+          include/ITSMFTReconstruction/RawPixelReader.h
+          include/ITSMFTReconstruction/PixelData.h
+          include/ITSMFTReconstruction/Clusterer.h
+          include/ITSMFTReconstruction/ClustererParam.h
+          include/ITSMFTReconstruction/BuildTopologyDictionary.h
+          include/ITSMFTReconstruction/LookUp.h
+          include/ITSMFTReconstruction/TopologyFastSimulation.h
+          include/ITSMFTReconstruction/ChipMappingITS.h
+          include/ITSMFTReconstruction/ChipMappingMFT.h
+          include/ITSMFTReconstruction/AlpideCoder.h
+          include/ITSMFTReconstruction/GBTWord.h
+          include/ITSMFTReconstruction/PayLoadCont.h
+          include/ITSMFTReconstruction/PayLoadSG.h
+          include/ITSMFTReconstruction/DecodingStat.h
+          include/ITSMFTReconstruction/RUInfo.h)
+
+if (OpenMP_CXX_FOUND)
+    target_compile_definitions(${targetName} PRIVATE WITH_OPENMP)
+    target_link_libraries(${targetName} PRIVATE OpenMP::OpenMP_CXX)
+endif()
+  

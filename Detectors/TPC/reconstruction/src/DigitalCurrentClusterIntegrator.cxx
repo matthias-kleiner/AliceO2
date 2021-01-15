@@ -14,15 +14,13 @@
 #include "TPCReconstruction/DigitalCurrentClusterIntegrator.h"
 
 using namespace o2::tpc;
+using namespace o2::tpc::constants;
 
 void DigitalCurrentClusterIntegrator::clear()
 {
-  for (int i = 0;i < Constants::MAXSECTOR;i++)
-  {
-    for (int j = 0;j < Constants::MAXGLOBALPADROW;j++)
-    {
-      if (mIntegratedCurrents[i][j])
-      {
+  for (int i = 0; i < MAXSECTOR; i++) {
+    for (int j = 0; j < MAXGLOBALPADROW; j++) {
+      if (mIntegratedCurrents[i][j]) {
         int nPads = Mapper::instance().getNumberOfPadsInRowSector(j);
         memset(&mIntegratedCurrents[i][j][0], 0, nPads * sizeof(mIntegratedCurrents[i][j][0]));
       }
@@ -32,10 +30,8 @@ void DigitalCurrentClusterIntegrator::clear()
 
 void DigitalCurrentClusterIntegrator::reset()
 {
-  for (int i = 0;i < Constants::MAXSECTOR;i++)
-  {
-    for (int j = 0;j < Constants::MAXGLOBALPADROW;j++)
-    {
+  for (int i = 0; i < MAXSECTOR; i++) {
+    for (int j = 0; j < MAXGLOBALPADROW; j++) {
       mIntegratedCurrents[i][j].reset(nullptr);
     }
   }

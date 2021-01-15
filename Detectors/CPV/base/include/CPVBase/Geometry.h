@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include <Rtypes.h>
 #include <RStringView.h>
 #include <TMath.h>
 
@@ -23,17 +24,30 @@ namespace cpv
 class Geometry
 {
  public:
-  ///
-  /// Default constructor.
-  /// It must be kept public for root persistency purposes,
-  /// but should never be called by the outside world
-  Geometry() = default;
+  static constexpr short kNumberOfCPVPadsPhi = 128;
+  static constexpr short kNumberOfCPVPadsZ = 60;
+  static constexpr float kCPVPadSizePhi = 1.13;
+  static constexpr float kCPVPadSizeZ = 2.1093;
+  //for hwaddress
+  static constexpr short kNPAD = 48;
+  static constexpr short kNDilogic = 10;
+  static constexpr short kNRow = 16;
+  static constexpr short kNDDL = 4;
+
+  /// Available numbering schems:
+  /// relative pad coordinates
+  /// relId[3]={Module, phi col, z row} where Module=1..3, phi col=0..127, z row=0..59
+  /// Absolute pad coordunate
+  /// absId=0..128*60*3=23040
+  /// Raw addresses:
+  /// DDL corresponds to one module: ddl=Module-1
+  /// each module consist of 16 columns of width 8 pads: row=0..15
+  /// Each column consists of 10 dilogics (in z direction) dilogic=0...9
+  /// Ecah dilogic contains 8*6 pads: hwaddress=0...48
 
   ///
-  /// Constructor for normal use.
-  ///
-  /// \param name: geometry name: CPV (see main class description for definition)
-  Geometry(const std::string_view name);
+  /// Default constructor.
+  Geometry() = default;
 
   ///
   /// Copy constructor.
@@ -50,41 +64,14 @@ class Geometry
   ///
   Geometry& operator=(const Geometry& rvalue);
 
-  ///
-  /// \return the pointer of the _existing_ unique instance of the geometry
-  /// It should have been set before with GetInstance(name) method
-  ///
-  static Geometry* GetInstance()
-  {
-    if (sGeom) {
-      return sGeom;
-    } else {
-      return GetInstance("Run3CPV");
-    }
-  }
-
-  ///
-  /// \return (newly created) pointer of the unique instance of the geometry. Previous instance is destroied.
-  ///
-  /// \param name: geometry name: CPV (see main class description for definition)
-  /// \param title
-  //  \param mcname: Geant3/4, Fluka, needed for settings of transport (check) \param mctitle: Geant4 physics list
-  //  (check)
-  ///
-  static Geometry* GetInstance(const std::string_view name)
-  {
-    if (sGeom) {
-      if (sGeom->GetName() == name) {
-        return sGeom;
-      } else {
-        delete sGeom;
-      }
-    }
-    sGeom = new Geometry(name);
-    return sGeom;
-  }
-
-  int AreNeighbours(int absId1, int absId2) const;
+  /// \breif Checks if two channels have common side
+  /// \param absId1: absId of first channel, order important!
+  /// \param absId2: absId of secont channel, order important!
+  /// \return  0 are not neighbour but continue searching
+  //         = 1 are neighbour
+  //         = 2 are not neighbour but do not continue searching
+  //         =-1 are not neighbour, continue searching, but do not look before d2 next time
+  static short areNeighbours(unsigned short absId1, unsigned short absId2);
 
   ///
   /// \return AbsId index of the CPV cell
@@ -93,30 +80,22 @@ class Geometry
   /// \param strip: strip number
   //  \param cell: cell in strip number
   ///
-  int RelToAbsId(int moduleNumber, int iphi, int iz) const;
-  bool AbsToRelNumbering(int absId, int* relid) const;
-  int AbsIdToModule(int absId);
-  void AbsIdToRelPosInModule(int absId, double& x, double& z) const;
-  bool RelToAbsNumbering(const int* RelId, int& AbsId) const;
-  // converts the absolute CPV numbering to a relative
+  static unsigned short relToAbsId(short moduleNumber, short iphi, short iz);
+  static bool absToRelNumbering(unsigned short absId, short* relid);
+  static short absIdToModule(unsigned short absId);
+  static void absIdToRelPosInModule(unsigned short absId, float& x, float& z);
+  static bool relToAbsNumbering(const short* relId, unsigned short& absId);
 
-  int GetTotalNPads() const { return mNumberOfCPVPadsPhi * mNumberOfCPVPadsZ * 3; } // TODO: evaluate from real geometry
-  int IsPadExists(int absId) const
+  static void hwaddressToAbsId(short ddl, short row, short dilogic, short hw, unsigned short& absId);
+  static void absIdToHWaddress(unsigned short absId, short& ddl, short& row, short& dilogic, short& hw);
+
+  static unsigned short getTotalNPads() { return kNumberOfCPVPadsPhi * kNumberOfCPVPadsZ * 4; }
+  static bool IsPadExists(unsigned short absId)
   {
-    return absId > 0 && absId <= GetTotalNPads();
+    return absId > 0 && absId <= getTotalNPads();
   } // TODO: evaluate from real geometry
 
-  const std::string& GetName() const { return mGeoName; }
-
- private:
-  static Geometry* sGeom; // Pointer to the unique instance of the singleton
-
-  int mNumberOfCPVPadsPhi; // Number of pads in phi direction
-  int mNumberOfCPVPadsZ;   // Number of pads in z direction
-  double mCPVPadSizePhi;   // pad size in phi direction (in cm)
-  double mCPVPadSizeZ;     // pad size in z direction (in cm)
-
-  std::string mGeoName; ///< Geometry name string
+  ClassDefNV(Geometry, 1);
 };
 } // namespace cpv
 } // namespace o2

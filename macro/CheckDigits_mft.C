@@ -10,7 +10,7 @@
 #include <TString.h>
 #include <TTree.h>
 
-#include "ITSMFTBase/Digit.h"
+#include "DataFormatsITSMFT/Digit.h"
 #include "ITSMFTBase/SegmentationAlpide.h"
 #include "ITSMFTSimulation/Hit.h"
 #include "MFTBase/GeometryTGeo.h"
@@ -25,9 +25,9 @@ using namespace o2::base;
 
 void CheckDigits_mft(Int_t nEvents = 1, Int_t nMuons = 10, TString mcEngine = "TGeant3")
 {
-  using o2::itsmft::SegmentationAlpide;
   using o2::itsmft::Digit;
   using o2::itsmft::Hit;
+  using o2::itsmft::SegmentationAlpide;
   using namespace o2::mft;
 
   TH1F* hTrackID = new TH1F("hTrackID", "hTrackID", 1.1 * nMuons + 1, -0.5, (nMuons + 0.1 * nMuons) + 0.5);
@@ -43,7 +43,7 @@ void CheckDigits_mft(Int_t nEvents = 1, Int_t nMuons = 10, TString mcEngine = "T
   gFile->Get("FairGeoParSet");
 
   auto* gman = o2::mft::GeometryTGeo::Instance();
-  gman->fillMatrixCache(o2::utils::bit2Mask(o2::TransformType::L2G));
+  gman->fillMatrixCache(o2::math_utils::bit2Mask(o2::math_utils::TransformType::L2G));
 
   SegmentationAlpide seg;
 
@@ -83,7 +83,7 @@ void CheckDigits_mft(Int_t nEvents = 1, Int_t nMuons = 10, TString mcEngine = "T
       Int_t ix = d->getRow(), iz = d->getColumn();
       Float_t x = 0.f, z = 0.f;
       seg.detectorToLocal(ix, iz, x, z);
-      const Point3D<Float_t> locD(x, 0., z);
+      const o2::math_utils::Point3D<Float_t> locD(x, 0., z);
 
       const auto& labs = labels->getLabels(nd);
 

@@ -28,6 +28,7 @@
 #include <limits>
 #include <fstream>
 #include <iostream>
+#include "TestParameters.h"
 
 using namespace o2::mch::mapping;
 namespace bdata = boost::unit_test::data;
@@ -112,8 +113,8 @@ BOOST_AUTO_TEST_CASE(NofNonBendingPads)
 
 BOOST_AUTO_TEST_CASE(TotalNofBendingFECInSegTypes)
 {
-  int nb{ 0 };
-  int nnb{ 0 };
+  int nb{0};
+  int nnb{0};
   forOneDetectionElementOfEachSegmentationType([&](int detElemId) {
     nb += CathodeSegmentation(detElemId, true).nofDualSampas();
     nnb += CathodeSegmentation(detElemId, false).nofDualSampas();
@@ -224,10 +225,10 @@ BOOST_AUTO_TEST_CASE(NofNonBendingFEC)
 
 BOOST_AUTO_TEST_CASE(CountPadsInCathodeSegmentations)
 {
-  int n{ 0 };
+  int n{0};
   forOneDetectionElementOfEachSegmentationType([&n](int detElemId) {
-    for (auto plane : { true, false }) {
-      CathodeSegmentation seg{ detElemId, plane };
+    for (auto plane : {true, false}) {
+      CathodeSegmentation seg{detElemId, plane};
       n += seg.nofPads();
     }
   });
@@ -236,7 +237,7 @@ BOOST_AUTO_TEST_CASE(CountPadsInCathodeSegmentations)
 
 BOOST_AUTO_TEST_CASE(LoopOnCathodeSegmentations)
 {
-  int n{ 0 };
+  int n{0};
   forOneDetectionElementOfEachSegmentationType([&n](int detElemId) {
     n += 2; // two planes (bending, non-bending)
   });
@@ -247,10 +248,10 @@ BOOST_AUTO_TEST_CASE(DualSampasWithLessThan64Pads)
 {
   std::map<int, int> non64;
   forOneDetectionElementOfEachSegmentationType([&non64](int detElemId) {
-    for (auto plane : { true, false }) {
-      CathodeSegmentation seg{ detElemId, plane };
+    for (auto plane : {true, false}) {
+      CathodeSegmentation seg{detElemId, plane};
       for (int i = 0; i < seg.nofDualSampas(); ++i) {
-        int n{ 0 };
+        int n{0};
         seg.forEachPadInDualSampa(seg.dualSampaId(i), [&n](int /*catPadIndex*/) { ++n; });
         if (n != 64) {
           non64[n]++;
@@ -278,7 +279,7 @@ BOOST_AUTO_TEST_CASE(DualSampasWithLessThan64Pads)
   BOOST_CHECK_EQUAL(non64[62], 4);
   BOOST_CHECK_EQUAL(non64[63], 7);
 
-  int n{ 0 };
+  int n{0};
   for (auto p : non64) {
     n += p.second;
   }
@@ -287,7 +288,7 @@ BOOST_AUTO_TEST_CASE(DualSampasWithLessThan64Pads)
 }
 
 struct SEG {
-  CathodeSegmentation seg{ 100, true };
+  CathodeSegmentation seg{100, true};
 };
 
 BOOST_FIXTURE_TEST_SUITE(HasPadBy, SEG)
@@ -305,7 +306,12 @@ BOOST_AUTO_TEST_CASE(ReturnsTrueIfPadIsConnected)
 
 BOOST_AUTO_TEST_CASE(ReturnsFalseIfPadIsNotConnected)
 {
-  BOOST_CHECK_EQUAL(seg.isValid(seg.findPadByFEE(214, 14)), false);
+  TestParameters params;
+  int testChannel{14};
+  if (params.isSegmentationRun3) {
+    testChannel = 39;
+  }
+  BOOST_CHECK_EQUAL(seg.isValid(seg.findPadByFEE(214, testChannel)), false);
 }
 
 BOOST_AUTO_TEST_CASE(HasPadByPosition)
@@ -315,19 +321,24 @@ BOOST_AUTO_TEST_CASE(HasPadByPosition)
 
 BOOST_AUTO_TEST_CASE(CheckPositionOfOnePadInDE100Bending)
 {
-  BOOST_CHECK_EQUAL(seg.findPadByFEE(76, 9), seg.findPadByPosition(1.575, 18.69));
+  TestParameters params;
+  int testChannel{9};
+  if (params.isSegmentationRun3) {
+    testChannel = 47;
+  }
+  BOOST_CHECK_EQUAL(seg.findPadByFEE(76, testChannel), seg.findPadByPosition(1.575, 18.69));
 }
 
 BOOST_AUTO_TEST_CASE(CheckCopy)
 {
-  CathodeSegmentation copy{ seg };
+  CathodeSegmentation copy{seg};
   BOOST_TEST((copy == seg));
   BOOST_TEST(copy.nofPads() == seg.nofPads());
 }
 
 BOOST_AUTO_TEST_CASE(CheckAssignment)
 {
-  CathodeSegmentation copy{ 200, true };
+  CathodeSegmentation copy{200, true};
   copy = seg;
   BOOST_TEST((copy == seg));
   BOOST_TEST(copy.nofPads() == seg.nofPads());

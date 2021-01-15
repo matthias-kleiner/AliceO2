@@ -1,19 +1,27 @@
-SET(MODULE_NAME SpacePoints)
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-O2_SETUP(NAME ${MODULE_NAME})
+o2_add_library(SpacePoints
+               SOURCES src/SpacePointsCalibParam.cxx
+                       src/TrackResiduals.cxx
+                       src/TrackInterpolation.cxx
+               PUBLIC_LINK_LIBRARIES O2::DataFormatsTPC
+                                     O2::TPCBase
+                                     O2::TPCReconstruction
+                                     O2::TPCFastTransformation
+                                     O2::DataFormatsITS
+                                     O2::DataFormatsITSMFT
+                                     O2::DataFormatsTOF)
 
-SET(SRCS
-  src/Param.cxx
-  src/TrackResiduals.cxx
-)
-
-SET(HEADERS
-  include/${MODULE_NAME}/Param.h
-  include/${MODULE_NAME}/TrackResiduals.h
-)
-
-SET(LINKDEF src/SpacePointCalibLinkDef.h)
-SET(LIBRARY_NAME ${MODULE_NAME})
-SET(BUCKET_NAME spacepoint_calib_bucket)
-
-O2_GENERATE_LIBRARY()
+o2_target_root_dictionary(SpacePoints
+                          HEADERS include/SpacePoints/SpacePointsCalibParam.h
+                                  include/SpacePoints/TrackResiduals.h
+                                  include/SpacePoints/TrackInterpolation.h
+                          LINKDEF src/SpacePointCalibLinkDef.h)

@@ -29,36 +29,34 @@
 using namespace o2::base;
 
 const std::unordered_map<EProc, const char*> MaterialManager::mProcessIDToName = {
-  { EProc::kPAIR, "PAIR" },
-  { EProc::kCOMP, "COMP" },
-  { EProc::kPHOT, "PHOT" },
-  { EProc::kPFIS, "PFIS" },
-  { EProc::kDRAY, "DRAY" },
-  { EProc::kANNI, "ANNI" },
-  { EProc::kBREM, "BREM" },
-  { EProc::kHADR, "HADR" },
-  { EProc::kMUNU, "MUNU" },
-  { EProc::kDCAY, "DCAY" },
-  { EProc::kLOSS, "LOSS" },
-  { EProc::kMULS, "MULS" },
-  { EProc::kCKOV, "CKOV" },
-  { EProc::kRAYL, "RAYL" },
-  { EProc::kLABS, "LABS" }
-};
+  {EProc::kPAIR, "PAIR"},
+  {EProc::kCOMP, "COMP"},
+  {EProc::kPHOT, "PHOT"},
+  {EProc::kPFIS, "PFIS"},
+  {EProc::kDRAY, "DRAY"},
+  {EProc::kANNI, "ANNI"},
+  {EProc::kBREM, "BREM"},
+  {EProc::kHADR, "HADR"},
+  {EProc::kMUNU, "MUNU"},
+  {EProc::kDCAY, "DCAY"},
+  {EProc::kLOSS, "LOSS"},
+  {EProc::kMULS, "MULS"},
+  {EProc::kCKOV, "CKOV"},
+  {EProc::kRAYL, "RAYL"},
+  {EProc::kLABS, "LABS"}};
 
 const std::unordered_map<ECut, const char*> MaterialManager::mCutIDToName = {
-  { ECut::kCUTGAM, "CUTGAM" },
-  { ECut::kCUTELE, "CUTELE" },
-  { ECut::kCUTNEU, "CUTNEU" },
-  { ECut::kCUTHAD, "CUTHAD" },
-  { ECut::kCUTMUO, "CUTMUO" },
-  { ECut::kBCUTE, "BCUTE" },
-  { ECut::kBCUTM, "BCUTM" },
-  { ECut::kDCUTE, "DCUTE" },
-  { ECut::kDCUTM, "DCUTM" },
-  { ECut::kPPCUTM, "PPCUTM" },
-  { ECut::kTOFMAX, "TOFMAX" }
-};
+  {ECut::kCUTGAM, "CUTGAM"},
+  {ECut::kCUTELE, "CUTELE"},
+  {ECut::kCUTNEU, "CUTNEU"},
+  {ECut::kCUTHAD, "CUTHAD"},
+  {ECut::kCUTMUO, "CUTMUO"},
+  {ECut::kBCUTE, "BCUTE"},
+  {ECut::kBCUTM, "BCUTM"},
+  {ECut::kDCUTE, "DCUTE"},
+  {ECut::kDCUTM, "DCUTM"},
+  {ECut::kPPCUTM, "PPCUTM"},
+  {ECut::kTOFMAX, "TOFMAX"}};
 
 void MaterialManager::Material(const char* modname, Int_t imat, const char* name, Float_t a, Float_t z, Float_t dens,
                                Float_t radl, Float_t absl, Float_t* buf, Int_t nwbuf)
@@ -233,50 +231,50 @@ void MaterialManager::printMedia() const
   }
 }
 
-void MaterialManager::printProcesses() const
+void MaterialManager::printProcesses(std::ostream& stream) const
 {
-  LOG(INFO) << "Print process settings of media.";
-  std::cout << "Default process settings:\n";
+  stream << "Summary of process settings per media.\n";
+  stream << "-- Default process settings:\n";
   for (auto& p : mDefaultProcessMap) {
     auto it = mProcessIDToName.find(p.first);
     if (it != mProcessIDToName.end()) {
-      std::cout << "\t" << it->second << " = " << p.second << "\n";
+      stream << "\t" << it->second << " = " << p.second << "\n";
     }
   }
   if (mApplySpecialProcesses && mMediumProcessMap.size() > 0) {
-    std::cout << "Settings for single media:\n";
+    stream << "-- Custom process settings for single media:\n";
     for (auto& m : mMediumProcessMap) {
-      std::cout << "Global medium ID " << m.first << " (module = " << getModuleFromMediumID(m.first)
-                << ", medium name = " << getMediumNameFromMediumID(m.first) << "):\n";
+      stream << "Global medium ID " << m.first << " (module = " << getModuleFromMediumID(m.first)
+             << ", medium name = " << getMediumNameFromMediumID(m.first) << "):\n";
       for (auto& p : m.second) {
         auto it = mProcessIDToName.find(p.first);
         if (it != mProcessIDToName.end()) {
-          std::cout << "\t" << it->second << " = " << p.second << "\n";
+          stream << "\t" << it->second << " = " << p.second << "\n";
         }
       }
     }
   }
 }
 
-void MaterialManager::printCuts() const
+void MaterialManager::printCuts(std::ostream& stream) const
 {
-  LOG(INFO) << "Print cut settings of media.";
-  std::cout << "Default cut settings:\n";
+  stream << "Summary of cut settings per media.\n";
+  stream << "-- Default cut settings:\n";
   for (auto& c : mDefaultCutMap) {
     auto it = mCutIDToName.find(c.first);
     if (it != mCutIDToName.end()) {
-      std::cout << "\t" << it->second << " = " << c.second << "\n";
+      stream << "\t" << it->second << " = " << c.second << "\n";
     }
   }
   if (mApplySpecialCuts && mMediumCutMap.size() > 0) {
-    std::cout << "Settings for single media:\n";
+    stream << "-- Custom cut settings for single media:\n";
     for (auto& m : mMediumCutMap) {
-      std::cout << "Global medium ID " << m.first << " (module = " << getModuleFromMediumID(m.first)
-                << ", medium name = " << getMediumNameFromMediumID(m.first) << "):\n";
+      stream << "Global medium ID " << m.first << " (module = " << getModuleFromMediumID(m.first)
+             << ", medium name = " << getMediumNameFromMediumID(m.first) << "):\n";
       for (auto& c : m.second) {
         auto it = mCutIDToName.find(c.first);
         if (it != mCutIDToName.end()) {
-          std::cout << "\t" << it->second << " = " << c.second << "\n";
+          stream << "\t" << it->second << " = " << c.second << "\n";
         }
       }
     }
@@ -340,30 +338,30 @@ void MaterialManager::loadCutsAndProcessesFromFile(const char* modname, const ch
 
   /// list of cut enumerated in ascending column mode as written in file
   using namespace o2::base;
-  ECut cutnames[NCUTS] = { ECut::kCUTGAM,
-                           ECut::kCUTELE,
-                           ECut::kCUTNEU,
-                           ECut::kCUTHAD,
-                           ECut::kCUTMUO,
-                           ECut::kBCUTE,
-                           ECut::kBCUTM,
-                           ECut::kDCUTE,
-                           ECut::kDCUTM,
-                           ECut::kPPCUTM };
+  ECut cutnames[NCUTS] = {ECut::kCUTGAM,
+                          ECut::kCUTELE,
+                          ECut::kCUTNEU,
+                          ECut::kCUTHAD,
+                          ECut::kCUTMUO,
+                          ECut::kBCUTE,
+                          ECut::kBCUTM,
+                          ECut::kDCUTE,
+                          ECut::kDCUTM,
+                          ECut::kPPCUTM};
 
   /// list of process flags enumerated in ascending column mode as written in file
   // missing STRA for the moment
-  EProc procnames[NFLAGS - 1] = { EProc::kANNI,
-                                  EProc::kBREM,
-                                  EProc::kCOMP,
-                                  EProc::kDCAY,
-                                  EProc::kDRAY,
-                                  EProc::kHADR,
-                                  EProc::kLOSS,
-                                  EProc::kMULS,
-                                  EProc::kPAIR,
-                                  EProc::kPHOT,
-                                  EProc::kRAYL };
+  EProc procnames[NFLAGS - 1] = {EProc::kANNI,
+                                 EProc::kBREM,
+                                 EProc::kCOMP,
+                                 EProc::kDCAY,
+                                 EProc::kDRAY,
+                                 EProc::kHADR,
+                                 EProc::kLOSS,
+                                 EProc::kMULS,
+                                 EProc::kPAIR,
+                                 EProc::kPHOT,
+                                 EProc::kRAYL};
 
   std::ifstream cutfile(filename);
 
@@ -407,14 +405,14 @@ void MaterialManager::loadCutsAndProcessesFromFile(const char* modname, const ch
     // apply cuts via material manager interface
     for (int i = 0; i < NCUTS; ++i) {
       if (cut[i] >= 0.) {
-        SpecialCut(modname, itmed, cutnames[i], cut[i]);
+        SpecialCut(detName, itmed, cutnames[i], cut[i]);
       }
     }
 
     // apply process flags
     for (int i = 0; i < NFLAGS - 1; ++i) {
       if (flag[i] >= 0) {
-        SpecialProcess(modname, itmed, procnames[i], flag[i]);
+        SpecialProcess(detName, itmed, procnames[i], flag[i]);
       }
     }
   } // end loop over lines
@@ -437,6 +435,8 @@ void MaterialManager::SpecialCut(const char* modname, int localindex, ECut parID
   int globalindex = getMediumID(modname, localindex);
   if (globalindex != -1) {
     Cut(ESpecial::kTRUE, globalindex, parID, val);
+  } else {
+    LOG(WARN) << "SpecialCut: NO GLOBALINDEX FOUND FOR " << modname << " " << localindex;
   }
 }
 
@@ -658,4 +658,4 @@ void MaterialManager::printContainingMedia(std::string const& volumename)
   }
 }
 
-ClassImp(o2::base::MaterialManager)
+ClassImp(o2::base::MaterialManager);

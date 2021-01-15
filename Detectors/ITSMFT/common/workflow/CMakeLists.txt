@@ -1,14 +1,40 @@
-set(MODULE_NAME "ITSMFTWorkflow")
-set(MODULE_BUCKET_NAME ITSMFT_workflow_bucket)
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-O2_SETUP(NAME ${MODULE_NAME})
+o2_add_library(ITSMFTWorkflow
+               SOURCES src/ClusterReaderSpec.cxx
+                       src/DigitWriterSpec.cxx
+                       src/STFDecoderSpec.cxx
+                       src/EntropyEncoderSpec.cxx
+                       src/EntropyDecoderSpec.cxx
+               PUBLIC_LINK_LIBRARIES O2::Framework
+                                     O2::DataFormatsITSMFT
+                                     O2::SimulationDataFormat
+                                     O2::ITSMFTReconstruction
+                                     O2::ITSBase
+                                     O2::MFTBase
+                                     O2::DetectorsCommonDataFormats
+                                     O2::DataFormatsParameters)
 
-set(SRCS
-  src/ClusterReaderSpec.cxx
-  )
 
-set(LIBRARY_NAME ${MODULE_NAME})
-set(BUCKET_NAME ${MODULE_BUCKET_NAME})
+o2_add_executable(stf-decoder-workflow
+                  SOURCES src/stf-decoder-workflow.cxx
+                  COMPONENT_NAME itsmft
+                  PUBLIC_LINK_LIBRARIES O2::ITSMFTWorkflow)
 
-O2_GENERATE_LIBRARY()
+o2_add_executable(entropy-encoder-workflow
+                  SOURCES src/entropy-encoder-workflow.cxx
+                  COMPONENT_NAME itsmft
+                  PUBLIC_LINK_LIBRARIES O2::ITSMFTWorkflow)
 
+o2_add_executable(digit-writer-workflow
+                  SOURCES src/digit-writer-workflow.cxx
+                  COMPONENT_NAME itsmft
+                  PUBLIC_LINK_LIBRARIES O2::ITSMFTWorkflow)

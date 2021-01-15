@@ -31,7 +31,7 @@ namespace itsmft
 {
 class Hit;
 }
-}
+} // namespace o2
 
 namespace o2
 {
@@ -39,7 +39,7 @@ namespace mft
 {
 class GeometryTGeo;
 }
-}
+} // namespace o2
 
 namespace o2
 {
@@ -90,41 +90,13 @@ class Detector : public o2::base::DetImpl<Detector>
   /// Creating materials for the detector
 
   void createMaterials();
-
-  enum EMedia {
-    Zero,
-    Air,
-    Vacuum,
-    Si,
-    Readout,
-    Support,
-    Carbon,
-    Be,
-    Alu,
-    Water,
-    SiO2,
-    Inox,
-    Kapton,
-    Epoxy,
-    CarbonFiber,
-    CarbonEpoxy,
-    Rohacell,
-    Polyimide,
-    PEEK,
-    FR4,
-    Cu,
-    X7R,
-    X7Rw,
-    CarbonFleece,
-    SE4445
-  }; // media IDs used in CreateMaterials
-
   void setDensitySupportOverSi(Double_t density)
   {
-    if (density > 1e-6)
+    if (density > 1e-6) {
       mDensitySupportOverSi = density;
-    else
+    } else {
       mDensitySupportOverSi = 1e-6;
+    }
   }
 
   void createGeometry();
@@ -157,14 +129,14 @@ class Detector : public o2::base::DetImpl<Detector>
 
   template <typename Det>
   friend class o2::base::DetImpl;
-  ClassDefOverride(Detector, 1)
+  ClassDefOverride(Detector, 1);
 };
 
 // Input and output function for standard C++ input/output.
 std::ostream& operator<<(std::ostream& os, Detector& source);
 std::istream& operator>>(std::istream& os, Detector& source);
-}
-}
+} // namespace mft
+} // namespace o2
 
 #ifdef USESHM
 namespace o2

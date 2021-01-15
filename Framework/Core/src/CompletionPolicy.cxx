@@ -14,16 +14,17 @@
 #include <functional>
 #include <iostream>
 
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
 /// By default the CompletionPolicy matches any Device and only runs a
 /// computation when all the inputs are there.
 std::vector<CompletionPolicy>
-CompletionPolicy::createDefaultPolicies() {
-  return { CompletionPolicyHelpers::consumeWhenAll() };
+  CompletionPolicy::createDefaultPolicies()
+{
+  return {
+    CompletionPolicyHelpers::defineByNameOrigin("internal-dpl-aod-writer", "TFN", CompletionOp::Consume),
+    CompletionPolicyHelpers::consumeWhenAll()};
 }
 
 std::ostream& operator<<(std::ostream& oss, CompletionPolicy::CompletionOp const& val)
@@ -45,5 +46,4 @@ std::ostream& operator<<(std::ostream& oss, CompletionPolicy::CompletionOp const
   return oss;
 }
 
-} // namespace framework
-} // namespace o2
+} // namespace o2::framework

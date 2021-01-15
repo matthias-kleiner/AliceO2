@@ -41,9 +41,9 @@
 
 using namespace GPUCA_NAMESPACE::gpu;
 
-ClassImp(AliHLTTPCClusterStatComponent)
+ClassImp(AliHLTTPCClusterStatComponent);
 
-  AliHLTTPCClusterStatComponent::AliHLTTPCClusterStatComponent()
+AliHLTTPCClusterStatComponent::AliHLTTPCClusterStatComponent()
   : AliHLTProcessor(), mSliceParam(nullptr), fTotal(0), fEdge(0), fSplitPad(0), fSplitTime(0), fSplitPadTime(0), fSplitPadOrTime(0), fAssigned(0), fCompressionStudy(0), fPrintClusters(0), fPrintClustersScaled(0), fDumpClusters(0), fAggregate(0), fSort(0), fEvent(0)
 {
 }
@@ -173,7 +173,7 @@ void AliHLTTPCClusterStatComponent::TransformReverse(int slice, int row, float y
 
   padtime[0] = y * sign / padWidth + 0.5 * maxPad;
 
-  float xyzGlobal[2] = { param->GetPadRowRadii(sector, sectorrow), y };
+  float xyzGlobal[2] = {param->GetPadRowRadii(sector, sectorrow), y};
   AliHLTTPCGeometry::Local2Global(xyzGlobal, slice);
 
   float time = z * sign * 1024.f / 250.f;
@@ -210,7 +210,7 @@ void AliHLTTPCClusterStatComponent::TransformForward(int slice, int row, float p
   xyz[0] = param->GetPadRowRadii(sector, sectorrow);
   xyz[1] = (pad - 0.5 * maxPad) * padWidth * sign;
 
-  float xyzGlobal[2] = { xyz[0], xyz[1] };
+  float xyzGlobal[2] = {xyz[0], xyz[1]};
   AliHLTTPCGeometry::Local2Global(xyzGlobal, slice);
 
   xyz[2] = sign * (1024 - time) * 250.f / 1024.f;
@@ -315,10 +315,8 @@ int AliHLTTPCClusterStatComponent::DoEvent(const AliHLTComponentEventData& evtDa
   const AliHLTUInt8_t* pCurrent = reinterpret_cast<const AliHLTUInt8_t*>(tracks->fTracklets);
   if (fCompressionStudy) {
     GPUTPCGMPropagator prop;
-    const float kRho = 1.025e-3;  // 0.9e-3;
-    const float kRadLen = 29.532; // 28.94;
     prop.SetMaxSinPhi(.999);
-    prop.SetMaterial(kRadLen, kRho);
+    prop.SetMaterialTPC();
     GPUTPCGMPolynomialField field;
     int err = GPUTPCGMPolynomialFieldManager::GetPolynomialField(field);
     if (err != 0) {
@@ -468,7 +466,7 @@ int AliHLTTPCClusterStatComponent::DoEvent(const AliHLTComponentEventData& evtDa
 
         if (ip != 0) {
           int rowType = padrow < 64 ? 0 : (padrow < 128 ? 2 : 1);
-          prop.Update(xyz[1], xyz[2], rowType, *mSliceParam, 0, false, false);
+          prop.Update(xyz[1], xyz[2], rowType, *mSliceParam, 0, 0, nullptr, false);
         }
       }
       if (hitsUsed) {
@@ -692,22 +690,22 @@ void AliHLTTPCClusterStatComponent::PrintDumpClustersScaled(int is, int ip, AliH
   time64res = (AliHLTUInt64_t)round(clusterTrack.fResidualTime * AliHLTTPCDefinitions::fgkClusterParameterDefinitions[AliHLTTPCDefinitions::kTime].fScale);
 
   if (fDumpClusters) {
-    int dumpVals[16] = { fEvent,
-                         (int)is,
-                         (int)ip,
-                         (int)cluster.GetPadRow(),
-                         (int)pad64,
-                         (int)time64,
-                         (int)sigmaPad64,
-                         (int)sigmaTime64,
-                         (int)cluster.GetQMax(),
-                         (int)cluster.GetCharge(),
-                         (int)(cluster.GetFlagEdge() * 4 + cluster.GetFlagSplitPad() * 2 + cluster.GetFlagSplitTime()),
-                         (int)clusterTrack.fID,
-                         (int)pad64res,
-                         (int)time64res,
-                         (int)clusterTrack.fAverageQTot,
-                         (int)clusterTrack.fAverageQMax };
+    int dumpVals[16] = {fEvent,
+                        (int)is,
+                        (int)ip,
+                        (int)cluster.GetPadRow(),
+                        (int)pad64,
+                        (int)time64,
+                        (int)sigmaPad64,
+                        (int)sigmaTime64,
+                        (int)cluster.GetQMax(),
+                        (int)cluster.GetCharge(),
+                        (int)(cluster.GetFlagEdge() * 4 + cluster.GetFlagSplitPad() * 2 + cluster.GetFlagSplitTime()),
+                        (int)clusterTrack.fID,
+                        (int)pad64res,
+                        (int)time64res,
+                        (int)clusterTrack.fAverageQTot,
+                        (int)clusterTrack.fAverageQMax};
     fwrite(dumpVals, sizeof(int), 16, fp);
   }
 

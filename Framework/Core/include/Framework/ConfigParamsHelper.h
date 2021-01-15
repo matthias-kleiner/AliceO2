@@ -18,27 +18,23 @@
 #include <string>
 #include <type_traits>
 
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
 using options_description = boost::program_options::options_description;
 
-struct ConfigParamsHelper
-{
+struct ConfigParamsHelper {
   static void populateBoostProgramOptions(
-      options_description &options,
-      const std::vector<ConfigParamSpec> &specs,
-      options_description vetos = options_description()
-    );
+    options_description& options,
+    const std::vector<ConfigParamSpec>& specs,
+    options_description vetos = options_description());
 
   /// populate boost program options making all options of type string
   /// this is used for filtering the command line argument
   /// all options which are found in the vetos are skipped
   static bool dpl2BoostOptions(const std::vector<ConfigParamSpec>& spec,
                                options_description& options,
-                               options_description vetos = options_description());
+                               boost::program_options::options_description vetos = options_description());
 
   /// populate boost program options for a complete workflow
   template <typename ContainerType>
@@ -58,7 +54,7 @@ struct ConfigParamsHelper
       specOptionsDescription += " (full info with '--help full')";
     }
     options_description specOptions(specOptionsDescription);
-    for (const auto & spec : workflow) {
+    for (const auto& spec : workflow) {
       std::string name = "Data processor options: " + spec.name;
       boost::program_options::options_description processorOptions(name);
       if (dpl2BoostOptions(spec.options, processorOptions, vetos)) {
@@ -97,28 +93,50 @@ struct ConfigParamsHelper
     return toplevel;
   }
 
-  template<VariantType V>
-  static void addConfigSpecOption(const ConfigParamSpec & spec,
+  template <VariantType V>
+  static void addConfigSpecOption(const ConfigParamSpec& spec,
                                   boost::program_options::options_description& options)
   {
-    const char *name = spec.name.c_str();
-    const char *help = spec.help.c_str();
-    using Type = typename variant_type<V>::type;
-    using BoostType = typename std::conditional<V == VariantType::String, std::string, Type>::type;
-    auto value = boost::program_options::value<BoostType>();
-    if (spec.defaultValue.type() != VariantType::Empty) {
-      // set the default value if provided in the config spec
-      value = value->default_value(spec.defaultValue.get<Type>());
+    const char* name = spec.name.c_str();
+    const char* help = spec.help.c_str();
+
+    if constexpr (V == VariantType::Int ||
+                  V == VariantType::Int64 ||
+                  V == VariantType::Float ||
+                  V == VariantType::Double ||
+                  V == VariantType::Bool) {
+      using Type = typename variant_type<V>::type;
+      using BoostType = typename std::conditional<V == VariantType::String, std::string, Type>::type;
+      auto value = boost::program_options::value<BoostType>();
+      value = value->default_value(spec.defaultValue.get<BoostType>());
+      if constexpr (V == VariantType::Bool) {
+        // for bool values we also support the zero_token option to make
+        // the option usable as a single switch
+        value = value->zero_tokens();
+      }
+      options.add_options()(name, value, help);
+    } else if constexpr (V == VariantType::ArrayInt ||
+                         V == VariantType::ArrayFloat ||
+                         V == VariantType::ArrayDouble ||
+                         V == VariantType::ArrayBool ||
+                         V == VariantType::ArrayString ||
+                         V == VariantType::MatrixInt ||
+                         V == VariantType::MatrixFloat ||
+                         V == VariantType::MatrixDouble) {
+      auto value = boost::program_options::value<std::string>();
+      value = value->default_value(spec.defaultValue.asString());
+      if constexpr (V != VariantType::String) {
+        value = value->multitoken();
+      }
+      options.add_options()(name, value, help);
+    } else {
+      using Type = typename variant_type<V>::type;
+      using BoostType = typename std::conditional<V == VariantType::String, std::string, Type>::type;
+      auto value = boost::program_options::value<BoostType>();
+      options.add_options()(name, value, help);
     }
-    if (V == VariantType::Bool) {
-      // for bool values we also support the zero_token option to make
-      // the option usable as a single switch
-      value = value->zero_tokens();
-    }
-    options.add_options()(name, value, help);
   }
 };
 
-} // namespace framework
-} // namespace o2
+} // namespace o2::framework
 #endif // FRAMEWORK_CONFIGPARAMSHELPER_H

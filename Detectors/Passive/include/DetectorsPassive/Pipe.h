@@ -11,7 +11,7 @@
 #ifndef ALICEO2_PASSIVE_PIPE_H
 #define ALICEO2_PASSIVE_PIPE_H
 
-#include "FairModule.h" // for FairModule
+#include "DetectorsPassive/PassiveBase.h"
 #include "Rtypes.h"     // for Pipe::Class, ClassDef, Pipe::Streamer
 
 class TGeoPcon;
@@ -20,7 +20,7 @@ namespace o2
 {
 namespace passive
 {
-class Pipe : public FairModule
+class Pipe : public PassiveBase
 {
  public:
   Pipe(const char* name, const char* Title = "Alice Pipe", float rho = 0.f, float thick = 0.f);
@@ -36,6 +36,7 @@ class Pipe : public FairModule
   float getRmax() const { return mBePipeRmax; }
   float getWidth() const { return mBePipeThick; }
   float getDz() const { return mIpHLength; }
+
  private:
   void createMaterials();
   Pipe(const Pipe& orig);
@@ -52,8 +53,8 @@ class Pipe : public FairModule
   float mBePipeThick = 0.; // Be section thickness
   float mIpHLength = 0.;   // half length of the beampipe around the IP // FixMe: up to now, hardcoded to 57.25cm
 
-  ClassDefOverride(Pipe, 1)
+  ClassDefOverride(Pipe, 1);
 };
-}
-}
+} // namespace passive
+} // namespace o2
 #endif // PIPE_H

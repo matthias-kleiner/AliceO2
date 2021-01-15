@@ -21,7 +21,7 @@ namespace o2
 {
 namespace its
 {
-namespace GPU
+namespace gpu
 {
 
 class Stream final
@@ -39,8 +39,8 @@ class Stream final
  private:
   GPUStream mStream;
 };
-}
-}
-}
+} // namespace gpu
+} // namespace its
+} // namespace o2
 
 #endif /* TRAKINGITSU_INCLUDE_GPU_STREAM_H_ */

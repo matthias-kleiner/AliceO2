@@ -70,10 +70,11 @@ void TrackITS::getImpactParams(Float_t x, Float_t y, Float_t z, Float_t bz, Floa
 
 Bool_t TrackITS::propagate(Float_t alpha, Float_t x, Float_t bz)
 {
-  if (rotate(alpha))
-    if (propagateTo(x, bz))
+  if (rotate(alpha)) {
+    if (propagateTo(x, bz)) {
       return kTRUE;
-
+    }
+  }
   return kFALSE;
 }
 
@@ -88,7 +89,6 @@ Bool_t TrackITS::update(const Cluster& c, Float_t chi2)
   mChi2 += chi2;
   return kTRUE;
 }
-
 
 Bool_t TrackITS::isBetter(const TrackITS& best, Float_t maxChi2) const
 {

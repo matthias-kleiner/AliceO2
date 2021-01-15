@@ -25,12 +25,15 @@ void Config()
   TGeant3* geant3 = nullptr;
   if (strncmp(gModel->Data(), "TGeo", 4) == 0) {
     geant3 = new TGeant3TGeo("C++ Interface to Geant3");
-    cout << "-I- G3Config: Geant3 with TGeo has been created." << endl;
+    std::cout << "-I- G3Config: Geant3 with TGeo has been created." << std::endl;
   } else {
     geant3 = new TGeant3("C++ Interface to Geant3");
-    cout << "-I- G3Config: Geant3 native has been created." << endl;
+    std::cout << "-I- G3Config: Geant3 native has been created." << std::endl;
   }
   stackSetup(geant3, run);
+
+  // setup decayer
+  decayerSetup(geant3);
 
   // ******* GEANT3  specific configuration for simulated Runs  *******
   geant3->SetTRIG(1); // Number of events to be processed
@@ -39,7 +42,7 @@ void Config()
 
   geant3->SetRAYL(1);
   geant3->SetSTRA(0);
-  
+
   // NOTE: Please avoid changing this setting, unless justified as this might lead to very many steps
   // performed by G3; AUTO(1) is the G3 default
   geant3->SetAUTO(1); // Select automatic STMIN etc... calc. (AUTO 1) or manual (AUTO 0)

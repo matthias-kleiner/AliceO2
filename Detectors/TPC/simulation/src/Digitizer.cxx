@@ -30,9 +30,9 @@
 
 #include "FairLogger.h"
 
-ClassImp(o2::tpc::Digitizer)
+ClassImp(o2::tpc::Digitizer);
 
-  using namespace o2::tpc;
+using namespace o2::tpc;
 
 bool o2::tpc::Digitizer::mIsContinuous = true;
 
@@ -40,7 +40,7 @@ void Digitizer::init()
 {
   // Calculate distortion lookup tables if initial space-charge density is provided
   if (mUseSCDistortions) {
-    mSpaceChargeHandler->init();
+    mSpaceCharge->init();
   }
 }
 
@@ -67,6 +67,9 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
   /// Reserve space in the digit container for the current event
   mDigitContainer.reserve(sampaProcessing.getTimeBinFromTime(mEventTime));
 
+  /// obtain max drift_time + hitTime which can be processed
+  float maxEleTime = (int(mDigitContainer.size()) - nShapedPoints) * eleParam.ZbinWidth;
+
   for (auto& hitGroup : hits) {
     const int MCTrackID = hitGroup.GetTrackID();
     for (size_t hitindex = 0; hitindex < hitGroup.getSize(); ++hitindex) {
@@ -76,7 +79,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
       // Distort the electron position in case space-charge distortions are used
       if (mUseSCDistortions) {
-        mSpaceChargeHandler->distortElectron(posEle);
+        mSpaceCharge->distortElectron(posEle);
       }
 
       /// Remove electrons that end up more than three sigma of the hit's average diffusion away from the current sector
@@ -97,7 +100,12 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
         /// Drift and Diffusion
         const GlobalPosition3D posEleDiff = electronTransport.getElectronDrift(posEle, driftTime);
-        const float absoluteTime = driftTime + mEventTime + hitTime; /// in us
+        const float eleTime = driftTime + hitTime; /// in us
+        if (eleTime > maxEleTime) {
+          LOG(WARNING) << "Skipping electron with driftTime " << driftTime << " from hit at time " << hitTime;
+          continue;
+        }
+        const float absoluteTime = eleTime + mEventTime; /// in us
 
         /// Attachment
         if (electronTransport.isElectronAttachment(driftTime)) {
@@ -133,7 +141,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 
         const GlobalPadNumber globalPad = mapper.globalPadNumber(digiPadPos.getGlobalPadPos());
         const float ADCsignal = sampaProcessing.getADCvalue(static_cast<float>(nElectronsGEM));
-        const MCCompLabel label(MCTrackID, eventID, sourceID);
+        const MCCompLabel label(MCTrackID, eventID, sourceID, false);
         sampaProcessing.getShapedSignal(ADCsignal, absoluteTime, signalArray);
         for (float i = 0; i < nShapedPoints; ++i) {
           const float time = absoluteTime + i * eleParam.ZbinWidth;
@@ -148,20 +156,41 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
 }
 
 void Digitizer::flush(std::vector<o2::tpc::Digit>& digits,
-                      o2::dataformats::MCTruthContainer<o2::MCCompLabel>& labels, bool finalFlush)
+                      o2::dataformats::MCTruthContainer<o2::MCCompLabel>& labels,
+                      std::vector<o2::tpc::CommonMode>& commonModeOutput,
+                      bool finalFlush)
 {
   static SAMPAProcessing& sampaProcessing = SAMPAProcessing::instance();
-  mDigitContainer.fillOutputContainer(digits, labels, mSector, sampaProcessing.getTimeBinFromTime(mEventTime), mIsContinuous, finalFlush);
+  mDigitContainer.fillOutputContainer(digits, labels, commonModeOutput, mSector, sampaProcessing.getTimeBinFromTime(mEventTime), mIsContinuous, finalFlush);
 }
 
-void Digitizer::enableSCDistortions(SpaceCharge::SCDistortionType distortionType, TH3* hisInitialSCDensity, int nZSlices, int nPhiBins, int nRBins)
+void Digitizer::setUseSCDistortions(SC::SCDistortionType distortionType, const TH3* hisInitialSCDensity)
 {
   mUseSCDistortions = true;
-  if (!mSpaceChargeHandler) {
-    mSpaceChargeHandler = std::make_unique<SpaceCharge>(nZSlices, nPhiBins, nRBins);
+  if (!mSpaceCharge) {
+    mSpaceCharge = std::make_unique<SC>();
   }
-  mSpaceChargeHandler->setSCDistortionType(distortionType);
+  mSpaceCharge->setSCDistortionType(distortionType);
   if (hisInitialSCDensity) {
-    mSpaceChargeHandler->setInitialSpaceChargeDensity(hisInitialSCDensity);
+    mSpaceCharge->fillChargeDensityFromHisto(*hisInitialSCDensity);
+    mSpaceCharge->setUseInitialSCDensity(true);
   }
+}
+
+void Digitizer::setUseSCDistortions(SC* spaceCharge)
+{
+  mUseSCDistortions = true;
+  mSpaceCharge.reset(spaceCharge);
+}
+
+void Digitizer::setUseSCDistortions(TFile& finp)
+{
+  mUseSCDistortions = true;
+  if (!mSpaceCharge) {
+    mSpaceCharge = std::make_unique<SC>();
+  }
+  mSpaceCharge->setGlobalDistortionsFromFile(finp, Side::A);
+  mSpaceCharge->setGlobalDistortionsFromFile(finp, Side::C);
+  mSpaceCharge->setGlobalCorrectionsFromFile(finp, Side::A);
+  mSpaceCharge->setGlobalCorrectionsFromFile(finp, Side::C);
 }

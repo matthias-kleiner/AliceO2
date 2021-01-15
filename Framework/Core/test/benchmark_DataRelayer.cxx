@@ -14,6 +14,7 @@
 #include "Framework/CompletionPolicyHelpers.h"
 #include "Framework/DataRelayer.h"
 #include "Framework/DataProcessingHeader.h"
+#include "../src/DataRelayerHelpers.h"
 #include <Monitoring/Monitoring.h>
 #include <fairmq/FairMQTransportFactory.h>
 #include <cstring>
@@ -22,23 +23,23 @@ using Monitoring = o2::monitoring::Monitoring;
 using namespace o2::framework;
 using DataHeader = o2::header::DataHeader;
 using Stack = o2::header::Stack;
+using RecordAction = o2::framework::DataRelayer::RecordAction;
 
 // A simple test where an input is provided
 // and the subsequent InputRecord is immediately requested.
 static void BM_RelayMessageCreation(benchmark::State& state)
 {
   Monitoring metrics;
-  InputSpec spec{ "clusters", "TPC", "CLUSTERS" };
+  InputSpec spec{"clusters", "TPC", "CLUSTERS"};
 
   std::vector<InputRoute> inputs = {
-    InputRoute{ spec, "Fake", 0 }
-  };
+    InputRoute{spec, 0, "Fake", 0}};
 
   std::vector<ForwardRoute> forwards;
   TimesliceIndex index;
 
   auto policy = CompletionPolicyHelpers::consumeWhenAny();
-  DataRelayer relayer(policy, inputs, forwards, metrics, index);
+  DataRelayer relayer(policy, inputs, metrics, index);
   relayer.setPipelineLength(4);
 
   // Let's create a dummy O2 Message with two headers in the stack:
@@ -48,8 +49,8 @@ static void BM_RelayMessageCreation(benchmark::State& state)
   dh.dataOrigin = "TPC";
   dh.subSpecification = 0;
 
-  DataProcessingHeader dph{ 0, 1 };
-  Stack stack{ dh, dph };
+  DataProcessingHeader dph{0, 1};
+  Stack stack{dh, dph};
   auto transport = FairMQTransportFactory::CreateTransportFactory("zeromq");
 
   for (auto _ : state) {
@@ -70,17 +71,16 @@ BENCHMARK(BM_RelayMessageCreation);
 static void BM_RelaySingleSlot(benchmark::State& state)
 {
   Monitoring metrics;
-  InputSpec spec{ "clusters", "TPC", "CLUSTERS" };
+  InputSpec spec{"clusters", "TPC", "CLUSTERS"};
 
   std::vector<InputRoute> inputs = {
-    InputRoute{ spec, "Fake", 0 }
-  };
+    InputRoute{spec, 0, "Fake", 0}};
 
   std::vector<ForwardRoute> forwards;
   TimesliceIndex index;
 
   auto policy = CompletionPolicyHelpers::consumeWhenAny();
-  DataRelayer relayer(policy, inputs, forwards, metrics, index);
+  DataRelayer relayer(policy, inputs, metrics, index);
   relayer.setPipelineLength(4);
 
   // Let's create a dummy O2 Message with two headers in the stack:
@@ -90,8 +90,8 @@ static void BM_RelaySingleSlot(benchmark::State& state)
   dh.dataOrigin = "TPC";
   dh.subSpecification = 0;
 
-  DataProcessingHeader dph{ 0, 1 };
-  Stack stack{ dh, dph };
+  DataProcessingHeader dph{0, 1};
+  Stack stack{dh, dph};
   auto transport = FairMQTransportFactory::CreateTransportFactory("zeromq");
 
   for (auto _ : state) {
@@ -103,12 +103,14 @@ static void BM_RelaySingleSlot(benchmark::State& state)
     //state.ResumeTiming();
 
     relayer.relay(std::move(header), std::move(payload));
-    auto ready = relayer.getReadyToProcess();
+    std::vector<RecordAction> ready;
+    relayer.getReadyToProcess(ready);
     assert(ready.size() == 1);
     assert(ready[0].slot.index == 0);
     assert(ready[0].op == CompletionPolicy::CompletionOp::Consume);
     auto result = relayer.getInputsForTimeslice(ready[0].slot);
-    assert(result.size() == 2);
+    assert(result.size() == 1);
+    assert(result.at(0).size() == 1);
   }
   // One for the header, one for the payload
 }
@@ -119,17 +121,16 @@ BENCHMARK(BM_RelaySingleSlot);
 static void BM_RelayMultipleSlots(benchmark::State& state)
 {
   Monitoring metrics;
-  InputSpec spec{ "clusters", "TPC", "CLUSTERS" };
+  InputSpec spec{"clusters", "TPC", "CLUSTERS"};
 
   std::vector<InputRoute> inputs = {
-    InputRoute{ spec, "Fake", 0 }
-  };
+    InputRoute{spec, 0, "Fake", 0}};
 
   std::vector<ForwardRoute> forwards;
   TimesliceIndex index;
 
   auto policy = CompletionPolicyHelpers::consumeWhenAny();
-  DataRelayer relayer(policy, inputs, forwards, metrics, index);
+  DataRelayer relayer(policy, inputs, metrics, index);
   relayer.setPipelineLength(4);
 
   // Let's create a dummy O2 Message with two headers in the stack:
@@ -146,8 +147,8 @@ static void BM_RelayMultipleSlots(benchmark::State& state)
     // FIXME: Understand why pausing the timer makes it slower..
     //state.PauseTiming();
 
-    DataProcessingHeader dph{ timeslice++, 1 };
-    Stack stack{ dh, dph };
+    DataProcessingHeader dph{timeslice++, 1};
+    Stack stack{dh, dph};
     FairMQMessagePtr header = transport->CreateMessage(stack.size());
     FairMQMessagePtr payload = transport->CreateMessage(1000);
 
@@ -155,11 +156,13 @@ static void BM_RelayMultipleSlots(benchmark::State& state)
     //state.ResumeTiming();
 
     relayer.relay(std::move(header), std::move(payload));
-    auto ready = relayer.getReadyToProcess();
+    std::vector<RecordAction> ready;
+    relayer.getReadyToProcess(ready);
     assert(ready.size() == 1);
     assert(ready[0].op == CompletionPolicy::CompletionOp::Consume);
     auto result = relayer.getInputsForTimeslice(ready[0].slot);
-    assert(result.size() == 2);
+    assert(result.size() == 1);
+    assert(result.at(0).size() == 1);
   }
   // One for the header, one for the payload
 }
@@ -170,19 +173,18 @@ BENCHMARK(BM_RelayMultipleSlots);
 static void BM_RelayMultipleRoutes(benchmark::State& state)
 {
   Monitoring metrics;
-  InputSpec spec1{ "clusters", "TPC", "CLUSTERS" };
-  InputSpec spec2{ "tracks", "TPC", "TRACKS" };
+  InputSpec spec1{"clusters", "TPC", "CLUSTERS"};
+  InputSpec spec2{"tracks", "TPC", "TRACKS"};
 
   std::vector<InputRoute> inputs = {
-    InputRoute{ spec1, "Fake1", 0 },
-    InputRoute{ spec2, "Fake2", 0 }
-  };
+    InputRoute{spec1, 0, "Fake1", 0},
+    InputRoute{spec2, 1, "Fake2", 0}};
 
   std::vector<ForwardRoute> forwards;
   TimesliceIndex index;
 
   auto policy = CompletionPolicyHelpers::consumeWhenAny();
-  DataRelayer relayer(policy, inputs, forwards, metrics, index);
+  DataRelayer relayer(policy, inputs, metrics, index);
   relayer.setPipelineLength(4);
 
   // Let's create a dummy O2 Message with two headers in the stack:
@@ -204,16 +206,16 @@ static void BM_RelayMultipleRoutes(benchmark::State& state)
     // FIXME: Understand why pausing the timer makes it slower..
     //state.PauseTiming();
 
-    DataProcessingHeader dph1{ timeslice, 1 };
-    Stack stack1{ dh1, dph1 };
+    DataProcessingHeader dph1{timeslice, 1};
+    Stack stack1{dh1, dph1};
 
     FairMQMessagePtr header1 = transport->CreateMessage(stack1.size());
     FairMQMessagePtr payload1 = transport->CreateMessage(1000);
 
     memcpy(header1->GetData(), stack1.data(), stack1.size());
 
-    DataProcessingHeader dph2{ timeslice, 1 };
-    Stack stack2{ dh2, dph2 };
+    DataProcessingHeader dph2{timeslice, 1};
+    Stack stack2{dh2, dph2};
 
     FairMQMessagePtr header2 = transport->CreateMessage(stack2.size());
     FairMQMessagePtr payload2 = transport->CreateMessage(1000);
@@ -222,16 +224,20 @@ static void BM_RelayMultipleRoutes(benchmark::State& state)
     //state.ResumeTiming();
 
     relayer.relay(std::move(header1), std::move(payload1));
-    auto ready = relayer.getReadyToProcess();
+    std::vector<RecordAction> ready;
+    relayer.getReadyToProcess(ready);
     assert(ready.size() == 1);
     assert(ready[0].op == CompletionPolicy::CompletionOp::Consume);
 
     relayer.relay(std::move(header2), std::move(payload2));
-    ready = relayer.getReadyToProcess();
+    ready.clear();
+    relayer.getReadyToProcess(ready);
     assert(ready.size() == 1);
     assert(ready[0].op == CompletionPolicy::CompletionOp::Consume);
     auto result = relayer.getInputsForTimeslice(ready[0].slot);
-    assert(result.size() == 4);
+    assert(result.size() == 2);
+    assert(result.at(0).size() == 1);
+    assert(result.at(1).size() == 1);
   }
   // One for the header, one for the payload
 }

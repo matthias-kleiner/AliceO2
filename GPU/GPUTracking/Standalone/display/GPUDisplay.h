@@ -14,28 +14,25 @@
 #ifndef GPUDISPLAY_H
 #define GPUDISPLAY_H
 
-#ifdef BUILD_EVENT_DISPLAY
-#ifdef GPUCA_O2_LIB
-//#define GPUCA_DISPLAY_GL3W
-#endif
+#ifdef GPUCA_BUILD_EVENT_DISPLAY
 
-#ifdef GPUCA_DISPLAY_GL3W
-#include "../src/GL/gl3w.h"
-#else
-#include <GL/glew.h>
-#endif
+// GL EXT must be the first header
+#include "GPUDisplayExt.h"
 
+// Runtime minimum version defined in GPUDisplayBackend.h, keep in sync!
 #if !defined(GL_VERSION_4_5) || GL_VERSION_4_5 != 1
 #ifdef GPUCA_STANDALONE
 #error Unsupported OpenGL version < 4.5
+#elif defined(GPUCA_O2_LIB)
+#pragma message "Unsupported OpenGL version < 4.5, disabling standalone event display"
 #else
 #warning Unsupported OpenGL version < 4.5, disabling standalone event display
-#undef BUILD_EVENT_DISPLAY
 #endif
+#undef GPUCA_BUILD_EVENT_DISPLAY
 #endif
 #endif
 
-#include "GPUDisplayConfig.h"
+#include "GPUSettings.h"
 #include "GPUDisplayBackend.h"
 
 namespace GPUCA_NAMESPACE
@@ -47,7 +44,7 @@ class GPUQA;
 } // namespace gpu
 } // namespace GPUCA_NAMESPACE
 
-#ifndef BUILD_EVENT_DISPLAY
+#ifndef GPUCA_BUILD_EVENT_DISPLAY
 
 namespace GPUCA_NAMESPACE
 {
@@ -56,11 +53,9 @@ namespace gpu
 class GPUDisplay
 {
  public:
-  GPUDisplay(GPUDisplayBackend* backend, GPUChainTracking* rec, GPUQA* qa) {}
+  GPUDisplay(GPUDisplayBackend* backend, GPUChainTracking* chain, GPUQA* qa) {}
   ~GPUDisplay() = default;
   GPUDisplay(const GPUDisplay&) = delete;
-
-  typedef structConfigGL configDisplay;
 
   int StartDisplay() { return 1; }
   void ShowNextEvent() {}
@@ -84,9 +79,8 @@ class GPUDisplay
 #include "../utils/qsem.h"
 
 #include <GL/gl.h>
-#ifdef GPUCA_DISPLAY_GL3W
-#include <GL/glext.h>
-#endif
+#include <array>
+#include "HandMadeMath.h"
 
 #include "utils/timer.h"
 
@@ -100,11 +94,9 @@ struct GPUParam;
 class GPUDisplay
 {
  public:
-  GPUDisplay(GPUDisplayBackend* backend, GPUChainTracking* rec, GPUQA* qa);
+  GPUDisplay(GPUDisplayBackend* backend, GPUChainTracking* chain, GPUQA* qa);
   ~GPUDisplay() = default;
   GPUDisplay(const GPUDisplay&) = delete;
-
-  typedef GPUDisplayConfig configDisplay;
 
   int StartDisplay();
   void ShowNextEvent();
@@ -144,38 +136,6 @@ class GPUDisplay
   struct GLvertex {
     GLfloat x, y, z;
     GLvertex(GLfloat a, GLfloat b, GLfloat c) : x(a), y(b), z(c) {}
-  };
-
-  struct OpenGLConfig {
-    int animationMode = 0;
-
-    bool smoothPoints = true;
-    bool smoothLines = false;
-    bool depthBuffer = false;
-
-    bool drawClusters = true;
-    bool drawLinks = false;
-    bool drawSeeds = false;
-    bool drawInitLinks = false;
-    bool drawTracklets = false;
-    bool drawTracks = false;
-    bool drawGlobalTracks = false;
-    bool drawFinal = false;
-    int excludeClusters = 0;
-    int propagateTracks = 0;
-
-    int colorClusters = 1;
-    int drawSlice = -1;
-    int drawRelatedSlices = 0;
-    int drawGrid = 0;
-    int colorCollisions = 0;
-    int showCollision = -1;
-
-    float pointSize = 2.0;
-    float lineWidth = 1.4;
-
-    bool drawTPC = true;
-    bool drawTRD = true;
   };
 
   struct DrawArraysIndirectCommand {
@@ -233,7 +193,7 @@ class GPUDisplay
   int InitGL_internal();
   const GPUParam& param();
   const GPUTPCTracker& sliceTracker(int iSlice);
-  const GPUTRDTracker& trdTracker();
+  const GPUTRDTrackerGPU& trdTracker();
   const GPUTrackingInOutPointers ioptrs();
   void drawVertices(const vboList& v, const GLenum t);
   void insertVertexList(std::pair<vecpod<GLint>*, vecpod<GLsizei>*>& vBuf, size_t first, size_t last);
@@ -242,10 +202,11 @@ class GPUDisplay
   void SetInfo(Args... args)
   {
     snprintf(mInfoText2, 1024, args...);
+    GPUInfo("%s", mInfoText2);
     mInfoText2Timer.ResetStart();
   }
   void PrintGLHelpText(float colorValue);
-  void calcXYZ();
+  void calcXYZ(const float*);
   void mAnimationCloseAngle(float& newangle, float lastAngle);
   void mAnimateCloseQuaternion(float* v, float lastx, float lasty, float lastz, float lastw);
   void setAnimationPoint();
@@ -253,6 +214,7 @@ class GPUDisplay
   void removeAnimationPoint();
   void startAnimation();
   void showInfo(const char* info);
+  void ActivateColor();
   void SetColorTRD();
   void SetColorClusters();
   void SetColorInitLinks();
@@ -263,6 +225,7 @@ class GPUDisplay
   void SetColorGlobalTracks();
   void SetColorFinal();
   void SetColorGrid();
+  void SetColorGridTRD();
   void SetColorMarked();
   void SetCollisionColor(int col);
   void setQuality();
@@ -284,14 +247,22 @@ class GPUDisplay
   vboList DrawTracks(const GPUTPCTracker& tracker, int global);
   void DrawFinal(int iSlice, int /*iCol*/, GPUTPCGMPropagator* prop, std::array<vecpod<int>, 2>& trackList, threadVertexBuffer& threadBuffer);
   vboList DrawGrid(const GPUTPCTracker& tracker);
+  vboList DrawGridTRD(int sector);
   void DoScreenshot(char* filename, float mAnimateTime = -1.f);
   void PrintHelp();
   void createQuaternionFromMatrix(float* v, const float* mat);
 
+  unsigned int mVertexShader;
+  unsigned int mFragmentShader;
+  unsigned int mShaderProgram;
+  unsigned int mVertexArray;
+  int mModelViewProjId;
+  int mColorId;
+
   GPUDisplayBackend* mBackend;
   GPUChainTracking* mChain;
-  const configDisplay& mConfig;
-  OpenGLConfig mCfg;
+  const GPUSettingsDisplay& mConfig;
+  GPUSettingsDisplayLight mCfg;
   GPUQA* mQA;
   const GPUTPCGMMerger& mMerger;
   qSem mSemLockDisplay;
@@ -303,12 +274,13 @@ class GPUDisplay
   vecpod<GLvertex> mVertexBuffer[NSLICES];
   vecpod<GLint> mVertexBufferStart[NSLICES];
   vecpod<GLsizei> mVertexBufferCount[NSLICES];
-  vecpod<GLuint> mMainBufferStack{ 0 };
+  vecpod<GLuint> mMainBufferStack{0};
 
   int mNDrawCalls = 0;
   bool mUseGLIndirectDraw = true;
   bool mUseMultiVBO = false;
 
+  std::array<float, 3> mDrawColor = {};
   bool mInvertColors = false;
   const int mDrawQualityRenderToTexture = 1;
   int mDrawQualityMSAA = 0;
@@ -334,7 +306,8 @@ class GPUDisplay
   bool mSeparateGlobalTracks = 0;
   bool mPropagateLoopers = 0;
 
-  GLfloat mCurrentMatrix[16];
+  hmm_mat4 mViewMatrix;
+  float* const mViewMatrixP = &mViewMatrix.Elements[0][0];
   float mXYZ[3];
   float mAngle[3];
   float mRPhiTheta[3];
@@ -346,7 +319,9 @@ class GPUDisplay
   int mHideRejectedClusters = 1;
   int mHideUnmatchedClusters = 0;
   int mHideRejectedTracks = 1;
-  int markAdjacentClusters = 0;
+  int mMarkAdjacentClusters = 0;
+  int mMarkFakeClusters = 0;
+  int mTrackFilter = 0;
 
   vecpod<std::array<int, 37>> mCollisionClusters;
   int mNCollissions = 1;
@@ -378,7 +353,7 @@ class GPUDisplay
   bool mAnimationChangeConfig = true;
   float mAnimationDelay = 2.f;
   vecpod<float> mAnimateVectors[9];
-  vecpod<OpenGLConfig> mAnimateConfig;
+  vecpod<GPUSettingsDisplayLight> mAnimateConfig;
   opengl_spline mAnimationSplines[8];
 
   volatile int mResetScene = 0;
@@ -399,6 +374,7 @@ class GPUDisplay
   vecpod<std::array<vboList, N_FINAL_TYPE>> mGlDLFinal[NSLICES];
   vecpod<vboList> mGlDLPoints[NSLICES][N_POINTS_TYPE];
   vboList mGlDLGrid[NSLICES];
+  vboList mGlDLGridTRD[NSLICES / 2];
   vecpod<DrawArraysIndirectCommand> mCmdBuffer;
 };
 } // namespace gpu

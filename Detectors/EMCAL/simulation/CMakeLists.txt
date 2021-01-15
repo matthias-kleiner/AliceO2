@@ -1,25 +1,31 @@
-SET(MODULE_NAME EMCALSimulation)
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-O2_SETUP(NAME ${MODULE_NAME})
+o2_add_library(EMCALSimulation
+               SOURCES src/Detector.cxx src/Digitizer.cxx src/DigitizerTask.cxx
+                       src/SpaceFrame.cxx src/SimParam.cxx src/LabeledDigit.cxx
+                       src/RawWriter.cxx
+               PUBLIC_LINK_LIBRARIES O2::EMCALBase O2::DetectorsBase O2::SimConfig O2::SimulationDataFormat O2::Headers O2::DetectorsRaw)
 
-set(SRCS
-  src/Detector.cxx
-  src/Digitizer.cxx
-  src/DigitizerTask.cxx
-  src/SpaceFrame.cxx
-  src/SimParam.cxx
-)
+o2_target_root_dictionary(EMCALSimulation
+                          HEADERS include/EMCALSimulation/Detector.h
+                                  include/EMCALSimulation/Digitizer.h
+                                  include/EMCALSimulation/DigitizerTask.h
+                                  include/EMCALSimulation/RawWriter.h
+                                  include/EMCALSimulation/SpaceFrame.h
+                                  include/EMCALSimulation/SimParam.h
+                                  include/EMCALSimulation/LabeledDigit.h)
 
-set(HEADERS
-  include/EMCALSimulation/Detector.h
-  include/EMCALSimulation/Digitizer.h
-  include/EMCALSimulation/DigitizerTask.h
-  include/EMCALSimulation/SpaceFrame.h
-  include/EMCALSimulation/SimParam.h
-)
+o2_add_executable(rawcreator
+                  COMPONENT_NAME emcal
+                  PUBLIC_LINK_LIBRARIES O2::EMCALSimulation
+                  SOURCES src/RawCreator.cxx)
 
-SET(LINKDEF src/EMCALSimulationLinkDef.h)
-SET(LIBRARY_NAME ${MODULE_NAME})
-SET(BUCKET_NAME emcal_simulation_bucket)
-
-O2_GENERATE_LIBRARY()
+o2_data_file(COPY data DESTINATION Detectors/EMC/simulation)

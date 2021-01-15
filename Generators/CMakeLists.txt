@@ -1,57 +1,142 @@
-# Create a library called "libGen" which includes the source files given in
-# the array .
-# The extension is already found.  Any number of sources could be listed here.
-set(MODULE_NAME "Generators")
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-FILE(GLOB INSTALL_SHARE "share/external/*.C")
-INSTALL(FILES ${INSTALL_SHARE} DESTINATION share/Generators/external/)
-SET(IGNORE_MACROS ${CMAKE_SOURCE_FILE}/share/Generators/external/hijing.C)
-
-O2_SETUP(NAME ${MODULE_NAME})
-
-set(SRCS
-    src/Generator.cxx
-    src/GeneratorTGenerator.cxx
-    src/GeneratorFromFile.cxx
-    src/Pythia6Generator.cxx
-    src/PDG.cxx	
-    src/PrimaryGenerator.cxx
-    src/InteractionDiamondParam.cxx
-    src/BoxGunParam.cxx
-   )
-set(HEADERS
-    include/${MODULE_NAME}/Generator.h
-    include/${MODULE_NAME}/GeneratorTGenerator.h
-    include/${MODULE_NAME}/GeneratorFromFile.h
-    include/${MODULE_NAME}/Pythia6Generator.h
-    include/${MODULE_NAME}/PDG.h
-    include/${MODULE_NAME}/PrimaryGenerator.h
-    include/${MODULE_NAME}/InteractionDiamondParam.h
-    include/${MODULE_NAME}/BoxGunParam.h
-       )
-if (HAVESIMULATION)
-  set(HEADERS ${HEADERS}
-      include/${MODULE_NAME}/GeneratorFactory.h
-    )
-  set(SRCS ${SRCS}
-      src/GeneratorFactory.cxx
-    )
+if(pythia6_FOUND)
+  set(pythia6Target ROOT::EGPythia6 MC::Pythia6)
 endif()
- 
-if (PYTHIA8_INCLUDE_DIR)
-  set(SRCS ${SRCS}
-      src/Pythia8Generator.cxx
-     )
-  set(HEADERS ${HEADERS}
-      include/${MODULE_NAME}/Pythia8Generator.h
-      )
-  set(BUCKET_NAME generators_bucket)
-else (PYTHIA8_INCLUDE_DIR)
-  message(STATUS "module 'Generators' requires Pythia8 ... deactivated")
-  set(BUCKET_NAME generators_base_bucket)
-endif (PYTHIA8_INCLUDE_DIR)
 
-set(LINKDEF src/GeneratorsLinkDef.h)
-set(LIBRARY_NAME ${MODULE_NAME})
+if(pythia_FOUND)
+  set(pythiaTarget MC::Pythia)
+endif()
 
-O2_GENERATE_LIBRARY()
+if(HepMC3_FOUND)
+  set(hepmcTarget MC::HepMC3)
+endif()
+
+o2_add_library(Generators
+               SOURCES src/Generator.cxx
+	       	       src/Trigger.cxx
+	       	       src/TriggerParticle.cxx
+                       src/GeneratorTGenerator.cxx
+                       src/GeneratorExternalParam.cxx
+                       src/GeneratorFromFile.cxx
+                       src/PDG.cxx
+                       src/PrimaryGenerator.cxx
+                       src/InteractionDiamondParam.cxx
+                       src/TriggerExternalParam.cxx
+                       src/TriggerParticleParam.cxx
+                       src/BoxGunParam.cxx
+		       src/QEDGenParam.cxx
+                       src/GenCosmicsParam.cxx
+                       src/GeneratorFactory.cxx
+                       $<$<BOOL:${pythia6_FOUND}>:src/GeneratorPythia6.cxx>
+                       $<$<BOOL:${pythia6_FOUND}>:src/GeneratorPythia6Param.cxx>
+                       $<$<BOOL:${pythia_FOUND}>:src/GeneratorPythia8.cxx>
+                       $<$<BOOL:${pythia_FOUND}>:src/DecayerPythia8.cxx>
+                       $<$<BOOL:${pythia_FOUND}>:src/GeneratorPythia8Param.cxx>
+                       $<$<BOOL:${pythia_FOUND}>:src/DecayerPythia8Param.cxx>
+                       $<$<BOOL:${HepMC3_FOUND}>:src/GeneratorHepMC.cxx>
+                       $<$<BOOL:${HepMC3_FOUND}>:src/GeneratorHepMCParam.cxx>
+               PUBLIC_LINK_LIBRARIES FairRoot::Base O2::SimConfig O2::CommonUtils
+                                     O2::SimulationDataFormat ${pythia6Target} ${pythiaTarget} ${hepmcTarget}
+                                     FairRoot::Gen
+               TARGETVARNAME targetName)
+
+if(pythia6_FOUND)
+  target_compile_definitions(${targetName} PUBLIC GENERATORS_WITH_PYTHIA6)
+endif()
+
+if(pythia_FOUND)
+  target_compile_definitions(${targetName} PUBLIC GENERATORS_WITH_PYTHIA8)
+endif()
+
+if(HepMC3_FOUND)
+  target_compile_definitions(${targetName} PUBLIC GENERATORS_WITH_HEPMC3)
+endif()
+
+set(headers
+    include/Generators/Generator.h
+    include/Generators/Trigger.h
+    include/Generators/TriggerParticle.h
+    include/Generators/GeneratorTGenerator.h
+    include/Generators/GeneratorExternalParam.h
+    include/Generators/GeneratorFromFile.h
+    include/Generators/PDG.h
+    include/Generators/PrimaryGenerator.h
+    include/Generators/InteractionDiamondParam.h
+    include/Generators/TriggerExternalParam.h
+    include/Generators/TriggerParticleParam.h
+    include/Generators/BoxGunParam.h
+    include/Generators/QEDGenParam.h
+    include/Generators/GenCosmicsParam.h)
+
+if (pythia6_FOUND)
+   list(APPEND headers include/Generators/GeneratorPythia6.h
+   	       include/Generators/GeneratorPythia6Param.h)
+endif()
+
+if(pythia_FOUND)
+  list(APPEND headers 
+              include/Generators/GeneratorPythia8.h
+              include/Generators/DecayerPythia8.h
+              include/Generators/GeneratorPythia8Param.h
+              include/Generators/DecayerPythia8Param.h
+              include/Generators/GeneratorFactory.h)
+endif()
+
+if(HepMC3_FOUND)
+  list(APPEND headers include/Generators/GeneratorHepMC.h)
+  list(APPEND headers include/Generators/GeneratorHepMCParam.h)
+endif()
+
+o2_target_root_dictionary(Generators HEADERS ${headers})
+
+o2_add_test_root_macro(share/external/extgen.C
+                       PUBLIC_LINK_LIBRARIES O2::Generators FairRoot::Base
+                       LABELS generators COMPILE_ONLY)
+if(pythia6_FOUND)
+  o2_add_test_root_macro(share/external/pythia6.C
+                         PUBLIC_LINK_LIBRARIES O2::Generators
+                         LABELS generators COMPILE_ONLY)
+endif()
+
+if(doBuildSimulation)
+  o2_add_test_root_macro(share/external/QEDLoader.C
+                         PUBLIC_LINK_LIBRARIES O2::Generators
+                                               O2::SimConfig
+                                               LABELS generators)
+
+  o2_add_test_root_macro(share/external/GenCosmicsLoader.C
+                         PUBLIC_LINK_LIBRARIES O2::Generators
+                                               O2::SimConfig
+                                               LABELS generators)
+endif()
+
+o2_add_test_root_macro(share/external/tgenerator.C
+                       PUBLIC_LINK_LIBRARIES O2::Generators
+                       LABELS generators)
+
+o2_add_test_root_macro(share/external/trigger_multiplicity.C
+                       PUBLIC_LINK_LIBRARIES O2::Generators
+                       LABELS generators)
+
+if(pythia_FOUND)
+o2_add_test_root_macro(share/external/trigger_mpi.C
+                       PUBLIC_LINK_LIBRARIES O2::Generators
+                       LABELS generators)
+
+o2_add_test_root_macro(share/egconfig/pythia8_userhooks_charm.C
+        PUBLIC_LINK_LIBRARIES O2::Generators
+                       LABELS generators)
+endif()		       
+		     
+o2_data_file(COPY share/external DESTINATION Generators)
+o2_data_file(COPY share/egconfig DESTINATION Generators)
+o2_data_file(COPY share/pythia8 DESTINATION Generators)

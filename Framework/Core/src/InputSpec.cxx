@@ -9,25 +9,70 @@
 // or submit itself to any jurisdiction.
 //
 #include "Framework/InputSpec.h"
+#include "Framework/DataSpecUtils.h"
 
 #include <variant>
+#include <vector>
 
 namespace o2
 {
 namespace framework
 {
 
-InputSpec::InputSpec(std::string binding_, header::DataOrigin origin_, header::DataDescription description_, header::DataHeader::SubSpecificationType subSpec_, enum Lifetime lifetime_)
-  : binding{ binding_ },
-    matcher{ ConcreteDataMatcher{ origin_, description_, subSpec_ } },
-    lifetime{ lifetime_ }
+InputSpec::InputSpec(std::string binding_,
+                     ConcreteDataMatcher const& concrete,
+                     enum Lifetime lifetime_,
+                     std::vector<ConfigParamSpec> const& metadata_)
+  : binding{binding_},
+    matcher{concrete},
+    lifetime{lifetime_},
+    metadata{metadata_}
 {
 }
 
-InputSpec::InputSpec(std::string binding_, data_matcher::DataDescriptorMatcher&& matcher_)
-  : binding{ binding_ },
-    matcher{ matcher_ },
-    lifetime{ Lifetime::Timeframe }
+InputSpec::InputSpec(std::string binding_,
+                     header::DataOrigin origin_,
+                     header::DataDescription description_,
+                     header::DataHeader::SubSpecificationType subSpec_,
+                     enum Lifetime lifetime_,
+                     std::vector<ConfigParamSpec> const& metadata_)
+  : binding{binding_},
+    matcher{ConcreteDataMatcher{origin_, description_, subSpec_}},
+    lifetime{lifetime_},
+    metadata{metadata_}
+{
+}
+
+InputSpec::InputSpec(std::string binding_,
+                     header::DataOrigin origin_,
+                     header::DataDescription description_,
+                     enum Lifetime lifetime_,
+                     std::vector<ConfigParamSpec> const& metadata_)
+  : binding{binding_},
+    matcher{ConcreteDataMatcher{origin_, description_, 0}},
+    lifetime{lifetime_},
+    metadata{metadata_}
+{
+}
+
+InputSpec::InputSpec(std::string binding_,
+                     ConcreteDataTypeMatcher const& dataType,
+                     enum Lifetime lifetime_,
+                     std::vector<ConfigParamSpec> const& metadata_)
+  : binding{binding_},
+    matcher{DataSpecUtils::dataDescriptorMatcherFrom(dataType)},
+    lifetime{lifetime_},
+    metadata{metadata_}
+{
+}
+
+InputSpec::InputSpec(std::string binding_,
+                     data_matcher::DataDescriptorMatcher&& matcher_,
+                     std::vector<ConfigParamSpec> const& metadata_)
+  : binding{binding_},
+    matcher{matcher_},
+    lifetime{Lifetime::Timeframe},
+    metadata{metadata_}
 {
 }
 

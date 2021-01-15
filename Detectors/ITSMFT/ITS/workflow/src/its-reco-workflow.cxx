@@ -9,7 +9,13 @@
 // or submit itself to any jurisdiction.
 
 #include "ITSWorkflow/RecoWorkflow.h"
-#include "SimConfig/ConfigurableParam.h"
+#include "CommonUtils/ConfigurableParam.h"
+#include "ITStracking/TrackingConfigParam.h"
+#include "ITStracking/Configuration.h"
+
+#include "GPUO2Interface.h"
+#include "GPUReconstruction.h"
+#include "GPUChainITS.h"
 
 using namespace o2::framework;
 
@@ -19,17 +25,26 @@ using namespace o2::framework;
 void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
 {
   // option allowing to set parameters
-  workflowOptions.push_back(ConfigParamSpec{
-    "disable-mc", o2::framework::VariantType::Bool, false, { "disable MC propagation even if available" } });
+  std::vector<o2::framework::ConfigParamSpec> options{
+    {"digits-from-upstream", o2::framework::VariantType::Bool, false, {"digits will be provided from upstream, skip digits reader"}},
+    {"clusters-from-upstream", o2::framework::VariantType::Bool, false, {"clusters will be provided from upstream, skip clusterizer"}},
+    {"disable-root-output", o2::framework::VariantType::Bool, false, {"do not write output root files"}},
+    {"disable-mc", o2::framework::VariantType::Bool, false, {"disable MC propagation even if available"}},
+    {"trackerCA", o2::framework::VariantType::Bool, false, {"use trackerCA (default: trackerCM)"}},
+    {"async-phase", o2::framework::VariantType::Bool, false, {"perform multiple passes for async. phase reconstruction"}},
+    {"entropy-encoding", o2::framework::VariantType::Bool, false, {"produce entropy encoded data"}},
+    {"gpuDevice", o2::framework::VariantType::Int, 1, {"use gpu device: CPU=1,CUDA=2,HIP=3 (default: CPU)"}}};
+
+  std::swap(workflowOptions, options);
 
   std::string keyvaluehelp("Semicolon separated key=value strings (e.g.: 'ITSDigitizerParam.roFrameLength=6000.;...')");
-
-  workflowOptions.push_back(ConfigParamSpec{ "configKeyValues", VariantType::String, "", { keyvaluehelp } });
+  workflowOptions.push_back(ConfigParamSpec{"configKeyValues", VariantType::String, "", {keyvaluehelp}});
 }
 
 // ------------------------------------------------------------------
 
 #include "Framework/runDataProcessing.h"
+#include "Framework/Logger.h"
 
 WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
 {
@@ -39,6 +54,17 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
   o2::conf::ConfigurableParam::writeINI("o2itsrecoflow_configuration.ini");
 
   auto useMC = !configcontext.options().get<bool>("disable-mc");
+  auto useCAtracker = configcontext.options().get<bool>("trackerCA");
+  auto async = configcontext.options().get<bool>("async-phase");
+  auto gpuDevice = static_cast<o2::gpu::GPUDataTypes::DeviceType>(configcontext.options().get<int>("gpuDevice"));
+  auto extDigits = configcontext.options().get<bool>("digits-from-upstream");
+  auto extClusters = configcontext.options().get<bool>("clusters-from-upstream");
+  auto disableRootOutput = configcontext.options().get<bool>("disable-root-output");
+  auto eencode = configcontext.options().get<bool>("entropy-encoding");
 
-  return std::move(o2::its::RecoWorkflow::getWorkflow(useMC));
+  if (async && !useCAtracker) {
+    LOG(ERROR) << "Async.mode is not supported by CookedTracker, use --trackerCA";
+    throw std::runtime_error("incompatible options provided");
+  }
+  return std::move(o2::its::reco_workflow::getWorkflow(useMC, useCAtracker, async, gpuDevice, extDigits, extClusters, disableRootOutput, eencode));
 }

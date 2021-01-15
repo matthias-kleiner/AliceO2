@@ -33,15 +33,16 @@ using namespace o2::passive;
 
 Absorber::~Absorber() = default;
 
-Absorber::Absorber() : FairModule("Absorber", "") {}
-Absorber::Absorber(const char* name, const char* Title) : FairModule(name, Title) {}
+Absorber::Absorber() : PassiveBase("ABSO", "") {}
+Absorber::Absorber(const char* name, const char* Title) : PassiveBase(name, Title) {}
 Absorber::Absorber(const Absorber& rhs) = default;
 
 Absorber& Absorber::operator=(const Absorber& rhs)
 {
   // self assignment
-  if (this == &rhs)
+  if (this == &rhs) {
     return *this;
+  }
 
   // base class assignment
   FairModule::operator=(rhs);
@@ -61,57 +62,42 @@ void Absorber::createMaterials()
   //
   // Air
   //
-  Float_t aAir[4] = { 12.0107, 14.0067, 15.9994, 39.948 };
-  Float_t zAir[4] = { 6., 7., 8., 18. };
-  Float_t wAir[4] = { 0.000124, 0.755267, 0.231781, 0.012827 };
+  Float_t aAir[4] = {12.0107, 14.0067, 15.9994, 39.948};
+  Float_t zAir[4] = {6., 7., 8., 18.};
+  Float_t wAir[4] = {0.000124, 0.755267, 0.231781, 0.012827};
   Float_t dAir = 1.20479E-3;
   Float_t dAir1 = 1.20479E-10;
   //
   // Polyethylene
   //
-  Float_t apoly[2] = { 12.01, 1. };
-  Float_t zpoly[2] = { 6., 1. };
-  Float_t wpoly[2] = { .33, .67 };
+  Float_t apoly[2] = {12.01, 1.};
+  Float_t zpoly[2] = {6., 1.};
+  Float_t wpoly[2] = {.33, .67};
   //
   // Concrete
   //
-  Float_t aconc[10] = { 1., 12.01, 15.994, 22.99, 24.305, 26.98, 28.086, 39.1, 40.08, 55.85 };
-  Float_t zconc[10] = { 1., 6., 8., 11., 12., 13., 14., 19., 20., 26. };
-  Float_t wconc[10] = { .01, .001, .529107, .016, .002, .033872, .337021, .013, .044, .014 };
+  Float_t aconc[10] = {1., 12.01, 15.994, 22.99, 24.305, 26.98, 28.086, 39.1, 40.08, 55.85};
+  Float_t zconc[10] = {1., 6., 8., 11., 12., 13., 14., 19., 20., 26.};
+  Float_t wconc[10] = {.01, .001, .529107, .016, .002, .033872, .337021, .013, .044, .014};
   //
   // Steel
   //
-  Float_t asteel[4] = { 55.847, 51.9961, 58.6934, 28.0855 };
-  Float_t zsteel[4] = { 26., 24., 28., 14. };
-  Float_t wsteel[4] = { .715, .18, .1, .005 };
+  Float_t asteel[4] = {55.847, 51.9961, 58.6934, 28.0855};
+  Float_t zsteel[4] = {26., 24., 28., 14.};
+  Float_t wsteel[4] = {.715, .18, .1, .005};
   //
   // Ni-Cu-W alloy
   //
-  Float_t aniwcu[3] = { 58.6934, 183.84, 63.546 };
-  Float_t zniwcu[3] = { 28., 74., 29 };
-  Float_t wniwcu[3] = { 0.015, 0.95, 0.035 };
-  //
-  // Poly Concrete
-  //                      H     Li     F       C      Al     Si      Ca      Pb     O
-  Float_t aPolyCc[9] = { 1., 6.941, 18.998, 12.01, 26.98, 28.086, 40.078, 207.2, 15.999 };
-  Float_t zPolyCc[9] = { 1., 3., 9., 6., 13., 14., 20., 82., 8. };
-  Float_t wPolyCc[9] = { 4.9, 1.2, 1.3, 1.1, 0.15, 0.02, 0.06, 0.7, 1.1 };
-  Float_t wtot = 0;
-  Int_t i = 0;
-
-  for (i = 0; i < 9; i++) {
-    wtot += wPolyCc[i];
-  }
-  for (i = 0; i < 9; i++) {
-    wPolyCc[i] /= wtot;
-  }
+  Float_t aniwcu[3] = {58.6934, 183.84, 63.546};
+  Float_t zniwcu[3] = {28., 74., 29};
+  Float_t wniwcu[3] = {0.015, 0.95, 0.035};
 
   //
   // Insulation powder
   //                    Si         O       Ti     Al
-  Float_t ains[4] = { 28.0855, 15.9994, 47.867, 26.982 };
-  Float_t zins[4] = { 14., 8., 22., 13. };
-  Float_t wins[4] = { 0.3019, 0.4887, 0.1914, 0.018 };
+  Float_t ains[4] = {28.0855, 15.9994, 47.867, 26.982};
+  Float_t zins[4] = {14., 8., 22., 13.};
+  Float_t wins[4] = {0.3019, 0.4887, 0.1914, 0.018};
 
   // ****************
   //     Defines tracking media parameters.
@@ -147,33 +133,6 @@ void Absorber::createMaterials()
   //    Magnesium
   matmgr.Material("ABSO", 7, "MAGNESIUM$", 24.31, 12., 1.74, 25.3, 46.0);
   matmgr.Medium("ABSO", 7, "MG_C0", 7, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-
-  //
-  //    Iron
-  matmgr.Material("ABSO", 10, "IRON0$", 55.85, 26., 7.87, 1.76, 17.1);
-  matmgr.Material("ABSO", 30, "IRON1$", 55.85, 26., 7.87, 1.76, 17.1);
-  matmgr.Material("ABSO", 50, "IRON2$", 55.85, 26., 7.87, 1.76, 17.1);
-  matmgr.Medium("ABSO", 10, "FE_C0", 10, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 30, "FE_C1", 30, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 50, "FE_C2", 50, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-
-  //
-  //    Copper
-  matmgr.Material("ABSO", 11, "COPPER0$", 63.55, 29., 8.96, 1.43, 15.1);
-  matmgr.Material("ABSO", 31, "COPPER1$", 63.55, 29., 8.96, 1.43, 15.1);
-  matmgr.Material("ABSO", 51, "COPPER2$", 63.55, 29., 8.96, 1.43, 15.1);
-  matmgr.Medium("ABSO", 11, "Cu_C0", 11, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 31, "Cu_C1", 31, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 51, "Cu_C2", 51, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-
-  //
-  //    Tungsten
-  matmgr.Material("ABSO", 12, "TUNGSTEN0$ ", 183.85, 74., 19.3, .35, 10.3);
-  matmgr.Material("ABSO", 32, "TUNGSTEN1$ ", 183.85, 74., 19.3, .35, 10.3);
-  matmgr.Material("ABSO", 52, "TUNGSTEN2$ ", 183.85, 74., 19.3, .35, 10.3);
-  matmgr.Medium("ABSO", 12, "W_C0", 12, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 32, "W_C1", 32, 0, isxfld, sxmgmx, tmaxfd, -stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 52, "W_C2", 52, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
   //
   //     Ni-W-Cu
@@ -246,15 +205,6 @@ void Absorber::createMaterials()
   matmgr.Medium("ABSO", 19, "ST_C0", 19, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   matmgr.Medium("ABSO", 39, "ST_C1", 39, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   matmgr.Medium("ABSO", 59, "ST_C3", 59, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-
-  //
-  // Polymer Concrete
-  matmgr.Mixture("ABSO", 20, "Poly Concrete0$", aPolyCc, zPolyCc, 3.53, -9, wPolyCc);
-  matmgr.Mixture("ABSO", 40, "Poly Concrete1$", aPolyCc, zPolyCc, 3.53, 9, wPolyCc);
-  matmgr.Mixture("ABSO", 60, "Poly Concrete2$", aPolyCc, zPolyCc, 3.53, 9, wPolyCc);
-  matmgr.Medium("ABSO", 20, "PCc_C0", 20, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 40, "PCc_C1", 40, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
-  matmgr.Medium("ABSO", 60, "PCc_C3", 60, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 }
 
 TGeoPcon* MakeShapeFromTemplate(const TGeoPcon* pcon, Float_t drMin, Float_t drMax)
@@ -286,7 +236,7 @@ void Absorber::ConstructGeometry()
   //
   // The top volume
   //
-  TGeoVolume* top = gGeoManager->GetVolume("cave");
+  TGeoVolume* barrel = gGeoManager->GetVolume("barrel");
 
   //
   // Media
@@ -645,7 +595,14 @@ void Absorber::ConstructGeometry()
 
   // Pos 10
   //
-  // This section has been moved to AliSHILv3
+  // This section is partially in Shield
+  Float_t dzFaWTube5 = 6.0;
+  Float_t kAngle0071 = TMath::Tan(0.71 * kDegRad);
+  Float_t rInFaWTube5C1 = rInFaWTube4C2;
+  Float_t rInFaWTube5C2 = rInFaWTube4C2 + dzFaWTube4 * kAngle0071;
+  Float_t rOuFaWTube5C1 = rOuFaWTube4C2;
+  TGeoVolume* voFaWTube5 = new TGeoVolume(
+    "AFaWTube5", new TGeoCone(dzFaWTube5 / 2., rInFaWTube5C1, rOuFaWTube5C1, rInFaWTube5C2, rOuFaWTube5C1), kMedNiWsh);
 
   //
   // Pos 11
@@ -756,8 +713,7 @@ void Absorber::ConstructGeometry()
   Float_t dFaCH2Cone = 7.5 / TMath::Cos(10. * kDegRad);
 
   TGeoVolume* voFaCH2Cone =
-    new TGeoVolume("AFaCH2Cone", new TGeoCone(dzFaCH2Cone / 2., rInFaCH2Cone1, rInFaCH2Cone1 + dFaCH2Cone,
-                                              rInFaCH2Cone2, rInFaCH2Cone2 + dFaCH2Cone),
+    new TGeoVolume("AFaCH2Cone", new TGeoCone(dzFaCH2Cone / 2., rInFaCH2Cone1, rInFaCH2Cone1 + dFaCH2Cone, rInFaCH2Cone2, rInFaCH2Cone2 + dFaCH2Cone),
                    kMedCH2Sh);
 
   // Pos 15
@@ -773,8 +729,7 @@ void Absorber::ConstructGeometry()
   Float_t rOuFaSteelCone25B = rOuFaSteelCone25A + dzFaSteelCone25 * angle10;
 
   TGeoVolume* voFaSteelCone25 = new TGeoVolume(
-    "AFaSteelCone25", new TGeoCone(dzFaSteelCone25 / 2., rInFaSteelCone25A + eps, rOuFaSteelCone25A - eps,
-                                   rInFaSteelCone25B + eps, rOuFaSteelCone25B - eps),
+    "AFaSteelCone25", new TGeoCone(dzFaSteelCone25 / 2., rInFaSteelCone25A + eps, rOuFaSteelCone25A - eps, rInFaSteelCone25B + eps, rOuFaSteelCone25B - eps),
     kMedSteelSh);
 
   // Pos 16
@@ -790,8 +745,7 @@ void Absorber::ConstructGeometry()
   Float_t rOuFaSteelCone31B = rOuFaSteelCone31A + dzFaSteelCone31 * angle10;
 
   TGeoVolume* voFaSteelCone31 = new TGeoVolume(
-    "AFaSteelCone31", new TGeoCone(dzFaSteelCone31 / 2., rInFaSteelCone31A + eps, rOuFaSteelCone31A - eps,
-                                   rInFaSteelCone31B + eps, rOuFaSteelCone31B - eps),
+    "AFaSteelCone31", new TGeoCone(dzFaSteelCone31 / 2., rInFaSteelCone31A + eps, rOuFaSteelCone31A - eps, rInFaSteelCone31B + eps, rOuFaSteelCone31B - eps),
     kMedSteelSh);
   // Outer Region with higher transport cuts
   dz = 5.;
@@ -912,7 +866,6 @@ void Absorber::ConstructGeometry()
   shFaM->DefineSection(14, z, rInFaCH2Cone2 - dz * angle10, rOuSteelEnvelopeR2);
   z += dzSteelEnvelopeR / 2.;
   shFaM->DefineSection(15, z, rInFaCH2Cone2, rOuSteelEnvelopeR2);
-
   TGeoVolume* voFaM = new TGeoVolume("AFaM", shFaM, kMedAir);
   voFaM->SetVisibility(0);
 
@@ -986,7 +939,7 @@ void Absorber::ConstructGeometry()
   const Float_t kFassUBFlangeW = 77.;
 
   const Float_t kFassUMFlangeH = 380.;
-  const Float_t kFassUMFlangeB = 246.;
+  const Float_t kFassUMFlangeB = 246. - 9.85;
   const Float_t kFassUMFlangeT = 10.;
   const Float_t kFassUMFalpha = -TMath::ATan((kFassUMFlangeB - kFassUMFlangeT) / kFassUMFlangeH / 2.) / kDegRad;
   // Upper back   flange
@@ -994,10 +947,10 @@ void Absorber::ConstructGeometry()
   // 380 x 77
   TGeoVolume* voFassUBFlange =
     new TGeoVolume("AFassUBFlange", new TGeoBBox(kFassUBFlangeW / 2., kFassUBFlangeH / 2., 3. / 2.), kMedSteel);
-  voFass->AddNode(voFassUBFlange, 1,
-                  new TGeoTranslation(+1.5 + kFassUBFlangeW / 2., 180. + kFassUBFlangeH / 2., kFassUMFlangeB - 1.5));
-  voFass->AddNode(voFassUBFlange, 2,
-                  new TGeoTranslation(-1.5 - kFassUBFlangeW / 2., 180. + kFassUBFlangeH / 2., kFassUMFlangeB - 1.5));
+  //  voFass->AddNode(voFassUBFlange, 1,
+  //                new TGeoTranslation(+1.5 + kFassUBFlangeW / 2., 180. + kFassUBFlangeH / 2., kFassUMFlangeB - 1.5));
+  //voFass->AddNode(voFassUBFlange, 2,
+  //                new TGeoTranslation(-1.5 - kFassUBFlangeW / 2., 180. + kFassUBFlangeH / 2., kFassUMFlangeB - 1.5));
 
   // Lower back   flange
   // Upper median flange
@@ -1006,8 +959,7 @@ void Absorber::ConstructGeometry()
   //    A2
 
   TGeoVolume* voFassUMFlange = new TGeoVolume(
-    "AFassUMFlange", new TGeoTrap(kFassUMFlangeH / 2., kFassUMFalpha, 0., 1.5, kFassUMFlangeB / 2., kFassUMFlangeB / 2.,
-                                  0., 1.5, kFassUMFlangeT / 2., kFassUMFlangeT / 2., 0.),
+    "AFassUMFlange", new TGeoTrap(kFassUMFlangeH / 2., kFassUMFalpha, 0., 1.5, kFassUMFlangeB / 2., kFassUMFlangeB / 2., 0., 1.5, kFassUMFlangeT / 2., kFassUMFlangeT / 2., 0.),
     kMedSteel);
 
   TGeoRotation* rotFass1 = new TGeoRotation("rotFass1", 180., 0., 90., 0., 90., 90.);
@@ -1020,12 +972,11 @@ void Absorber::ConstructGeometry()
   //    Drawing ALIP2A__0089                        //
   //    A1
   const Float_t kFassLMFlangeH = 242.;
-  const Float_t kFassLMFlangeB = 246.;
+  const Float_t kFassLMFlangeB = 246. - 9.85;
   const Float_t kFassLMFlangeT = 43.;
   const Float_t kFassLMFalpha = -TMath::ATan((kFassLMFlangeB - kFassLMFlangeT) / kFassLMFlangeH / 2.) / kDegRad;
   TGeoVolume* voFassLMFlange = new TGeoVolume(
-    "AFassLMFlange", new TGeoTrap(kFassLMFlangeH / 2., kFassLMFalpha, 0., 1.5, kFassLMFlangeB / 2., kFassLMFlangeB / 2.,
-                                  0., 1.5, kFassLMFlangeT / 2., kFassLMFlangeT / 2., 0.),
+    "AFassLMFlange", new TGeoTrap(kFassLMFlangeH / 2., kFassLMFalpha, 0., 1.5, kFassLMFlangeB / 2., kFassLMFlangeB / 2., 0., 1.5, kFassLMFlangeT / 2., kFassLMFlangeT / 2., 0.),
     kMedSteel);
   TGeoRotation* rotFass2 = new TGeoRotation("rotFass2", 180., 0., 90., 0., 90., 270.);
   voFass->AddNode(voFassLMFlange, 1,
@@ -1036,12 +987,13 @@ void Absorber::ConstructGeometry()
   // Support Plate
   //
   // Central cone
-  TGeoPgon* shFassCone = new TGeoPgon(22.5, 360., 8, 4);
+  // reduce by 9.85 cm inorder to fit into barrel volume
+  // (insignificant change of material budget, but helping very much to improve the efficiency)
+  TGeoPgon* shFassCone = new TGeoPgon("FassCone", 22.5, 360., 8, 4);
   shFassCone->DefineSection(0, 0., 0., 180.);
   shFassCone->DefineSection(1, 3., 0., 180.);
   shFassCone->DefineSection(2, 3., 177., 180.);
-  shFassCone->DefineSection(3, 246., 177., 180.);
-  shFassCone->SetName("FassCone");
+  shFassCone->DefineSection(3, 246. - 9.85, 177., 180.);
 
   TGeoBBox* shFassWindow = new TGeoBBox(190., 53., 28.);
   shFassWindow->SetName("FassWindow");
@@ -1082,7 +1034,8 @@ void Absorber::ConstructGeometry()
   voFA->AddNode(voFaEndPlate, 1, new TGeoTranslation(0., 0., dzFa + dzEndPlate / 2.));
   voFA->AddNode(voFass, 1, new TGeoTranslation(0., 0., 388.45));
   voFA->AddNode(voFassAlRing, 1, new TGeoTranslation(0., 0., 382. - 3.56));
-  top->AddNode(voFA, 1, new TGeoCombiTrans(0., 0., -90., rotxz));
+  voFA->AddNode(voFaWTube5, 1, new TGeoTranslation(0., 0., 412.));
+  barrel->AddNode(voFA, 1, new TGeoCombiTrans(0., 30., -90., rotxz));
 }
 
 FairModule* Absorber::CloneModule() const { return new Absorber(*this); }

@@ -8,12 +8,12 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifndef FRAMEWORK_PARALLELCONTEXT_H
-#define FRAMEWORK_PARALLELCONTEXT_H
+#ifndef O2_FRAMEWORK_PARALLELCONTEXT_H_
+#define O2_FRAMEWORK_PARALLELCONTEXT_H_
 
-namespace o2
-{
-namespace framework
+#include "Framework/ServiceHandle.h"
+
+namespace o2::framework
 {
 
 /// Purpose of this class is to provide DataProcessors which
@@ -21,15 +21,17 @@ namespace framework
 /// function with information relevant to the parallel execution,
 /// e.g. how many workers have been created by the above mentioned function
 /// and what's the unique id the caller is associated with.
-/// This context is exposed as a Service and it's therefore available 
+/// This context is exposed as a Service and it's therefore available
 /// to both the init and the processing callbacks via:
 ///
 ///    auto ctx = services.get<ParallelContext>();
 ///
 /// FIXME: should we have convenience methods to address workers using
 ///        different parallel topology (e.g. have a index2D, rather than index1D).
-class ParallelContext {
-public:
+class ParallelContext
+{
+ public:
+  constexpr static ServiceKind service_kind = ServiceKind::Global;
   // FIXME: find better names... rank1D and rank1DSize?
   ParallelContext(size_t index1D, size_t index1DSize)
     : mIndex1D{index1D},
@@ -38,12 +40,12 @@ public:
   }
 
   size_t index1D() const { return mIndex1D; }
-  size_t index1DSize() const {return mIndex1DSize; };
-private:
+  size_t index1DSize() const { return mIndex1DSize; };
+
+ private:
   size_t mIndex1D;
   size_t mIndex1DSize;
 };
 
-} // namespace framework
-} // namespace o2
+} // namespace o2::framework
 #endif

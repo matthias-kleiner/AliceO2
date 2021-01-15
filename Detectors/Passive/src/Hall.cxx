@@ -25,18 +25,19 @@ using namespace o2::passive;
 
 Hall::~Hall() = default;
 
-Hall::Hall() : FairModule("Hall", "") {}
-Hall::Hall(const char* name, const char* Title) : FairModule(name, Title) {}
+Hall::Hall() : PassiveBase("HALL", "") {}
+Hall::Hall(const char* name, const char* Title) : PassiveBase(name, Title) {}
 Hall::Hall(const Hall& rhs) = default;
 
 Hall& Hall::operator=(const Hall& rhs)
 {
   // self assignment
-  if (this == &rhs)
+  if (this == &rhs) {
     return *this;
+  }
 
   // base class assignment
-  FairModule::operator=(rhs);
+  PassiveBase::operator=(rhs);
 
   return *this;
 }
@@ -45,7 +46,7 @@ namespace
 {
 constexpr double kDegrad = TMath::DegToRad();
 constexpr double kRaddeg = TMath::RadToDeg();
-}
+} // namespace
 
 void Hall::createMaterials()
 {
@@ -59,19 +60,19 @@ void Hall::createMaterials()
   o2::base::Detector::initFieldTrackingParams(isxfld, sxmgmx);
   isxfld = 0;
 
-  Float_t aconc[10] = { 1., 12.01, 15.994, 22.99, 24.305, 26.98, 28.086, 39.1, 40.08, 55.85 };
-  Float_t zconc[10] = { 1., 6., 8., 11., 12., 13., 14., 19., 20., 26. };
-  Float_t wconc[10] = { .01, .001, .529107, .016, .002, .033872, .337021, .013, .044, .014 };
+  Float_t aconc[10] = {1., 12.01, 15.994, 22.99, 24.305, 26.98, 28.086, 39.1, 40.08, 55.85};
+  Float_t zconc[10] = {1., 6., 8., 11., 12., 13., 14., 19., 20., 26.};
+  Float_t wconc[10] = {.01, .001, .529107, .016, .002, .033872, .337021, .013, .044, .014};
 
-  Float_t aAir[4] = { 12.0107, 14.0067, 15.9994, 39.948 };
-  Float_t zAir[4] = { 6., 7., 8., 18. };
-  Float_t wAir[4] = { 0.000124, 0.755267, 0.231781, 0.012827 };
+  Float_t aAir[4] = {12.0107, 14.0067, 15.9994, 39.948};
+  Float_t zAir[4] = {6., 7., 8., 18.};
+  Float_t wAir[4] = {0.000124, 0.755267, 0.231781, 0.012827};
   Float_t dAir = 1.20479E-3;
 
   // Steel
-  Float_t asteel[4] = { 55.847, 51.9961, 58.6934, 28.0855 };
-  Float_t zsteel[4] = { 26., 24., 28., 14. };
-  Float_t wsteel[4] = { .715, .18, .1, .005 };
+  Float_t asteel[4] = {55.847, 51.9961, 58.6934, 28.0855};
+  Float_t zsteel[4] = {26., 24., 28., 14.};
+  Float_t wsteel[4] = {.715, .18, .1, .005};
 
   // ****************
   //     Defines tracking media parameters.
@@ -99,35 +100,13 @@ void Hall::createMaterials()
   matmgr.Mixture("HALL", kCC_C2, "CONCRETE2", aconc, zconc, 2.35, 10, wconc);
   matmgr.Medium("HALL", kCC_C2, "CC_C2", kCC_C2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 
+  matmgr.Mixture("HALL", kCC_C0, "CONCRETE0", aconc, zconc, 2.35, 10, wconc);
+  matmgr.Medium("HALL", kCC_C0, "CC_C0", kCC_C0, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
   //  Iron
   matmgr.Material("HALL", kFE_C2, "IRON", 55.85, 26., 7.87, 1.76, 17.1);
   matmgr.Medium("HALL", kFE_C2, "FE_C2", kFE_C2, 0, isxfld, sxmgmx, tmaxfd, stemax, deemax, epsil, stmin);
 }
 
-void Hall::SetSpecialPhysicsCuts()
-{
-
-  using namespace o2::base;
-  // MaterialManager used to set physics cuts
-  auto& matmgr = MaterialManager::Instance();
-
-  // \note ported from AliRoot. People responsible for the HALL implementation must judge and modify cuts if required.
-  auto& hp = HallSimParam::Instance();
-  const auto cutgam = hp.mCUTGAM;
-  const auto cutele = hp.mCUTELE;
-  const auto cutneu = hp.mCUTNEU;
-  const auto cuthad = hp.mCUTHAD;
-
-  matmgr.SpecialCuts(
-    "HALL", kSTST_C2,
-    { { ECut::kCUTGAM, cutgam }, { ECut::kCUTELE, cutele }, { ECut::kCUTNEU, cutneu }, { ECut::kCUTHAD, cuthad } });
-  matmgr.SpecialCuts(
-    "HALL", kAIR_C2,
-    { { ECut::kCUTGAM, cutgam }, { ECut::kCUTELE, cutele }, { ECut::kCUTNEU, cutneu }, { ECut::kCUTHAD, cuthad } });
-  matmgr.SpecialCuts(
-    "HALL", kCC_C2,
-    { { ECut::kCUTGAM, cutgam }, { ECut::kCUTELE, cutele }, { ECut::kCUTNEU, cutneu }, { ECut::kCUTHAD, cuthad } });
-}
 
 void Hall::ConstructGeometry()
 {
@@ -155,6 +134,7 @@ void Hall::ConstructGeometry()
   // Media
   auto& matmgr = o2::base::MaterialManager::Instance();
   TGeoMedium* kMedCC = matmgr.getTGeoMedium("HALL_CC_C2");
+  TGeoMedium* kMedCClc = matmgr.getTGeoMedium("HALL_CC_C0");
   TGeoMedium* kMedST = matmgr.getTGeoMedium("HALL_STST_C2");
   TGeoMedium* kMedAir = matmgr.getTGeoMedium("HALL_AIR_C2");
   TGeoMedium* kMedFe = matmgr.getTGeoMedium("HALL_FE_C2");
@@ -481,7 +461,7 @@ void Hall::ConstructGeometry()
     shRb24PlSS = new TGeoCompositeShape("Rb24PlSS", "ShRb24Pl4-ShRb24Pl2:trPl5");
   }
 
-  TGeoVolume* voRb24Pl = new TGeoVolume("Rb24Pl", shRb24Pl, kMedCC);
+  TGeoVolume* voRb24Pl = new TGeoVolume("Rb24Pl", shRb24Pl, kMedCClc);
 
   asShRb24->AddNode(voRb24Pl, 1, new TGeoTranslation(0., 0., 520. - 40.));
   if (mNewShield24) {
@@ -541,8 +521,9 @@ void Hall::ConstructGeometry()
   //
   // Scoring plane for beam background simulations
   //
-  TGeoVolume* voRB24Scoring = new TGeoVolume("RB24Scoring", new TGeoTube(4.3, 300., 1.), kMedAir);
-  asHall->AddNode(voRB24Scoring, 1, new TGeoTranslation(0., 0., 735.));
+
+  //  TGeoVolume* voRB24Scoring = new TGeoVolume("RB24Scoring", new TGeoTube(4.3, 300., 1.), kMedAir);
+  // asHall->AddNode(voRB24Scoring, 1, new TGeoTranslation(0., 0., 735.));
   //
   // Extra shielding in front of racks
   //

@@ -17,9 +17,13 @@ namespace o2
 {
 namespace steer
 {
-o2::framework::DataProcessorSpec getSimReaderSpec(int fanoutsize, const std::vector<int>& tpcsectors,
-                                                  std::shared_ptr<std::vector<int>> tpcsubchannels);
+struct SubspecRange {
+  int min = 0;
+  int max = 0;
+};
+
+o2::framework::DataProcessorSpec getSimReaderSpec(SubspecRange range, const std::vector<std::string>& simprefixes, const std::vector<int>& tpcsectors);
 }
-}
+} // namespace o2
 
 #endif // O2_STEER_SIMREADERSPEC_H

@@ -34,58 +34,69 @@ namespace its
 void TrackerTraitsCPU::computeLayerTracklets()
 {
   PrimaryVertexContext* primaryVertexContext = mPrimaryVertexContext;
-  for (int iLayer{ 0 }; iLayer < constants::its::TrackletsPerRoad; ++iLayer) {
+  for (int iLayer{0}; iLayer < mTrkParams.TrackletsPerRoad(); ++iLayer) {
     if (primaryVertexContext->getClusters()[iLayer].empty() || primaryVertexContext->getClusters()[iLayer + 1].empty()) {
-      return;
+      continue;
     }
 
     const float3& primaryVertex = primaryVertexContext->getPrimaryVertex();
-    const int currentLayerClustersNum{ static_cast<int>(primaryVertexContext->getClusters()[iLayer].size()) };
+    const int currentLayerClustersNum{static_cast<int>(primaryVertexContext->getClusters()[iLayer].size())};
 
-    for (int iCluster{ 0 }; iCluster < currentLayerClustersNum; ++iCluster) {
-      const Cluster& currentCluster{ primaryVertexContext->getClusters()[iLayer][iCluster] };
+    for (int iCluster{0}; iCluster < currentLayerClustersNum; ++iCluster) {
+      const Cluster& currentCluster{primaryVertexContext->getClusters()[iLayer][iCluster]};
 
-      const float tanLambda{ (currentCluster.zCoordinate - primaryVertex.z) / currentCluster.rCoordinate };
-      const float directionZIntersection{ tanLambda * (constants::its::LayersRCoordinate()[iLayer + 1] -
-                                                       currentCluster.rCoordinate) +
-                                          currentCluster.zCoordinate };
+      if (primaryVertexContext->isClusterUsed(iLayer, currentCluster.clusterId)) {
+        continue;
+      }
 
-      const int4 selectedBinsRect{ getBinsRect(currentCluster, iLayer, directionZIntersection,
-                                               mTrkParams.TrackletMaxDeltaZ[iLayer], mTrkParams.TrackletMaxDeltaPhi) };
+      const float tanLambda{(currentCluster.zCoordinate - primaryVertex.z) / currentCluster.rCoordinate};
+      const float zAtRmin{tanLambda * (mPrimaryVertexContext->getMinR(iLayer + 1) -
+                                       currentCluster.rCoordinate) +
+                          currentCluster.zCoordinate};
+      const float zAtRmax{tanLambda * (mPrimaryVertexContext->getMaxR(iLayer + 1) -
+                                       currentCluster.rCoordinate) +
+                          currentCluster.zCoordinate};
+
+      const int4 selectedBinsRect{getBinsRect(currentCluster, iLayer, zAtRmin, zAtRmax,
+                                              mTrkParams.TrackletMaxDeltaZ[iLayer], mTrkParams.TrackletMaxDeltaPhi)};
 
       if (selectedBinsRect.x == 0 && selectedBinsRect.y == 0 && selectedBinsRect.z == 0 && selectedBinsRect.w == 0) {
         continue;
       }
 
-      int phiBinsNum{ selectedBinsRect.w - selectedBinsRect.y + 1 };
+      int phiBinsNum{selectedBinsRect.w - selectedBinsRect.y + 1};
 
       if (phiBinsNum < 0) {
-        phiBinsNum += constants::IndexTable::PhiBins;
+        phiBinsNum += mTrkParams.PhiBins;
       }
 
-      for (int iPhiBin{ selectedBinsRect.y }, iPhiCount{ 0 }; iPhiCount < phiBinsNum;
-           iPhiBin = ++iPhiBin == constants::IndexTable::PhiBins ? 0 : iPhiBin, iPhiCount++) {
-
-        const int firstBinIndex{ IndexTableUtils::getBinIndex(selectedBinsRect.x, iPhiBin) };
-        const int maxBinIndex{ firstBinIndex + selectedBinsRect.z - selectedBinsRect.x + 1 };
+      for (int iPhiBin{selectedBinsRect.y}, iPhiCount{0}; iPhiCount < phiBinsNum;
+           iPhiBin = ++iPhiBin == mTrkParams.PhiBins ? 0 : iPhiBin, iPhiCount++) {
+        const int firstBinIndex{primaryVertexContext->mIndexTableUtils.getBinIndex(selectedBinsRect.x, iPhiBin)};
+        const int maxBinIndex{firstBinIndex + selectedBinsRect.z - selectedBinsRect.x + 1};
         const int firstRowClusterIndex = primaryVertexContext->getIndexTables()[iLayer][firstBinIndex];
         const int maxRowClusterIndex = primaryVertexContext->getIndexTables()[iLayer][maxBinIndex];
 
-        for (int iNextLayerCluster{ firstRowClusterIndex }; iNextLayerCluster < maxRowClusterIndex;
+        for (int iNextLayerCluster{firstRowClusterIndex}; iNextLayerCluster < maxRowClusterIndex;
              ++iNextLayerCluster) {
 
-          const Cluster& nextCluster{ primaryVertexContext->getClusters()[iLayer + 1][iNextLayerCluster] };
+          if (iNextLayerCluster >= (int)primaryVertexContext->getClusters()[iLayer + 1].size()) {
+            break;
+          }
 
-          if (primaryVertexContext->isClusterUsed(iLayer + 1, nextCluster.clusterId))
+          const Cluster& nextCluster{primaryVertexContext->getClusters()[iLayer + 1][iNextLayerCluster]};
+
+          if (primaryVertexContext->isClusterUsed(iLayer + 1, nextCluster.clusterId)) {
             continue;
+          }
 
-          const float deltaZ{ gpu::GPUCommonMath::Abs(tanLambda * (nextCluster.rCoordinate - currentCluster.rCoordinate) +
-                                                      currentCluster.zCoordinate - nextCluster.zCoordinate) };
-          const float deltaPhi{ gpu::GPUCommonMath::Abs(currentCluster.phiCoordinate - nextCluster.phiCoordinate) };
+          const float deltaZ{o2::gpu::GPUCommonMath::Abs(tanLambda * (nextCluster.rCoordinate - currentCluster.rCoordinate) +
+                                                         currentCluster.zCoordinate - nextCluster.zCoordinate)};
+          const float deltaPhi{o2::gpu::GPUCommonMath::Abs(currentCluster.phiCoordinate - nextCluster.phiCoordinate)};
 
           if (deltaZ < mTrkParams.TrackletMaxDeltaZ[iLayer] &&
               (deltaPhi < mTrkParams.TrackletMaxDeltaPhi ||
-               gpu::GPUCommonMath::Abs(deltaPhi - constants::Math::TwoPi) < mTrkParams.TrackletMaxDeltaPhi)) {
+               o2::gpu::GPUCommonMath::Abs(deltaPhi - constants::math::TwoPi) < mTrkParams.TrackletMaxDeltaPhi)) {
 
             if (iLayer > 0 &&
                 primaryVertexContext->getTrackletsLookupTable()[iLayer - 1][iCluster] == constants::its::UnusedIndex) {
@@ -100,13 +111,25 @@ void TrackerTraitsCPU::computeLayerTracklets()
         }
       }
     }
+    if (iLayer > 0 && iLayer < mTrkParams.TrackletsPerRoad() - 1 &&
+        primaryVertexContext->getTracklets()[iLayer].size() > primaryVertexContext->getCellsLookupTable()[iLayer - 1].size()) {
+      std::cout << "**** FATAL: not enough memory in the CellsLookupTable, increase the tracklet memory coefficients ****" << std::endl;
+      exit(1);
+    }
   }
+#ifdef CA_DEBUG
+  std::cout << "+++ Number of tracklets per layer: ";
+  for (int iLayer{0}; iLayer < mTrkParams.TrackletsPerRoad(); ++iLayer) {
+    std::cout << primaryVertexContext->getTracklets()[iLayer].size() << "\t";
+  }
+  std::cout << std::endl;
+#endif
 }
 
 void TrackerTraitsCPU::computeLayerCells()
 {
   PrimaryVertexContext* primaryVertexContext = mPrimaryVertexContext;
-  for (int iLayer{ 0 }; iLayer < constants::its::CellsPerRoad; ++iLayer) {
+  for (int iLayer{0}; iLayer < mTrkParams.CellsPerRoad(); ++iLayer) {
 
     if (primaryVertexContext->getTracklets()[iLayer + 1].empty() ||
         primaryVertexContext->getTracklets()[iLayer].empty()) {
@@ -115,93 +138,90 @@ void TrackerTraitsCPU::computeLayerCells()
     }
 
     const float3& primaryVertex = primaryVertexContext->getPrimaryVertex();
-    const int currentLayerTrackletsNum{ static_cast<int>(primaryVertexContext->getTracklets()[iLayer].size()) };
+    const int currentLayerTrackletsNum{static_cast<int>(primaryVertexContext->getTracklets()[iLayer].size())};
 
-    for (int iTracklet{ 0 }; iTracklet < currentLayerTrackletsNum; ++iTracklet) {
+    for (int iTracklet{0}; iTracklet < currentLayerTrackletsNum; ++iTracklet) {
 
-      const Tracklet& currentTracklet{ primaryVertexContext->getTracklets()[iLayer][iTracklet] };
-      const int nextLayerClusterIndex{ currentTracklet.secondClusterIndex };
+      const Tracklet& currentTracklet{primaryVertexContext->getTracklets()[iLayer][iTracklet]};
+      const int nextLayerClusterIndex{currentTracklet.secondClusterIndex};
       const int nextLayerFirstTrackletIndex{
-        primaryVertexContext->getTrackletsLookupTable()[iLayer][nextLayerClusterIndex]
-      };
+        primaryVertexContext->getTrackletsLookupTable()[iLayer][nextLayerClusterIndex]};
 
       if (nextLayerFirstTrackletIndex == constants::its::UnusedIndex) {
 
         continue;
       }
 
-      const Cluster& firstCellCluster{ primaryVertexContext->getClusters()[iLayer][currentTracklet.firstClusterIndex] };
+      const Cluster& firstCellCluster{primaryVertexContext->getClusters()[iLayer][currentTracklet.firstClusterIndex]};
       const Cluster& secondCellCluster{
-        primaryVertexContext->getClusters()[iLayer + 1][currentTracklet.secondClusterIndex]
-      };
-      const float firstCellClusterQuadraticRCoordinate{ firstCellCluster.rCoordinate * firstCellCluster.rCoordinate };
-      const float secondCellClusterQuadraticRCoordinate{ secondCellCluster.rCoordinate *
-                                                         secondCellCluster.rCoordinate };
-      const float3 firstDeltaVector{ secondCellCluster.xCoordinate - firstCellCluster.xCoordinate,
-                                     secondCellCluster.yCoordinate - firstCellCluster.yCoordinate,
-                                     secondCellClusterQuadraticRCoordinate - firstCellClusterQuadraticRCoordinate };
-      const int nextLayerTrackletsNum{ static_cast<int>(primaryVertexContext->getTracklets()[iLayer + 1].size()) };
+        primaryVertexContext->getClusters()[iLayer + 1][currentTracklet.secondClusterIndex]};
+      const float firstCellClusterQuadraticRCoordinate{firstCellCluster.rCoordinate * firstCellCluster.rCoordinate};
+      const float secondCellClusterQuadraticRCoordinate{secondCellCluster.rCoordinate *
+                                                        secondCellCluster.rCoordinate};
+      const float3 firstDeltaVector{secondCellCluster.xCoordinate - firstCellCluster.xCoordinate,
+                                    secondCellCluster.yCoordinate - firstCellCluster.yCoordinate,
+                                    secondCellClusterQuadraticRCoordinate - firstCellClusterQuadraticRCoordinate};
+      const int nextLayerTrackletsNum{static_cast<int>(primaryVertexContext->getTracklets()[iLayer + 1].size())};
 
-      for (int iNextLayerTracklet{ nextLayerFirstTrackletIndex };
+      for (int iNextLayerTracklet{nextLayerFirstTrackletIndex};
            iNextLayerTracklet < nextLayerTrackletsNum &&
            primaryVertexContext->getTracklets()[iLayer + 1][iNextLayerTracklet].firstClusterIndex ==
              nextLayerClusterIndex;
            ++iNextLayerTracklet) {
 
-        const Tracklet& nextTracklet{ primaryVertexContext->getTracklets()[iLayer + 1][iNextLayerTracklet] };
-        const float deltaTanLambda{ std::abs(currentTracklet.tanLambda - nextTracklet.tanLambda) };
-        const float deltaPhi{ std::abs(currentTracklet.phiCoordinate - nextTracklet.phiCoordinate) };
+        const Tracklet& nextTracklet{primaryVertexContext->getTracklets()[iLayer + 1][iNextLayerTracklet]};
+        const float deltaTanLambda{std::abs(currentTracklet.tanLambda - nextTracklet.tanLambda)};
+        const float deltaPhi{std::abs(currentTracklet.phiCoordinate - nextTracklet.phiCoordinate)};
 
         if (deltaTanLambda < mTrkParams.CellMaxDeltaTanLambda &&
             (deltaPhi < mTrkParams.CellMaxDeltaPhi ||
-             std::abs(deltaPhi - constants::Math::TwoPi) < mTrkParams.CellMaxDeltaPhi)) {
+             std::abs(deltaPhi - constants::math::TwoPi) < mTrkParams.CellMaxDeltaPhi)) {
 
-          const float averageTanLambda{ 0.5f * (currentTracklet.tanLambda + nextTracklet.tanLambda) };
-          const float directionZIntersection{ -averageTanLambda * firstCellCluster.rCoordinate +
-                                              firstCellCluster.zCoordinate };
-          const float deltaZ{ std::abs(directionZIntersection - primaryVertex.z) };
+          const float averageTanLambda{0.5f * (currentTracklet.tanLambda + nextTracklet.tanLambda)};
+          const float directionZIntersection{-averageTanLambda * firstCellCluster.rCoordinate +
+                                             firstCellCluster.zCoordinate};
+          const float deltaZ{std::abs(directionZIntersection - primaryVertex.z)};
 
           if (deltaZ < mTrkParams.CellMaxDeltaZ[iLayer]) {
 
             const Cluster& thirdCellCluster{
-              primaryVertexContext->getClusters()[iLayer + 2][nextTracklet.secondClusterIndex]
-            };
+              primaryVertexContext->getClusters()[iLayer + 2][nextTracklet.secondClusterIndex]};
 
-            const float thirdCellClusterQuadraticRCoordinate{ thirdCellCluster.rCoordinate *
-                                                              thirdCellCluster.rCoordinate };
+            const float thirdCellClusterQuadraticRCoordinate{thirdCellCluster.rCoordinate *
+                                                             thirdCellCluster.rCoordinate};
 
-            const float3 secondDeltaVector{ thirdCellCluster.xCoordinate - firstCellCluster.xCoordinate,
-                                            thirdCellCluster.yCoordinate - firstCellCluster.yCoordinate,
-                                            thirdCellClusterQuadraticRCoordinate -
-                                              firstCellClusterQuadraticRCoordinate };
+            const float3 secondDeltaVector{thirdCellCluster.xCoordinate - firstCellCluster.xCoordinate,
+                                           thirdCellCluster.yCoordinate - firstCellCluster.yCoordinate,
+                                           thirdCellClusterQuadraticRCoordinate -
+                                             firstCellClusterQuadraticRCoordinate};
 
-            float3 cellPlaneNormalVector{ MathUtils::crossProduct(firstDeltaVector, secondDeltaVector) };
+            float3 cellPlaneNormalVector{math_utils::crossProduct(firstDeltaVector, secondDeltaVector)};
 
-            const float vectorNorm{ std::sqrt(cellPlaneNormalVector.x * cellPlaneNormalVector.x +
-                                              cellPlaneNormalVector.y * cellPlaneNormalVector.y +
-                                              cellPlaneNormalVector.z * cellPlaneNormalVector.z) };
+            const float vectorNorm{std::sqrt(cellPlaneNormalVector.x * cellPlaneNormalVector.x +
+                                             cellPlaneNormalVector.y * cellPlaneNormalVector.y +
+                                             cellPlaneNormalVector.z * cellPlaneNormalVector.z)};
 
-            if (vectorNorm < constants::Math::FloatMinThreshold ||
-                std::abs(cellPlaneNormalVector.z) < constants::Math::FloatMinThreshold) {
+            if (vectorNorm < constants::math::FloatMinThreshold ||
+                std::abs(cellPlaneNormalVector.z) < constants::math::FloatMinThreshold) {
 
               continue;
             }
 
-            const float inverseVectorNorm{ 1.0f / vectorNorm };
-            const float3 normalizedPlaneVector{ cellPlaneNormalVector.x * inverseVectorNorm,
-                                                cellPlaneNormalVector.y * inverseVectorNorm,
-                                                cellPlaneNormalVector.z * inverseVectorNorm };
-            const float planeDistance{ -normalizedPlaneVector.x * (secondCellCluster.xCoordinate - primaryVertex.x) -
-                                       (normalizedPlaneVector.y * secondCellCluster.yCoordinate - primaryVertex.y) -
-                                       normalizedPlaneVector.z * secondCellClusterQuadraticRCoordinate };
-            const float normalizedPlaneVectorQuadraticZCoordinate{ normalizedPlaneVector.z * normalizedPlaneVector.z };
-            const float cellTrajectoryRadius{ std::sqrt(
+            const float inverseVectorNorm{1.0f / vectorNorm};
+            const float3 normalizedPlaneVector{cellPlaneNormalVector.x * inverseVectorNorm,
+                                               cellPlaneNormalVector.y * inverseVectorNorm,
+                                               cellPlaneNormalVector.z * inverseVectorNorm};
+            const float planeDistance{-normalizedPlaneVector.x * (secondCellCluster.xCoordinate - primaryVertex.x) -
+                                      (normalizedPlaneVector.y * secondCellCluster.yCoordinate - primaryVertex.y) -
+                                      normalizedPlaneVector.z * secondCellClusterQuadraticRCoordinate};
+            const float normalizedPlaneVectorQuadraticZCoordinate{normalizedPlaneVector.z * normalizedPlaneVector.z};
+            const float cellTrajectoryRadius{std::sqrt(
               (1.0f - normalizedPlaneVectorQuadraticZCoordinate - 4.0f * planeDistance * normalizedPlaneVector.z) /
-              (4.0f * normalizedPlaneVectorQuadraticZCoordinate)) };
-            const float2 circleCenter{ -0.5f * normalizedPlaneVector.x / normalizedPlaneVector.z,
-                                       -0.5f * normalizedPlaneVector.y / normalizedPlaneVector.z };
-            const float distanceOfClosestApproach{ std::abs(
-              cellTrajectoryRadius - std::sqrt(circleCenter.x * circleCenter.x + circleCenter.y * circleCenter.y)) };
+              (4.0f * normalizedPlaneVectorQuadraticZCoordinate))};
+            const float2 circleCenter{-0.5f * normalizedPlaneVector.x / normalizedPlaneVector.z,
+                                      -0.5f * normalizedPlaneVector.y / normalizedPlaneVector.z};
+            const float distanceOfClosestApproach{std::abs(
+              cellTrajectoryRadius - std::sqrt(circleCenter.x * circleCenter.x + circleCenter.y * circleCenter.y))};
 
             if (distanceOfClosestApproach >
                 mTrkParams.CellMaxDCA[iLayer]) {
@@ -209,7 +229,7 @@ void TrackerTraitsCPU::computeLayerCells()
               continue;
             }
 
-            const float cellTrajectoryCurvature{ 1.0f / cellTrajectoryRadius };
+            const float cellTrajectoryCurvature{1.0f / cellTrajectoryRadius};
             if (iLayer > 0 &&
                 primaryVertexContext->getCellsLookupTable()[iLayer - 1][iTracklet] == constants::its::UnusedIndex) {
 
@@ -225,17 +245,24 @@ void TrackerTraitsCPU::computeLayerCells()
       }
     }
   }
+#ifdef CA_DEBUG
+  std::cout << "+++ Number of cells per layer: ";
+  for (int iLayer{0}; iLayer < mTrkParams.CellsPerRoad(); ++iLayer) {
+    std::cout << primaryVertexContext->getCells()[iLayer].size() << "\t";
+  }
+  std::cout << std::endl;
+#endif
 }
 
-void TrackerTraitsCPU::refitTracks(const std::array<std::vector<TrackingFrameInfo>, 7>& tf, std::vector<TrackITSExt>& tracks)
+void TrackerTraitsCPU::refitTracks(const std::vector<std::vector<TrackingFrameInfo>>& tf, std::vector<TrackITSExt>& tracks)
 {
-  std::array<const Cell*, 5> cells;
-  for (int iLayer = 0; iLayer < 5; iLayer++) {
-    cells[iLayer] = mPrimaryVertexContext->getCells()[iLayer].data();
+  std::vector<const Cell*> cells;
+  for (int iLayer = 0; iLayer < mTrkParams.CellsPerRoad(); iLayer++) {
+    cells.push_back(mPrimaryVertexContext->getCells()[iLayer].data());
   }
-  std::array<const Cluster*, 7> clusters;
-  for (int iLayer = 0; iLayer < 7; iLayer++) {
-    clusters[iLayer] = mPrimaryVertexContext->getClusters()[iLayer].data();
+  std::vector<const Cluster*> clusters;
+  for (int iLayer = 0; iLayer < mTrkParams.NLayers; iLayer++) {
+    clusters.push_back(mPrimaryVertexContext->getClusters()[iLayer].data());
   }
   mChainRunITSTrackFit(*mChain, mPrimaryVertexContext->getRoads(), clusters, cells, tf, tracks);
 }

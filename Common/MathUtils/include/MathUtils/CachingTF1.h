@@ -18,7 +18,7 @@
 
 namespace o2
 {
-namespace base
+namespace math_utils
 {
 class CachingTF1 : public TF1
 {
@@ -43,9 +43,9 @@ class CachingTF1 : public TF1
   std::vector<double>* mAlphaCache = &fAlpha;
   std::vector<double>* mBetaCache = &fBeta;
   std::vector<double>* mGammaCache = &fGamma;
-  ClassDefOverride(CachingTF1,1);
+  ClassDefOverride(CachingTF1, 1);
 };
-}
-}
+} // namespace math_utils
+} // namespace o2
 
 #endif

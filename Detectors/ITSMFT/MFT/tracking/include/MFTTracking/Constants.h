@@ -1,0 +1,71 @@
+// Copyright CERN and copyright holders of ALICE O2. This software is
+// distributed under the terms of the GNU General Public License v3 (GPL
+// Version 3), copied verbatim in the file "COPYING".
+//
+// See http://alice-o2.web.cern.ch/license for full licensing information.
+//
+// In applying this license CERN does not waive the privileges and immunities
+// granted to it by virtue of its status as an Intergovernmental Organization
+// or submit itself to any jurisdiction.
+///
+/// \file Constants.h
+/// \brief Some constants, fixed parameters and look-up-table functions
+///
+
+#ifndef O2_MFT_CONSTANTS_H_
+#define O2_MFT_CONSTANTS_H_
+
+#include <climits>
+#include <vector>
+#include <array>
+
+#include <Rtypes.h>
+
+#include "CommonConstants/MathConstants.h"
+
+namespace o2
+{
+namespace mft
+{
+
+namespace constants
+{
+
+namespace mft
+{
+constexpr Int_t LayersNumber{10};
+constexpr Int_t DisksNumber{5};
+constexpr Int_t TrackletsPerRoad{LayersNumber - 1};
+constexpr Int_t CellsPerRoad{LayersNumber - 2};
+constexpr Int_t ClustersPerCell{2};
+constexpr Int_t UnusedIndex{-1};
+constexpr Float_t Resolution{0.0005f};
+constexpr std::array<Float_t, LayersNumber> LayerZCoordinate()
+{
+  return std::array<Float_t, LayersNumber>{-45.3, -46.7, -48.6, -50.0, -52.4, -53.8, -67.7, -69.1, -76.1, -77.5};
+}
+constexpr std::array<Float_t, LayersNumber> InverseLayerZCoordinate()
+{
+  return std::array<Float_t, LayersNumber>{-1. / 45.3, -1. / 46.7, -1. / 48.6, -1. / 50.0, -1. / 52.4, -1. / 53.8, -1. / 67.7, -1. / 69.1, -1. / 76.1, -1. / 77.5};
+}
+constexpr Int_t MaxCellNeighbours{50};
+constexpr Int_t MaxPointsInRoad{100};
+constexpr Int_t MaxCellsInRoad{100};
+} // namespace mft
+
+namespace index_table
+{
+constexpr Float_t RMin{2.0}; // [cm]
+constexpr Float_t RMax{16.0};
+
+constexpr Float_t PhiMin{0.};
+constexpr Float_t PhiMax{o2::constants::math::TwoPI}; // [rad]
+
+constexpr Int_t MaxRPhiBins{100 * 100};
+} // namespace index_table
+
+} // namespace constants
+} // namespace mft
+} // namespace o2
+
+#endif /* O2_MFT_CONSTANTS_H_ */

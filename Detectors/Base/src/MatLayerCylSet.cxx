@@ -16,7 +16,7 @@
 
 #ifndef GPUCA_ALIGPUCODE // this part is unvisible on GPU version
 
-#include "GPUCommonFairLogger.h"
+#include "GPUCommonLogger.h"
 #include <TFile.h>
 #include "CommonUtils/TreeStreamRedirector.h"
 //#define _DBG_LOC_ // for local debugging only
@@ -36,8 +36,8 @@ void MatLayerCylSet::addLayer(float rmin, float rmax, float zmax, float dz, floa
   assert(mConstructionMask != Constructed);
   assert(rmin < rmax && zmax > 0 && dz > 0 && drphi > 0);
   mConstructionMask = InProgress;
-
-  if (!getNLayers()) {
+  int nlr = getNLayers();
+  if (!nlr) {
     // book local storage
     auto sz = sizeof(MatLayerCylSetLayout);
     o2::gpu::resizeArray(mFlatBufferContainer, 0, sz);
@@ -48,15 +48,19 @@ void MatLayerCylSet::addLayer(float rmin, float rmax, float zmax, float dz, floa
     get()->mRMax = 0.;
   }
 
-  for (int il = 0; il < getNLayers(); il++) {
+  for (int il = 0; il < nlr; il++) {
     const auto& lr = getLayer(il);
     if (lr.getRMax() > rmin && rmax > lr.getRMin()) {
       LOG(FATAL) << "new layer overlaps with layer " << il;
     }
   }
-
-  delete[] o2::gpu::resizeArray(get()->mLayers, getNLayers(), getNLayers() + 1);
-  get()->mLayers[getNLayers()].initSegmentation(rmin, rmax, zmax, dz, drphi);
+  auto* oldLayers = o2::gpu::resizeArray(get()->mLayers, nlr, nlr + 1);
+  // dynamyc buffers of old layers were used in new ones, detach them
+  for (int i = nlr; i--;) {
+    oldLayers[i].clearInternalBufferPtr();
+  }
+  delete[] oldLayers;
+  get()->mLayers[nlr].initSegmentation(rmin, rmax, zmax, dz, drphi);
   get()->mNLayers++;
   get()->mRMin = get()->mRMin > rmin ? rmin : get()->mRMin;
   get()->mRMax = get()->mRMax < rmax ? rmax : get()->mRMax;
@@ -129,9 +133,10 @@ void MatLayerCylSet::dumpToTree(const std::string outName) const
       if (ip + 1 < nphib) {
         int ips1 = lr.phiBin2Slice(ip + 1);
         merge = ips == ips1 ? -1 : lr.canMergePhiSlices(ips, ips1); // -1 for already merged
-      } else
+      } else {
         merge = -2; // last one
-      o2::utils::sincosf(phi, sn, cs);
+      }
+      o2::math_utils::sincos(phi, sn, cs);
       float x = r * cs, y = r * sn;
       for (int iz = 0; iz < lr.getNZBins(); iz++) {
         float z = 0.5 * (lr.getZBinMin(iz) + lr.getZBinMax(iz));
@@ -241,7 +246,8 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
   MatBudget rval;
   Ray ray(x0, y0, z0, x1, y1, z1);
   short lmin, lmax; // get innermost and outermost relevant layer
-  if (!getLayersRange(ray, lmin, lmax)) {
+  if (ray.isTooShort() || !getLayersRange(ray, lmin, lmax)) {
+    rval.length = ray.getDist();
     return rval;
   }
   short lrID = lmax;
@@ -273,6 +279,9 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
           checkMorePhi = false;
         } else { // last phi slice still not reached
           tEndPhi = ray.crossRadial(lr, (stepPhiID > 0 ? phiID + 1 : phiID) % lr.getNPhiSlices());
+          if (tEndPhi == Ray::InvalidT) {
+            break; // ray parallel to radial line, abandon check for phi bin change
+          }
         }
         auto zID = lr.getZBinID(ray.getZ(tStartPhi));
         auto zIDLast = lr.getZBinID(ray.getZ(tEndPhi));
@@ -292,17 +301,20 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
               checkMoreZ = false;
             } else {
               tEndZ = ray.crossZ(lr.getZBinMin(stepZID > 0 ? zID + 1 : zID));
+              if (tEndZ == Ray::InvalidT) { // track normal to Z axis, abandon Zbin change test
+                break;
+              }
             }
             // account materials of this step
-            float step = tEndZ - tStartZ; // the real step is ray.getDist(tEnd-tStart), will rescale all later
+            float step = tEndZ > tStartZ ? tEndZ - tStartZ : tStartZ - tEndZ; // the real step is ray.getDist(tEnd-tStart), will rescale all later
             const auto& cell = lr.getCell(phiID, zID);
             rval.meanRho += cell.meanRho * step;
             rval.meanX2X0 += cell.meanX2X0 * step;
             rval.length += step;
 
 #ifdef _DBG_LOC_
-            float pos0[3] = { ray.getPos(tStartZ, 0), ray.getPos(tStartZ, 1), ray.getPos(tStartZ, 2) };
-            float pos1[3] = { ray.getPos(tEndZ, 0), ray.getPos(tEndZ, 1), ray.getPos(tEndZ, 2) };
+            float pos0[3] = {ray.getPos(tStartZ, 0), ray.getPos(tStartZ, 1), ray.getPos(tStartZ, 2)};
+            float pos1[3] = {ray.getPos(tEndZ, 0), ray.getPos(tEndZ, 1), ray.getPos(tEndZ, 2)};
             printf(
               "Lr#%3d / cross#%d : account %f<t<%f at phiSlice %d | Zbin: %3d (%3d) |[%+e %+e +%e]:[%+e %+e %+e] "
               "Step: %.3e StrpCor: %.3e\n",
@@ -314,15 +326,15 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
             zID += stepZID;
           } while (checkMoreZ);
         } else {
-          float step = tEndPhi - tStartPhi; // the real step is |ray.getDist(tEnd-tStart)|, will rescale all later
+          float step = tEndPhi > tStartPhi ? tEndPhi - tStartPhi : tStartPhi - tEndPhi; // the real step is |ray.getDist(tEnd-tStart)|, will rescale all later
           const auto& cell = lr.getCell(phiID, zID);
           rval.meanRho += cell.meanRho * step;
           rval.meanX2X0 += cell.meanX2X0 * step;
           rval.length += step;
 
 #ifdef _DBG_LOC_
-          float pos0[3] = { ray.getPos(tStartPhi, 0), ray.getPos(tStartPhi, 1), ray.getPos(tStartPhi, 2) };
-          float pos1[3] = { ray.getPos(tEndPhi, 0), ray.getPos(tEndPhi, 1), ray.getPos(tEndPhi, 2) };
+          float pos0[3] = {ray.getPos(tStartPhi, 0), ray.getPos(tStartPhi, 1), ray.getPos(tStartPhi, 2)};
+          float pos1[3] = {ray.getPos(tEndPhi, 0), ray.getPos(tEndPhi, 1), ray.getPos(tEndPhi, 2)};
           printf(
             "Lr#%3d / cross#%d : account %f<t<%f at phiSlice %d | Zbin: %3d ----- |[%+e %+e +%e]:[%+e %+e %+e]"
             "Step: %.3e StrpCor: %.3e\n",
@@ -341,10 +353,10 @@ GPUd() MatBudget MatLayerCylSet::getMatBudget(float x0, float y0, float z0, floa
 
   if (rval.length != 0.f) {
     rval.meanRho /= rval.length;                                       // average
-    float norm = (rval.length < 0.f) ? -ray.getDist() : ray.getDist(); // normalize
-    rval.meanX2X0 *= norm;
-    rval.length *= norm;
+    rval.meanX2X0 *= ray.getDist();                                    // normalize
   }
+  rval.length = ray.getDist();
+
 #ifdef _DBG_LOC_
   printf("<rho> = %e, x2X0 = %e  | step = %e\n", rval.meanRho, rval.meanX2X0, rval.length);
 #endif
@@ -417,7 +429,12 @@ void MatLayerCylSet::flatten()
 
   auto offs = alignSize(sizeof(MatLayerCylSetLayout), getBufferAlignmentBytes()); // account for the alignment
   // move array of layer pointers to the flat array
-  delete[] o2::gpu::resizeArray(get()->mLayers, nLr, nLr, (MatLayerCyl*)(mFlatBufferPtr + offs));
+  auto* oldLayers = o2::gpu::resizeArray(get()->mLayers, nLr, nLr, (MatLayerCyl*)(mFlatBufferPtr + offs));
+  // dynamyc buffers of old layers were used in new ones, detach them
+  for (int i = nLr; i--;) {
+    oldLayers[i].clearInternalBufferPtr();
+  }
+  delete[] oldLayers;
   offs = alignSize(offs + nLr * sizeof(MatLayerCyl), MatLayerCyl::getClassAlignmentBytes()); // account for the alignment
 
   // move array of R2 boundaries to the flat array

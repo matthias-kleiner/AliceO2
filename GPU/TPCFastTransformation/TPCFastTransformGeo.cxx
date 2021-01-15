@@ -33,10 +33,10 @@ TPCFastTransformGeo::TPCFastTransformGeo()
     s.sinAlpha = sin(alpha);
     s.cosAlpha = cos(alpha);
   }
-  mSliceInfos[NumberOfSlices] = SliceInfo{ 0.f, 0.f };
+  mSliceInfos[NumberOfSlices] = SliceInfo{0.f, 0.f};
 
   for (int i = 0; i < MaxNumberOfRows + 1; i++) {
-    mRowInfos[i] = RowInfo{ 0.f, -1, 0.f, 0.f, 0.f, 0.f };
+    mRowInfos[i] = RowInfo{0.f, -1, 0.f, 0.f, 0.f, 0.f};
   }
 }
 
@@ -58,7 +58,7 @@ void TPCFastTransformGeo::startConstruction(int numberOfRows)
   mScaleSVtoVsideC = 0.f;
 
   for (int i = 0; i < MaxNumberOfRows; i++) {
-    mRowInfos[i] = RowInfo{ 0.f, -1, 0.f, 0.f, 0.f, 0.f };
+    mRowInfos[i] = RowInfo{0.f, -1, 0.f, 0.f, 0.f, 0.f};
   }
 }
 
@@ -71,10 +71,10 @@ void TPCFastTransformGeo::setTPCzLength(float tpcZlengthSideA, float tpcZlengthS
 
   mTPCzLengthA = tpcZlengthSideA;
   mTPCzLengthC = tpcZlengthSideC;
-  mScaleVtoSVsideA = 1. / tpcZlengthSideA;
-  mScaleVtoSVsideC = 1. / tpcZlengthSideC;
-  mScaleSVtoVsideA = tpcZlengthSideA;
-  mScaleSVtoVsideC = tpcZlengthSideC;
+  mScaleSVtoVsideA = tpcZlengthSideA + 3.; // add some extra possible drift length due to the space charge distortions
+  mScaleSVtoVsideC = tpcZlengthSideC + 3.;
+  mScaleVtoSVsideA = 1. / mScaleSVtoVsideA;
+  mScaleVtoSVsideC = 1. / mScaleSVtoVsideC;
 
   mConstructionMask |= ConstructionState::GeometryIsSet;
 }
@@ -132,7 +132,7 @@ void TPCFastTransformGeo::finishConstruction()
 
 void TPCFastTransformGeo::print() const
 {
-  /// Prints the geometry
+/// Prints the geometry
 #if !defined(GPUCA_GPUCODE)
   std::cout << "TPC Fast Transformation Geometry: " << std::endl;
   std::cout << "mNumberOfRows = " << mNumberOfRows << std::endl;
@@ -152,12 +152,12 @@ int TPCFastTransformGeo::test(int slice, int row, float ly, float lz) const
 
   int error = 0;
 
-  if (!isConstructed())
+  if (!isConstructed()) {
     error = -1;
-
-  if (mNumberOfRows <= 0 || mNumberOfRows >= MaxNumberOfRows)
+  }
+  if (mNumberOfRows <= 0 || mNumberOfRows >= MaxNumberOfRows) {
     error = -2;
-
+  }
   float lx = getRowInfo(row).x;
   float lx1 = 0.f, ly1 = 0.f, lz1 = 0.f;
   float gx = 0.f, gy = 0.f, gz = 0.f;

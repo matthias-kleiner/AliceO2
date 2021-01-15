@@ -7,25 +7,42 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#ifndef FRAMEWORK_WORKFLOWHELPERS_H
-#define FRAMEWORK_WORKFLOWHELPERS_H
+#ifndef O2_FRAMEWORK_WORKFLOWHELPERS_H_
+#define O2_FRAMEWORK_WORKFLOWHELPERS_H_
 
 #include "Framework/InputSpec.h"
 #include "Framework/OutputSpec.h"
 #include "Framework/ForwardRoute.h"
 #include "Framework/WorkflowSpec.h"
-#include "DataProcessorInfo.h"
+#include "Framework/DataOutputDirector.h"
+#include "Framework/DataProcessorInfo.h"
 
 #include <cstddef>
 #include <vector>
 #include <iosfwd>
 
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
-// Structure to hold information which was derived 
+inline static std::string debugWorkflow(std::vector<DataProcessorSpec> const& specs)
+{
+  std::ostringstream out;
+  for (auto& spec : specs) {
+    out << spec.name << "\n";
+    out << " Inputs:\n";
+    for (auto& ii : spec.inputs) {
+      out << "   - " << DataSpecUtils::describe(ii) << "\n";
+    }
+    //    out << "\n Outputs:\n";
+    //    for (auto& ii : spec.outputs) {
+    //      out << "   - " << DataSpecUtils::describe(ii) << "\n";
+    //    }
+  }
+  return out.str();
+}
+
+struct ConfigContext;
+// Structure to hold information which was derived
 // for output channels.
 struct LogicalOutputInfo {
   size_t specIndex;
@@ -71,16 +88,16 @@ struct DeviceConnectionEdge {
   enum ConnectionKind kind;
 };
 
-
 // Unique identifier for a connection
 struct DeviceConnectionId {
   size_t producer;
   size_t consumer;
   size_t timeIndex;
   size_t producerTimeIndex;
-  size_t port;
+  uint16_t port;
 
-  bool operator<(const DeviceConnectionId &rhs) const {
+  bool operator<(const DeviceConnectionId& rhs) const
+  {
     return std::tie(producer, consumer, timeIndex, producerTimeIndex) <
            std::tie(rhs.producer, rhs.consumer, rhs.timeIndex, rhs.producerTimeIndex);
   }
@@ -93,7 +110,8 @@ struct DeviceId {
   size_t timeslice;
   size_t deviceIndex;
 
-  bool operator<(const DeviceId &rhs) const {
+  bool operator<(const DeviceId& rhs) const
+  {
     return std::tie(processorIndex, timeslice) <
            std::tie(rhs.processorIndex, rhs.timeslice);
   }
@@ -120,6 +138,16 @@ struct TopoIndexInfo {
   friend std::ostream& operator<<(std::ostream& out, TopoIndexInfo const& info);
 };
 
+struct OutputObj {
+  InputSpec spec;
+  bool isdangling;
+};
+
+enum struct WorkflowParsingState : int {
+  Valid,
+  Empty,
+};
+
 /// A set of internal helper classes to manipulate a Workflow
 struct WorkflowHelpers {
   /// Topological sort for a graph of @a nodeCount nodes.
@@ -135,45 +163,54 @@ struct WorkflowHelpers {
   static std::vector<TopoIndexInfo> topologicalSort(size_t nodeCount,
                                                     int const* edgeIn,
                                                     int const* edgeOut,
-                                                    size_t stride,
+                                                    size_t byteStride,
                                                     size_t edgesCount);
 
   // Helper method to verify that a given workflow is actually valid e.g. that
   // it contains no empty labels.
-  static void verifyWorkflow(const WorkflowSpec &workflow);
+  [[nodiscard]] static WorkflowParsingState verifyWorkflow(const WorkflowSpec& workflow);
 
   // Depending on the workflow and the dangling inputs inside it, inject "fake"
   // devices to mark the fact we might need some extra action to make sure
   // dangling inputs are satisfied.
-  static void injectServiceDevices(WorkflowSpec& workflow);
+  // @a workflow the workflow to decorate
+  // @a ctx the context for the configuration phase
+  static void injectServiceDevices(WorkflowSpec& workflow, ConfigContext const& ctx);
 
-  static void constructGraph(const WorkflowSpec &workflow,
-                             std::vector<DeviceConnectionEdge> &logicalEdges,
-                             std::vector<OutputSpec> &outputs,
-                             std::vector<LogicalForwardInfo> &availableForwardsInfo);
+  static void constructGraph(const WorkflowSpec& workflow,
+                             std::vector<DeviceConnectionEdge>& logicalEdges,
+                             std::vector<OutputSpec>& outputs,
+                             std::vector<LogicalForwardInfo>& availableForwardsInfo);
 
-  // FIXME: this is an implementation detail for compute edge action, 
+  // FIXME: this is an implementation detail for compute edge action,
   //        actually. It should be moved to the cxx. Comes handy for testing things though..
-  static void sortEdges(std::vector<size_t> &inEdgeIndex,
-                        std::vector<size_t> &outEdgeIndex,
-                        const std::vector<DeviceConnectionEdge> &edges);
-
+  static void sortEdges(std::vector<size_t>& inEdgeIndex,
+                        std::vector<size_t>& outEdgeIndex,
+                        const std::vector<DeviceConnectionEdge>& edges);
 
   static std::vector<EdgeAction> computeOutEdgeActions(
-                                 const std::vector<DeviceConnectionEdge> &edges,
-                                 const std::vector<size_t> &index);
+    const std::vector<DeviceConnectionEdge>& edges,
+    const std::vector<size_t>& index);
 
   static std::vector<EdgeAction> computeInEdgeActions(
-                                 const std::vector<DeviceConnectionEdge> &edges,
-                                 const std::vector<size_t> &index);
+    const std::vector<DeviceConnectionEdge>& edges,
+    const std::vector<size_t>& index);
 
-  /// Given @a workflow it finds the OutputSpec in every module which do not have
-  /// a corresponding InputSpec. I.e. they are dangling.
-  /// @return a vector of InputSpec which would have matched said dangling outputs.
+  static std::shared_ptr<DataOutputDirector> getDataOutputDirector(ConfigParamRegistry const& options, std::vector<InputSpec> const& OutputsInputs, std::vector<unsigned char> const& outputTypes);
+
+  /// Given @a workflow it gathers all the OutputSpec and in addition provides
+  /// the information whether and output is dangling and/or of type AOD
+  /// An Output is dangling if it does not have a corresponding InputSpec.
+  /// The type of the output is encoded in an unsigend char whichs values are defined by
+  /// 0 + isdangling*1 + isAOD*2
+  /// @return a vector of InputSpec of all outputs and a vector of unsigned char
+  /// with the encoded output type
+  static std::tuple<std::vector<InputSpec>, std::vector<unsigned char>> analyzeOutputs(WorkflowSpec const& workflow);
+
+  /// returns only dangling outputs
   static std::vector<InputSpec> computeDanglingOutputs(WorkflowSpec const& workflow);
 };
 
-}
-}
+} // namespace o2::framework
 
-#endif // FRAMEWORK_WORKFLOWHELPERS_H
+#endif // O2_FRAMEWORK_WORKFLOWHELPERS_H_

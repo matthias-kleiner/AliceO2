@@ -10,176 +10,269 @@
 
 #include "PHOSSimulation/Digitizer.h"
 #include "SimulationDataFormat/MCCompLabel.h"
+#include "PHOSBase/PHOSSimParams.h"
+#include "DataFormatsPHOS/Digit.h"
+#include "DataFormatsPHOS/MCLabel.h"
+#include "CCDB/CcdbApi.h"
 
 #include <TRandom.h>
 #include "FairLogger.h" // for LOG
 
 ClassImp(o2::phos::Digitizer);
 
-using o2::phos::Digit;
 using o2::phos::Hit;
 
 using namespace o2::phos;
 
 //_______________________________________________________________________
-void Digitizer::init() { mGeometry = Geometry::GetInstance(); }
-
-//_______________________________________________________________________
-void Digitizer::finish() {}
-
-//_______________________________________________________________________
-void Digitizer::process(const std::vector<Hit>& hits, std::vector<Digit>& digits)
+void Digitizer::init()
 {
-  // Convert list of hits to digits:
-  // Add hits with energy deposition in same cell and same time
-  // Add energy corrections
-  // Apply time smearing
-
-  // Sort Hits: moved to Detector::FinishEvent
-  // Add duplicates if any and remove them
-  // TODO: Apply Poisson smearing of light production
-
-  // std::vector<Hit> hits(ahits);
-
-  // auto first = hits.begin();
-  // auto last = hits.end();
-
-  // std::sort(first, last);
-
-  // first = hits.begin();
-  // last = hits.end();
-
-  // // this is copy of std::unique() method with addition: adding identical Hits
-  // auto itr = first;
-  // while (++first != last) {
-  //   if (*itr == *first) {
-  //     *itr += *first;
-  //   } else {
-  //     *(++itr) = *first;
-  //   }
-  // }
-  // ++itr;
-
-  // hits.erase(itr, hits.end());
-  // // TODO==========End of hit sorting, to be moved to Detector=============
-
-  Int_t hitIndex = 0;
-  Int_t hitAbsId = 0;
-  Int_t nHits = hits.size();
-  Hit hit;
-  if (hitIndex < nHits) {
-    hit = hits.at(hitIndex);
-    hitAbsId = hit.GetDetectorID();
-  }
-
-  Int_t nTotCells = mGeometry->GetTotalNCells();
-  for (Int_t absId = 1; absId < nTotCells; absId++) {
-
-    // If signal exist in this cell, add noise to it, otherwise just create noise digit
-    if (absId == hitAbsId) {
-      Digit digit(hit);
-      hitIndex++;
-      if (hitIndex < nHits) {
-        Digit digitNext(hits.at(hitIndex));
-        while ((hitIndex < nHits) && digit.canAdd(digitNext)) {
-          digit += digitNext;
-          hitIndex++;
-          if (hitIndex < nHits) {
-            digitNext.FillFromHit(hits.at(hitIndex));
-          }
-        }
-        if (hitIndex < nHits) {
-          hitAbsId = digitNext.getAbsId();
-        } else {
-          hitAbsId = 0;
-        }
-        hit = hits.at(hitIndex);
-      } else {
-        hitAbsId = 99999; // out of PHOS
-      }
-
-      // Add Electroinc noise, apply non-linearity, digitize, de-calibrate, time resolution
-      Double_t energy = digit.getAmplitude();
-      // // Simulate electronic noise
-      // energy += SimulateNoiseEnergy();
-
-      // if (mApplyNonLinearity) {
-      //   energy = NonLinearity(energy);
-      // }
-      // if (mApplyDigitization) {
-      //   energy = DigitizeEnergy(energy);
-      // }
-      // if (mApplyDecalibration) {
-      //   energy = Decalibrate(energy);
-      // }
-      // digit.setAmplitude(energy);
-      if (mApplyTimeResolution) {
-        digit.setTimeStamp(TimeResolution(digit.getTimeStamp(), energy));
-      }
-      digits.push_back(digit);
-    } else { // No signal in this cell,
-      if (!mGeometry->IsCellExists(absId)) {
-        continue;
-      }
-      // Simulate noise
-      Double_t energy = SimulateNoiseEnergy();
-      Double_t time = SimulateNoiseTime();
-      if (energy > mZSthreshold) {
-        Digit noiseDigit(absId, energy, time, -1); // current AbsId, energy, random time, no primary
-        digits.push_back(noiseDigit);
+  mGeometry = Geometry::GetInstance();
+  if (!mCalibParams) {
+    if (o2::phos::PHOSSimParams::Instance().mCCDBPath.compare("localtest") == 0) {
+      mCalibParams = new CalibParams(1); // test default calibration
+      LOG(INFO) << "[PHOSDigitizer] No reading calibration from ccdb requested, set default";
+    } else {
+      LOG(INFO) << "[PHOSDigitizer] getting calibration object from ccdb";
+      o2::ccdb::CcdbApi ccdb;
+      std::map<std::string, std::string> metadata; // do we want to store any meta data?
+      ccdb.init("http://ccdb-test.cern.ch:8080");  // or http://localhost:8080 for a local installation
+      mCalibParams = ccdb.retrieveFromTFileAny<o2::phos::CalibParams>("PHOS/Calib", metadata, mEventTime);
+      if (!mCalibParams) {
+        LOG(FATAL) << "[PHOSDigitizer] can not get calibration object from ccdb";
       }
     }
   }
 }
 
 //_______________________________________________________________________
-Double_t Digitizer::NonLinearity(const Double_t e) { return e * mcNL * (1. + maNL * exp(-e * e / 2. / mbNL / mbNL)); }
+void Digitizer::finish() {}
+
 //_______________________________________________________________________
-Double_t Digitizer::DigitizeEnergy(const Double_t e)
+void Digitizer::process(const std::vector<Hit>* hitsBg, const std::vector<Hit>* hitsS, std::vector<Digit>& digits, o2::dataformats::MCTruthContainer<o2::phos::MCLabel>& labels)
 {
-  // distretize energy if necessary
-  return mADCWidth * ceil(e / mADCWidth);
+  // Convert list of hits to digits:
+  // Add hits with energy deposition in same cell and same time
+  // Add energy corrections
+  // Apply time smearing
+
+  std::vector<Hit>::const_iterator hitBg = hitsBg->cbegin();
+  std::vector<Hit>::const_iterator hitS = hitsS->cbegin();
+  std::vector<Hit>::const_iterator hit; //Far above maximal PHOS absId
+  const short kBigAbsID = 32767;
+  short hitAbsId = kBigAbsID;
+  short hitBgAbsId = kBigAbsID;
+  short hitSAbsId = kBigAbsID;
+
+  if (hitBg != hitsBg->end()) {
+    hitBgAbsId = hitBg->GetDetectorID();
+  }
+  if (hitS != hitsS->end()) {
+    hitSAbsId = hitS->GetDetectorID();
+  }
+  if (hitBgAbsId < hitSAbsId) { // Bg hit exists and smaller than signal
+    hitAbsId = hitBgAbsId;
+    hit = hitBg;
+    mCurrSrcID = 0;
+    ++hitBg;
+  } else {
+    if (hitSAbsId < kBigAbsID) { //Signal hit exists and smaller than Bg
+      hitAbsId = hitSAbsId;
+      hit = hitS;
+      mCurrSrcID = 1;
+      ++hitS;
+    }
+  }
+
+  Int_t nTotCells = mGeometry->getTotalNCells();
+
+  short start = 64 * 56 + 32 * 56 + 1; //first digit in half-mod 1
+  char relid[3];
+  for (short absId = start; absId < nTotCells; absId++) {
+
+    // If signal exist in this cell, add noise to it, otherwise just create noise digit
+    if (absId == hitAbsId) {
+      int labelIndex = labels.getIndexedSize();
+      //Add primary info: create new MCLabels entry
+      o2::phos::MCLabel label(hit->GetTrackID(), mCurrEvID, mCurrSrcID, true, hit->GetEnergyLoss());
+      labels.addElement(labelIndex, label);
+
+      Digit digit((*hit), labelIndex);
+
+      //May be add more hits to this digit?
+      if (hitBg == hitsBg->end()) {
+        hitBgAbsId = kBigAbsID;
+      } else {
+        hitBgAbsId = hitBg->GetDetectorID();
+      }
+      if (hitS == hitsS->end()) {
+        hitSAbsId = kBigAbsID;
+      } else {
+        hitSAbsId = hitS->GetDetectorID();
+      }
+      if (hitBgAbsId < hitSAbsId) { // Bg hit exists and smaller than signal
+        hitAbsId = hitBgAbsId;
+        hit = hitBg;
+        mCurrSrcID = 0;
+        ++hitBg;
+      } else {
+        if (hitSAbsId < kBigAbsID) { //Signal hit exists and smaller than Bg
+          hitAbsId = hitSAbsId;
+          hit = hitS;
+          mCurrSrcID = 1;
+          ++hitS;
+        } else { //no hits left
+          hitAbsId = kBigAbsID;
+          continue;
+        }
+      }
+
+      while (absId == hitAbsId) {
+        Digit digitNext((*hit), labelIndex); //Use same MCTruth entry so far
+        digit += digitNext;
+
+        //add MCLabel to list (add energy if same primary or add another label)
+        o2::phos::MCLabel label(hit->GetTrackID(), mCurrEvID, mCurrSrcID, true, hit->GetEnergyLoss());
+        labels.addElement(labelIndex, label);
+
+        //next hit?
+        if (hitBg == hitsBg->end()) {
+          hitBgAbsId = kBigAbsID;
+        } else {
+          hitBgAbsId = hitBg->GetDetectorID();
+        }
+        if (hitS == hitsS->end()) {
+          hitSAbsId = kBigAbsID;
+        } else {
+          hitSAbsId = hitS->GetDetectorID();
+        }
+        if (hitBgAbsId < hitSAbsId) { // Bg hit exists and smaller than signal
+          hitAbsId = hitBgAbsId;
+          hit = hitBg;
+          mCurrSrcID = 0;
+          ++hitBg;
+        } else {
+          if (hitSAbsId < kBigAbsID) { //Signal hit exists and smaller than Bg
+            hitAbsId = hitSAbsId;
+            hit = hitS;
+            mCurrSrcID = 1;
+            ++hitS;
+          } else { //no hits left
+            hitAbsId = kBigAbsID;
+            digitNext.setAbsId(kBigAbsID);
+            continue;
+          }
+        }
+
+        digitNext.fillFromHit(*hit);
+      }
+
+      //Current digit finished, sort MCLabels according to eDeposited
+      auto lbls = labels.getLabels(labelIndex);
+      std::sort(lbls.begin(), lbls.end(),
+                [](o2::phos::MCLabel a, o2::phos::MCLabel b) { return a.getEdep() > b.getEdep(); });
+
+      // Add Electroinc noise, apply non-linearity, digitize, de-calibrate, time resolution
+      float energy = digit.getAmplitude();
+      // Simulate electronic noise
+      energy += simulateNoiseEnergy(absId);
+
+      if (o2::phos::PHOSSimParams::Instance().mApplyNonLinearity) {
+        energy = nonLinearity(energy);
+      }
+
+      energy = uncalibrate(energy, absId);
+
+      if (energy <= o2::phos::PHOSSimParams::Instance().mDigitThreshold) {
+        continue;
+      }
+      digit.setHighGain(energy < o2::phos::PHOSSimParams::Instance().mMCOverflow); //10bit ADC
+      if (digit.isHighGain()) {
+        digit.setAmplitude(energy);
+      } else {
+        float hglgratio = mCalibParams->getHGLGRatio(absId);
+        digit.setAmplitude(energy / hglgratio);
+      }
+      if (o2::phos::PHOSSimParams::Instance().mApplyTimeResolution) {
+        digit.setTime(uncalibrateT(timeResolution(digit.getTime(), energy), absId, digit.isHighGain()));
+      }
+
+      digits.push_back(digit);
+    } else { // No signal in this cell,
+      if (!mGeometry->isCellExists(absId)) {
+        continue;
+      }
+      // Simulate noise
+      float energy = simulateNoiseEnergy(absId);
+      energy = uncalibrate(energy, absId);
+      if (energy > o2::phos::PHOSSimParams::Instance().mDigitThreshold) {
+        float time = simulateNoiseTime();
+        digits.emplace_back(absId, energy, time, -1); // current AbsId, energy, random time, no primary
+      }
+    }
+  }
+}
+
+//_______________________________________________________________________
+float Digitizer::nonLinearity(const float e)
+{
+  float a = o2::phos::PHOSSimParams::Instance().mCellNonLineaityA;
+  float b = o2::phos::PHOSSimParams::Instance().mCellNonLineaityB;
+  float c = o2::phos::PHOSSimParams::Instance().mCellNonLineaityC;
+  return e * c * (1. + a * exp(-e * e / (2. * b * b)));
 }
 //_______________________________________________________________________
-Double_t Digitizer::Decalibrate(const Double_t e)
+float Digitizer::uncalibrate(const float e, const int absId)
 {
-  // Decalibrate EMC digit, i.e. change its energy by a factor read from CDB
-  return e; // TODO apply de-calibration from OCDB
+  // Decalibrate EMC digit, i.e. transform from energy to ADC counts a factor read from CDB
+  float calib = mCalibParams->getGain(absId);
+  if (calib > 0) {
+    return floor(e / calib);
+  } else {
+    return 0;
+  }
 }
 //_______________________________________________________________________
-Double_t Digitizer::TimeResolution(const Double_t time, const Double_t e)
+float Digitizer::uncalibrateT(const float time, const int absId, bool isHighGain)
+{
+  // Decalibrate EMC digit, i.e. transform from energy to ADC counts a factor read from CDB
+  // note time in seconds
+  if (isHighGain) {
+    return time + mCalibParams->getHGTimeCalib(absId);
+  } else {
+    return time + mCalibParams->getLGTimeCalib(absId);
+  }
+}
+//_______________________________________________________________________
+float Digitizer::timeResolution(const float time, const float e)
 {
   // apply time resolution
-  Double_t timeResolution = mTimeResolutionA + mTimeResolutionB / std::max(e, mTimeResThreshold);
+  // time measured in seconds
+
+  float timeResolution = o2::phos::PHOSSimParams::Instance().mTimeResolutionA +
+                         o2::phos::PHOSSimParams::Instance().mTimeResolutionB /
+                           std::max(float(e), o2::phos::PHOSSimParams::Instance().mTimeResThreshold);
   return gRandom->Gaus(time, timeResolution);
 }
 //_______________________________________________________________________
-Double_t Digitizer::SimulateNoiseEnergy() { return DigitizeEnergy(gRandom->Gaus(0., mAPDNoise)); }
+float Digitizer::simulateNoiseEnergy(int absId)
+{
+  return gRandom->Gaus(0., o2::phos::PHOSSimParams::Instance().mAPDNoise);
+}
 //_______________________________________________________________________
-Double_t Digitizer::SimulateNoiseTime() { return gRandom->Uniform(mMinNoiseTime, mMaxNoiseTime); }
+float Digitizer::simulateNoiseTime() { return gRandom->Uniform(o2::phos::PHOSSimParams::Instance().mMinNoiseTime,
+                                                               o2::phos::PHOSSimParams::Instance().mMaxNoiseTime); }
 
 //_______________________________________________________________________
 void Digitizer::setEventTime(double t)
 {
   // assign event time, it should be in a strictly increasing order
-  // convert to ns
-  t *= mCoeffToNanoSecond;
+  // in ns
 
-  if (t < mEventTime && mContinuous) {
-    LOG(FATAL) << "New event time (" << t << ") is < previous event time (" << mEventTime << ")" << FairLogger::endl;
+  if (t < mEventTime) {
+    LOG(INFO) << "New event time (" << t << ") is < previous event time (" << mEventTime << ")";
   }
   mEventTime = t;
-}
-
-//_______________________________________________________________________
-void Digitizer::setCurrSrcID(int v)
-{
-  // set current MC source ID
-  if (v > MCCompLabel::maxSourceID()) {
-    LOG(FATAL) << "MC source id " << v << " exceeds max storable in the label " << MCCompLabel::maxSourceID()
-               << FairLogger::endl;
-  }
-  mCurrSrcID = v;
 }
 
 //_______________________________________________________________________
@@ -187,8 +280,7 @@ void Digitizer::setCurrEvID(int v)
 {
   // set current MC event ID
   if (v > MCCompLabel::maxEventID()) {
-    LOG(FATAL) << "MC event id " << v << " exceeds max storable in the label " << MCCompLabel::maxEventID()
-               << FairLogger::endl;
+    LOG(FATAL) << "MC event id " << v << " exceeds max storable in the label " << MCCompLabel::maxEventID();
   }
   mCurrEvID = v;
 }

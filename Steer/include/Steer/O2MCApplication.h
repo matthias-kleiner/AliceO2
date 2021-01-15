@@ -75,17 +75,8 @@ class O2MCApplication : public O2MCApplicationBase
   void GeneratePrimaries() override
   {
     // ordinarily we would call the event generator ...
-
-    // correct status code
-    int i = 0;
-    for (auto& p : mPrimaries) {
-      p.SetStatusCode(i);
-      i++;
-    }
-
     LOG(INFO) << "Generate primaries " << mPrimaries.size() << "\n";
     GetStack()->Reset();
-
     // but here we init the stack from
     // a vector of particles that someone sets externally
     static_cast<o2::data::Stack*>(GetStack())->initFromPrimaries(mPrimaries);
@@ -105,7 +96,7 @@ class O2MCApplication : public O2MCApplicationBase
   o2::data::SubEventInfo* mSubEventInfo = nullptr;     //! what are we currently processing?
   std::vector<o2::base::Detector*> mActiveO2Detectors; //! active (data taking) o2 detectors
 
-  ClassDefOverride(O2MCApplication, 1) //Interface to MonteCarlo application
+  ClassDefOverride(O2MCApplication, 1); //Interface to MonteCarlo application
 };
 
 } // end namespace steer

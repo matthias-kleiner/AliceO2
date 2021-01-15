@@ -11,13 +11,13 @@
 #ifndef ALICEO2_PASSIVE_ABSORBER_H
 #define ALICEO2_PASSIVE_ABSORBER_H
 
-#include "FairModule.h" // for FairModule
+#include "DetectorsPassive/PassiveBase.h"
 
 namespace o2
 {
 namespace passive
 {
-class Absorber : public FairModule
+class Absorber : public PassiveBase
 {
  public:
   Absorber(const char* name, const char* Title = "ALICE Absorber");
@@ -33,9 +33,9 @@ class Absorber : public FairModule
   Absorber(const Absorber& orig);
   Absorber& operator=(const Absorber&);
 
-  ClassDefOverride(o2::passive::Absorber, 1)
+  ClassDefOverride(o2::passive::Absorber, 1);
 };
-}
-}
+} // namespace passive
+} // namespace o2
 
 #endif

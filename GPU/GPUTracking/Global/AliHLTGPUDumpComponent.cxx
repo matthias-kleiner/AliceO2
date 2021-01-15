@@ -54,7 +54,7 @@
 
 using namespace GPUCA_NAMESPACE::gpu;
 
-AliHLTGPUDumpComponent::AliHLTGPUDumpComponent() : fSolenoidBz(0.f), fRec(nullptr), fChain(nullptr), fFastTransformManager(new TPCFastTransformManager), fCalib(nullptr), fRecParam(nullptr), fOfflineRecoParam(), fOrigTransform(nullptr), fIsMC(false)
+AliHLTGPUDumpComponent::AliHLTGPUDumpComponent() : fSolenoidBz(0.f), fRec(nullptr), fChain(nullptr), fFastTransformManager(new TPCFastTransformManager), fCalib(nullptr), fRecParam(nullptr), fOfflineRecoParam(), fOrigTransform(nullptr), fIsMC(false), fInitTimestamp(0.)
 {
   fRec = GPUReconstruction::CreateInstance();
   fChain = fRec->AddChain<GPUChainTracking>();
@@ -150,6 +150,7 @@ int AliHLTGPUDumpComponent::DoInit(int argc, const char** argv)
     HLTFatal("No TPC Reco Param entry found for the given event specification");
   }
   fCalib->GetTransform()->SetCurrentRecoParam(fRecParam);
+  fInitTimestamp = GetTimeStamp();
 
   return 0;
 }
@@ -170,9 +171,9 @@ int AliHLTGPUDumpComponent::DoEvent(const AliHLTComponentEventData& evtData, con
   }
 
   // Prepare everything for all slices
-  const AliHLTTPCClusterMCData* clusterLabels[NSLICES][NPATCHES] = { nullptr };
-  const AliHLTTPCClusterXYZData* clustersXYZ[NSLICES][NPATCHES] = { nullptr };
-  const AliHLTTPCRawClusterData* clustersRaw[NSLICES][NPATCHES] = { nullptr };
+  const AliHLTTPCClusterMCData* clusterLabels[NSLICES][NPATCHES] = {nullptr};
+  const AliHLTTPCClusterXYZData* clustersXYZ[NSLICES][NPATCHES] = {nullptr};
+  const AliHLTTPCRawClusterData* clustersRaw[NSLICES][NPATCHES] = {nullptr};
   bool labelsPresent = false;
   GPUTRDTrackletWord* TRDtracklets = nullptr;
   GPUTRDTrackletLabels* TRDtrackletsMC = nullptr;
@@ -252,8 +253,21 @@ int AliHLTGPUDumpComponent::DoEvent(const AliHLTComponentEventData& evtData, con
 #endif
           AliHLTTPCRawCluster tmp = cRaw;
           tmp.fPadRow += firstRow;
+          if ((unsigned int)cluster.amp >= 25 * 1024) {
+            GPUError("Invalid cluster charge, truncating (%d >= %d)", (int)cluster.amp, 25 * 1024);
+            cluster.amp = 25 * 1024 - 1;
+          }
+          if ((unsigned int)tmp.GetCharge() >= 25 * 1024) {
+            GPUError("Invalid raw cluster charge, truncating (%d >= %d)", (int)tmp.GetCharge(), 25 * 1024);
+            tmp.SetCharge(25 * 1024 - 1);
+          }
+          if ((unsigned int)tmp.GetQMax() >= 1024) {
+            GPUError("Invalid raw cluster charge max, truncating (%d >= %d)", (int)tmp.GetQMax(), 1024);
+            tmp.SetQMax(1024 - 1);
+          }
           clusterData[slice].emplace_back(cluster);
           rawClusters[slice].emplace_back(tmp);
+
           nClustersTotal++;
         }
       }
@@ -410,7 +424,7 @@ int AliHLTGPUDumpComponent::DoEvent(const AliHLTComponentEventData& evtData, con
           mcInfo[i].pZ = ref->Pz();
         }
 
-        // if (ref) printf("Particle %d: Charge %d, Prim %d, PrimDaughter %d, Pt %f %f ref %p\n", i, charge, prim, hasPrimDaughter, ref->Pt(), particle->Pt(), ref);
+        // if (ref) HLTImportant("Particle %d: Charge %d, Prim %d, PrimDaughter %d, Pt %f %f ref %p\n", i, charge, prim, hasPrimDaughter, ref->Pt(), particle->Pt(), ref);
       }
       for (int i = 0; i < nTracks; i++) {
         delete trackRefs[i];
@@ -447,7 +461,7 @@ int AliHLTGPUDumpComponent::DoEvent(const AliHLTComponentEventData& evtData, con
 
   if (nEvent == 0) {
     std::unique_ptr<TPCFastTransform> fFastTransformIRS(new TPCFastTransform);
-    long TimeStamp = GetTimeStamp();
+    long TimeStamp = (getenv("DUMP_TIMESTAMP_SOR") && atoi(getenv("DUMP_TIMESTAMP_SOR"))) ? fInitTimestamp : GetTimeStamp();
     if (fIsMC && !fRecParam->GetUseCorrectionMap()) {
       TimeStamp = 0;
     }

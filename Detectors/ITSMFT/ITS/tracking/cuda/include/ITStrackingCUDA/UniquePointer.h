@@ -21,7 +21,7 @@ namespace o2
 {
 namespace its
 {
-namespace GPU
+namespace gpu
 {
 
 namespace
@@ -40,7 +40,7 @@ struct UniquePointerTraits final {
     return const_cast<T*>(internalPointer);
   }
 };
-}
+} // namespace
 
 template <typename T>
 class UniquePointer final
@@ -71,7 +71,7 @@ class UniquePointer final
 };
 
 template <typename T>
-UniquePointer<T>::UniquePointer() : mDevicePointer{ nullptr }
+UniquePointer<T>::UniquePointer() : mDevicePointer{nullptr}
 {
   // Nothing to do
 }
@@ -81,8 +81,8 @@ UniquePointer<T>::UniquePointer(const T& ref)
 {
   try {
 
-    Utils::Host::gpuMalloc(reinterpret_cast<void**>(&mDevicePointer), sizeof(T));
-    Utils::Host::gpuMemcpyHostToDevice(mDevicePointer, &ref, sizeof(T));
+    utils::host::gpuMalloc(reinterpret_cast<void**>(&mDevicePointer), sizeof(T));
+    utils::host::gpuMemcpyHostToDevice(mDevicePointer, &ref, sizeof(T));
 
   } catch (...) {
 
@@ -99,7 +99,7 @@ UniquePointer<T>::~UniquePointer()
 }
 
 template <typename T>
-UniquePointer<T>::UniquePointer(UniquePointer<T>&& other) : mDevicePointer{ other.mDevicePointer }
+UniquePointer<T>::UniquePointer(UniquePointer<T>&& other) : mDevicePointer{other.mDevicePointer}
 {
   // Nothing to do
 }
@@ -118,7 +118,7 @@ void UniquePointer<T>::destroy()
 {
   if (mDevicePointer != nullptr) {
 
-    Utils::Host::gpuFree(mDevicePointer);
+    utils::host::gpuFree(mDevicePointer);
   }
 }
 
@@ -145,8 +145,8 @@ GPU_HOST_DEVICE const T& UniquePointer<T>::operator*() const noexcept
 {
   return PointerTraits::getReference(mDevicePointer);
 }
-}
-}
-}
+} // namespace gpu
+} // namespace its
+} // namespace o2
 
 #endif /* TRAKINGITSU_INCLUDE_GPU_CAGPUUNIQUE_POINTER_H_ */

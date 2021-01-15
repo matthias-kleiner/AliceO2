@@ -18,10 +18,14 @@
 #ifndef AliceO2_TPC_Defs_H
 #define AliceO2_TPC_Defs_H
 
+#ifndef GPUCA_GPUCODE_DEVICE
 #include <cmath>
+#endif
 
-#include "MathUtils/Cartesian2D.h"
-#include "MathUtils/Cartesian3D.h"
+#include "GPUROOTCartesianFwd.h"
+#ifndef GPUCA_ALIGPUCODE
+#include "MathUtils/Cartesian.h"
+#endif
 
 namespace o2
 {
@@ -29,7 +33,9 @@ namespace tpc
 {
 
 /// TPC readout sidE
-enum Side { A = 0, C = 1, UNDEFINED = 2 };
+enum Side { A = 0,
+            C = 1,
+            UNDEFINED = 2 };
 //   enum class Side {A=0, C=1};
 //  Problem with root cint. does not seem to support enum class ...
 constexpr unsigned char SECTORSPERSIDE = 18;
@@ -40,11 +46,15 @@ constexpr double TWOPI = 2. * PI;
 constexpr double SECPHIWIDTH = TWOPI / 18.;
 
 /// TPC ROC types
-enum RocType { IROC = 0, OROC = 1 };
+enum RocType { IROC = 0,
+               OROC = 1 };
 // enum class RocType {IROC=0, OROC=1};
 
 /// TPC GEM stack types
-enum GEMstack { IROCgem = 0, OROC1gem = 1, OROC2gem = 2, OROC3gem = 3 };
+enum GEMstack { IROCgem = 0,
+                OROC1gem = 1,
+                OROC2gem = 2,
+                OROC3gem = 3 };
 constexpr unsigned short GEMSTACKSPERSECTOR = 4;
 
 /// Definition of the different pad subsets
@@ -53,16 +63,24 @@ enum class PadSubset : char {
   Partition, ///< Partitions (up to 36*5)
   Region     ///< Regions (up to 36*10)
 };
+
+/// Statistics type
+enum class StatisticsType {
+  GausFit,     ///< Use slow gaus fit (better fit stability)
+  GausFitFast, ///< Use fast gaus fit (less accurate error treatment)
+  MeanStdDev   ///< Use mean and standard deviation
+};
+
 // default point definitions for PointND, PointNDlocal, PointNDglobal are in
 // MathUtils/CartesianND.h
 
 /// Pad centres as 2D float
 // For some reason cling does not like the nested using statement, typedef works ...
-typedef Point2D<float> PadCentre;
-typedef Point2D<float> GlobalPosition2D;
-typedef Point2D<float> LocalPosition2D;
-typedef Point3D<float> GlobalPosition3D;
-typedef Point3D<float> LocalPosition3D;
+typedef math_utils::Point2D<float> PadCentre;
+typedef math_utils::Point2D<float> GlobalPosition2D;
+typedef math_utils::Point2D<float> LocalPosition2D;
+typedef math_utils::Point3D<float> GlobalPosition3D;
+typedef math_utils::Point3D<float> LocalPosition3D;
 
 /// global pad number
 typedef unsigned short GlobalPadNumber;
@@ -119,7 +137,7 @@ typename Enum<T>::Iterator end(Enum<T>)
 {
   return typename Enum<T>::Iterator(((int)T::Last) + 1);
 }
-}
-}
+} // namespace tpc
+} // namespace o2
 
 #endif

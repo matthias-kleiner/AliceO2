@@ -1,40 +1,39 @@
+/// \file plot_dig_phos.C
+/// \brief Simple macro to plot PHOS digits per event
+
 #if !defined(__CLING__) || defined(__ROOTCLING__)
 #include <sstream>
 
-#include <TStopwatch.h>
+#include "TROOT.h"
+#include "TTree.h"
 #include "TCanvas.h"
+#include "TFile.h"
 #include "TH2.h"
-//#include "DataFormatsParameters/GRPObject.h"
-#include "FairFileSource.h"
-#include "FairLogger.h"
-#include "FairRunAna.h"
-//#include "FairRuntimeDb.h"
-#include "FairParRootFileIo.h"
-#include "FairSystemInfo.h"
-#include "SimulationDataFormat/MCCompLabel.h"
-
-#include "PHOSBase/Digit.h"
+#include "SimulationDataFormat/MCTruthContainer.h"
+#include "DataFormatsPHOS/Digit.h"
+#include "DataFormatsPHOS/MCLabel.h"
 #include "PHOSBase/Geometry.h"
-#include "PHOSSimulation/DigitizerTask.h"
 #endif
 
-void plot_dig_phos(int ievent = 0, std::string inputfile = "o2dig.root")
+using namespace std;
+
+void plot_dig_phos(int ievent = 0, TString inputfile = "o2dig.root")
 {
-  // macros to plot PHOS hits
 
-  FairFileSource* fFileSource = new FairFileSource(inputfile);
-  FairRootManager* mgr = FairRootManager::Instance();
-  mgr->SetSource(fFileSource);
-  mgr->InitSource();
+  TFile* file1 = TFile::Open(inputfile.Data());
+  TTree* digTree = (TTree*)gFile->Get("o2sim");
+  std::vector<o2::phos::Digit>* mDigitsArray = nullptr;
+  o2::dataformats::MCTruthContainer<o2::phos::MCLabel>* labels = nullptr;
+  digTree->SetBranchAddress("PHSDigit", &mDigitsArray);
+  digTree->SetBranchAddress("PHSDigitMCTruth", &labels);
 
-  const std::vector<o2::phos::Digit>* mDigitsArray = mgr->InitObjectAs<const std::vector<o2::phos::Digit>*>("PHSDigit");
   if (!mDigitsArray) {
-    cout << "PHOS digits not registered in the FairRootManager. Exiting ..." << endl;
+    cout << "PHOS digits not in tree. Exiting ..." << endl;
     return;
   }
-  mgr->ReadEvent(ievent);
+  digTree->GetEvent(ievent);
 
-  TH2D* vMod[5][100] = { 0 };
+  TH2D* vMod[5][100] = {0};
   int primLabels[5][100];
   for (int mod = 1; mod < 5; mod++)
     for (int j = 0; j < 100; j++)
@@ -43,13 +42,13 @@ void plot_dig_phos(int ievent = 0, std::string inputfile = "o2dig.root")
   o2::phos::Geometry* geom = new o2::phos::Geometry("PHOS");
 
   std::vector<o2::phos::Digit>::const_iterator it;
-  int relId[3];
+  char relId[3];
 
   for (it = mDigitsArray->begin(); it != mDigitsArray->end(); it++) {
-    int absId = (*it).getAbsId();
-    double en = (*it).getAmplitude();
-    int lab = (*it).getLabel(0);
-    geom->AbsToRelNumbering(absId, relId);
+    short absId = (*it).getAbsId();
+    float en = (*it).getAmplitude();
+    int lab = (*it).getLabel();
+    geom->absToRelNumbering(absId, relId);
     // check, if this label already exist
     int j = 0;
     bool found = false;

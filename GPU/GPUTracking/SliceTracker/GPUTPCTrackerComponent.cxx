@@ -40,9 +40,9 @@ using namespace GPUCA_NAMESPACE::gpu;
 const AliHLTComponentDataType GPUTPCDefinitions::fgkTrackletsDataType = AliHLTComponentDataTypeInitializer("CATRACKL", kAliHLTDataOriginTPC);
 
 /** ROOT macro for the implementation of ROOT specific class methods */
-ClassImp(GPUTPCTrackerComponent)
+ClassImp(GPUTPCTrackerComponent);
 
-  GPUTPCTrackerComponent::GPUTPCTrackerComponent()
+GPUTPCTrackerComponent::GPUTPCTrackerComponent()
   : fSolenoidBz(0), fMinNTrackClusters(-1), fMinTrackPt(GPUCA_MIN_TRACK_PT_DEFAULT), fClusterZCut(500.), mNeighboursSearchArea(0), fClusterErrorCorrectionY(0), fClusterErrorCorrectionZ(0), fBenchmark("CATracker"), fAllowGPU(0), fGPUHelperThreads(-1), fCPUTrackers(0), fGlobalTracking(0), fGPUDeviceNum(-1), fGPUType("CPU"), fGPUStuckProtection(0), fAsync(0), fSearchWindowDZDR(0.), fRec(0), fChain(0), fAsyncProcessor()
 {
   // see header file for class documentation
@@ -365,12 +365,12 @@ int GPUTPCTrackerComponent::Configure(const char* cdbEntry, const char* chainId,
   return iResult1 ? iResult1 : (iResult2 ? iResult2 : iResult3);
 }
 
-void GPUTPCTrackerComponent::ConfigureSlices()
+int GPUTPCTrackerComponent::ConfigureSlices()
 {
   // Initialize the tracker slices
   GPUSettingsRec rec;
   GPUSettingsEvent ev;
-  GPUSettingsDeviceProcessing devProc;
+  GPUSettingsProcessing devProc;
 
   ev.solenoidBz = fSolenoidBz;
   ev.continuousMaxTimeBin = 0; // triggered events
@@ -390,6 +390,9 @@ void GPUTPCTrackerComponent::ConfigureSlices()
   rec.GlobalTracking = fGlobalTracking;
   devProc.stuckProtection = fGPUStuckProtection;
   rec.NonConsecutiveIDs = true;
+  rec.mergerReadFromTrackerDirectly = false;
+  devProc.ompThreads = 1;
+  devProc.ompKernels = false;
 
   GPURecoStepConfiguration steps;
   steps.steps.set(GPUDataTypes::RecoStep::TPCSliceTracking);
@@ -398,7 +401,7 @@ void GPUTPCTrackerComponent::ConfigureSlices()
 
   fRec->SetSettings(&ev, &rec, &devProc, &steps);
   fChain->LoadClusterErrors();
-  fRec->Init();
+  return fRec->Init();
 }
 
 void* GPUTPCTrackerComponent::TrackerInit(void* par)
@@ -410,7 +413,9 @@ void* GPUTPCTrackerComponent::TrackerInit(void* par)
   }
   fChain = fRec->AddChain<GPUChainTracking>();
 
-  ConfigureSlices();
+  if (ConfigureSlices()) {
+    return ((void*)-1);
+  }
   return (nullptr);
 }
 
@@ -545,8 +550,8 @@ void* GPUTPCTrackerComponent::TrackerDoEvent(void* par)
   }
 
   // Prepare everything for all slices
-  const AliHLTTPCClusterXYZData* clustersXYZ[NSLICES][fgkNPatches] = { nullptr };
-  const AliHLTTPCRawClusterData* clustersRaw[NSLICES][fgkNPatches] = { nullptr };
+  const AliHLTTPCClusterXYZData* clustersXYZ[NSLICES][fgkNPatches] = {nullptr};
+  const AliHLTTPCRawClusterData* clustersRaw[NSLICES][fgkNPatches] = {nullptr};
 
   for (unsigned long ndx = 0; ndx < evtData.fBlockCnt; ndx++) {
     const AliHLTComponentBlockData& pBlock = blocks[ndx];
@@ -559,8 +564,8 @@ void* GPUTPCTrackerComponent::TrackerDoEvent(void* par)
     }
   }
 
-  GPUTPCClusterData* clusterData[NSLICES] = { nullptr };
-  int nClusters[NSLICES] = { 0 };
+  GPUTPCClusterData* clusterData[NSLICES] = {nullptr};
+  int nClusters[NSLICES] = {0};
 
   int nClustersTotal = 0;
   for (int slice = 0; slice < NSLICES; slice++) {
@@ -649,7 +654,13 @@ void* GPUTPCTrackerComponent::TrackerDoEvent(void* par)
     printf("Memory Allocation Error\n");
     return ((void*)(size_t)-EINVAL);
   }
-  fChain->RunTPCTrackingSlices();
+  if (fChain->RunTPCTrackingSlices()) {
+    HLTError("Error running tracking!");
+    return ((void*)(size_t)-EINVAL);
+  }
+  if (fChain->CheckErrorCodes()) {
+    return ((void*)(size_t)-EINVAL);
+  }
   fBenchmark.Stop(1);
   HLTInfo("Processed %d clusters", nClustersTotal);
   for (int i = 0; i < NSLICES; i++) {

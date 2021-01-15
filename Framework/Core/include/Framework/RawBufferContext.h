@@ -37,11 +37,11 @@ class RawBufferContext
 {
  public:
   RawBufferContext(FairMQDeviceProxy proxy)
-    : mProxy{ proxy }
+    : mProxy{proxy}
   {
   }
   RawBufferContext(RawBufferContext&& other)
-    : mProxy{ other.mProxy }, mMessages{ std::move(other.mMessages) }
+    : mProxy{other.mProxy}, mMessages{std::move(other.mMessages)}
   {
   }
 
@@ -61,7 +61,7 @@ class RawBufferContext
                     std::function<std::ostringstream()> serialize,
                     std::function<void()> destructor)
   {
-    mMessages.push_back(std::move(MessageRef{ std::move(header), std::move(payload), std::move(channel), std::move(serialize), std::move(destructor) }));
+    mMessages.push_back(std::move(MessageRef{std::move(header), std::move(payload), std::move(channel), std::move(serialize), std::move(destructor)}));
   }
 
   Messages::iterator begin()
@@ -86,6 +86,8 @@ class RawBufferContext
     // payload will be cleared by the mMessages.clear()
     for (auto& m : mMessages) {
       assert(m.header == nullptr);
+      // NOTE: payloads can be empty so m.payload == nullptr should
+      //       be an actual issue.
       assert(m.payload != nullptr);
       m.destroyPayload();
       m.payload = nullptr;

@@ -10,9 +10,8 @@
 
 #include "Framework/ReadoutAdapter.h"
 #include "Framework/DataProcessingHeader.h"
+#include "Framework/DataSpecUtils.h"
 #include "Headers/DataHeader.h"
-
-#include <Common/DataBlock.h>
 
 namespace o2
 {
@@ -25,19 +24,22 @@ InjectorFunction readoutAdapter(OutputSpec const& spec)
 {
   auto counter = std::make_shared<uint64_t>(0);
 
-  return [spec, counter](FairMQDevice& device, FairMQParts& parts, int index) {
+  return [spec, counter](FairMQDevice& device, FairMQParts& parts, ChannelRetriever channelRetriever) {
     for (size_t i = 0; i < parts.Size(); ++i) {
       DataHeader dh;
-      dh.dataOrigin = spec.origin;
-      dh.dataDescription = spec.description;
-      dh.subSpecification = spec.subSpec;
+      // FIXME: this will have to change and extract the actual subspec from
+      //        the data.
+      ConcreteDataMatcher concrete = DataSpecUtils::asConcreteDataMatcher(spec);
+      dh.dataOrigin = concrete.origin;
+      dh.dataDescription = concrete.description;
+      dh.subSpecification = concrete.subSpec;
       dh.payloadSize = parts.At(i)->GetSize();
       dh.payloadSerializationMethod = o2::header::gSerializationMethodNone;
 
-      DataProcessingHeader dph{ *counter, 0 };
+      DataProcessingHeader dph{*counter, 0};
       (*counter) += 1UL;
-      o2::header::Stack headerStack{ dh, dph };
-      broadcastMessage(device, std::move(headerStack), std::move(parts.At(i)), index);
+      o2::header::Stack headerStack{dh, dph};
+      sendOnChannel(device, std::move(headerStack), std::move(parts.At(i)), spec, channelRetriever);
     }
   };
 }

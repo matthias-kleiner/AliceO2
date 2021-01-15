@@ -1,23 +1,43 @@
-O2_SETUP(NAME MCHSimulationTest)
-set(BUCKET_NAME mch_simulation_test_bucket)
+# Copyright CERN and copyright holders of ALICE O2. This software is distributed
+# under the terms of the GNU General Public License v3 (GPL Version 3), copied
+# verbatim in the file "COPYING".
+#
+# See http://alice-o2.web.cern.ch/license for full licensing information.
+#
+# In applying this license CERN does not waive the privileges and immunities
+# granted to it by virtue of its status as an Intergovernmental Organization or
+# submit itself to any jurisdiction.
 
-O2_GENERATE_EXECUTABLE(
-  EXE_NAME test_MCHSimulation
-  SOURCES testDigitMerging.cxx DigitMerging.cxx testGeometry.cxx testDigitization.cxx testResponse.cxx
-  BUCKET_NAME mch_simulation_test_bucket
-  NO_INSTALL TRUE
-)
+o2_add_test(digit-merging
+        COMPONENT_NAME mch
+        SOURCES testDigitMerging.cxx DigitMerging.cxx
+        PUBLIC_LINK_LIBRARIES O2::MCHSimulation O2::MCHBase O2::DetectorsPassive
+        LABELS muon mch sim)
 
-target_link_libraries(test_MCHSimulation Boost::unit_test_framework O2MCHSimulation)
-add_test_wrap(NAME test_MCHSimulation COMMAND test_MCHSimulation)
+# o2_add_test(digitization
+#         COMPONENT_NAME mch
+#         SOURCES testDigitization.cxx 
+#         PUBLIC_LINK_LIBRARIES O2::MCHSimulation O2::MCHBase O2::DetectorsPassive
+#         LABELS muon mch long sim)
+#
+# o2_add_test(response
+#         COMPONENT_NAME mch
+#         SOURCES testResponse.cxx 
+#         PUBLIC_LINK_LIBRARIES O2::MCHSimulation O2::MCHBase O2::DetectorsPassive
+#         LABELS muon mch  sim)
 
-if (benchmark_FOUND)
-  O2_GENERATE_EXECUTABLE(
-    EXE_NAME o2-mch-bench-digit-merging
-    SOURCES benchDigitMerging.cxx DigitMerging.cxx
-    BUCKET_NAME ${BUCKET_NAME}
-    NO_INSTALL TRUE
-  )
+o2_add_test(regular-geometry
+        COMPONENT_NAME mch
+        SOURCES 
+        testRegularGeometry.cxx
+        PUBLIC_LINK_LIBRARIES O2::MCHSimulation O2::MCHBase O2::DetectorsPassive
+        LABELS muon mch  sim)
+
+if(benchmark_FOUND)
+        o2_add_executable(
+                digit-merging
+                COMPONENT_NAME mch
+                SOURCES benchDigitMerging.cxx DigitMerging.cxx
+                PUBLIC_LINK_LIBRARIES O2::MCHSimulation benchmark::benchmark)
 
 endif()
-

@@ -15,50 +15,38 @@
 #include "TPCFastTransform.h"
 #include "GPUTPCClusterData.h"
 #include "GPUReconstruction.h"
-#include "ClusterNativeAccessExt.h"
+#include "GPUO2DataTypes.h"
 
 using namespace GPUCA_NAMESPACE::gpu;
 
 void GPUTPCConvert::InitializeProcessor() {}
 
-void* GPUTPCConvert::SetPointersInput(void* mem)
-{
-  computePointerWithAlignment(mem, mInputClusters, mNClustersTotal);
-  return mem;
-}
-
 void* GPUTPCConvert::SetPointersOutput(void* mem)
 {
-  computePointerWithAlignment(mem, mClusters, mNClustersTotal);
+  if (mRec->GetParam().par.earlyTpcTransform) {
+    computePointerWithAlignment(mem, mClusters, mNClustersTotal);
+  }
   return mem;
 }
 
 void* GPUTPCConvert::SetPointersMemory(void* mem)
 {
   computePointerWithAlignment(mem, mMemory, 1);
-  if (mRec->GetRecoStepsGPU() & GPUDataTypes::RecoStep::TPCConversion) {
-    computePointerWithAlignment(mem, mClustersNativeBuffer, 1);
-  }
   return mem;
 }
 
 void GPUTPCConvert::RegisterMemoryAllocation()
 {
+  AllocateAndInitializeLate();
   mMemoryResMemory = mRec->RegisterMemoryAllocation(this, &GPUTPCConvert::SetPointersMemory, GPUMemoryResource::MEMORY_INPUT | GPUMemoryResource::MEMORY_PERMANENT, "TPCConvertMemory");
-  mMemoryResInput = mRec->RegisterMemoryAllocation(this, &GPUTPCConvert::SetPointersInput, GPUMemoryResource::MEMORY_INPUT | GPUMemoryResource::MEMORY_EXTERNAL | GPUMemoryResource::MEMORY_CUSTOM_TRANSFER, "TPCConvertInput");
   mMemoryResOutput = mRec->RegisterMemoryAllocation(this, &GPUTPCConvert::SetPointersOutput, GPUMemoryResource::MEMORY_OUTPUT, "TPCConvertOutput");
 }
 
-void GPUTPCConvert::SetMaxData()
+void GPUTPCConvert::SetMaxData(const GPUTrackingInOutPointers& io)
 {
-  unsigned int offset = 0;
-  if (mClustersNative) {
-    for (unsigned int i = 0; i < NSLICES; i++) {
-      for (unsigned int j = 0; j < o2::tpc::Constants::MAXGLOBALPADROW; j++) {
-        mClustersNative->clusterOffset[i][j] = offset;
-        offset += mClustersNative->nClusters[i][j];
-      }
-    }
+  if (io.clustersNative) {
+    mNClustersTotal = io.clustersNative->nClustersTotal;
+  } else {
+    mNClustersTotal = 0;
   }
-  mNClustersTotal = offset;
 }

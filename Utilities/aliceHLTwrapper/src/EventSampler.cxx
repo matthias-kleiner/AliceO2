@@ -75,6 +75,7 @@ bpo::options_description EventSampler::GetOptionsDescription()
 {
   // assemble the options for the device class and component
   bpo::options_description od("EventSampler options");
+  // clang-format off
   od.add_options()
     (OptionKeys[OptionKeyEventPeriod],
      bpo::value<int>()->default_value(1000),
@@ -91,6 +92,7 @@ bpo::options_description EventSampler::GetOptionsDescription()
     ((std::string(OptionKeys[OptionKeyDryRun]) + ",n").c_str(),
      bpo::value<bool>()->zero_tokens()->default_value(false),
      "skip component processing");
+  // clang-format on
   return od;
 }
 
@@ -113,7 +115,7 @@ void EventSampler::Run()
   /// inherited from FairMQDevice
   int iResult=0;
 
-  boost::thread samplerThread(boost::bind(&EventSampler::samplerLoop, this));
+  boost::thread samplerThread([this] { EventSampler::samplerLoop(); });
 
   unique_ptr<FairMQPoller> poller(fTransportFactory->CreatePoller(fChannels["data-in"]));
 
@@ -214,7 +216,9 @@ void EventSampler::samplerLoop()
   unsigned initialDelayInSeconds=mInitialDelay/1000;
   unsigned initialDelayInUSeconds=mInitialDelay%1000;
   unsigned eventPeriodInSeconds=mEventPeriod/1000000;
-  if (initialDelayInSeconds>0) sleep(initialDelayInSeconds);
+  if (initialDelayInSeconds > 0) {
+    sleep(initialDelayInSeconds);
+  }
   usleep(initialDelayInUSeconds);
 
   unique_ptr<FairMQMessage> msg(fTransportFactory->CreateMessage());
@@ -251,7 +255,10 @@ void EventSampler::samplerLoop()
     }
 
     mNEvents++;
-    if (eventPeriodInSeconds>0) sleep(eventPeriodInSeconds);
-    else usleep(mEventPeriod);
+    if (eventPeriodInSeconds > 0) {
+      sleep(eventPeriodInSeconds);
+    } else {
+      usleep(mEventPeriod);
+    }
   }
 }

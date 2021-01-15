@@ -26,58 +26,65 @@
 #pragma GCC diagnostic pop
 #endif
 
-namespace o2
-{
-namespace framework
+namespace o2::framework
 {
 
 InputRecord::InputRecord(std::vector<InputRoute> const& inputsSchema,
                          InputSpan&& span)
-  : mInputsSchema{ inputsSchema },
-    mSpan{ span }
+  : mInputsSchema{inputsSchema},
+    mSpan{std::move(span)}
 {
-  assert(mSpan.size() % 2 == 0);
 }
 
-int
-InputRecord::getPos(const char *binding) const {
-  for (int i = 0; i < mInputsSchema.size(); ++i) {
-    auto &route = mInputsSchema[i];
-    if (route.matcher.binding == binding) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-int
-InputRecord::getPos(std::string const &binding) const {
+int InputRecord::getPos(const char* binding) const
+{
+  auto inputIndex = 0;
   for (size_t i = 0; i < mInputsSchema.size(); ++i) {
-    auto &route = mInputsSchema[i];
-    if (route.matcher.binding == binding) {
-      return i;
+    auto& route = mInputsSchema[i];
+    if (route.timeslice != 0) {
+      continue;
     }
+    if (route.matcher.binding == binding) {
+      return inputIndex;
+    }
+    ++inputIndex;
   }
   return -1;
 }
 
-bool
-InputRecord::isValid(char const *s) {
+int InputRecord::getPos(std::string const& binding) const
+{
+  return this->getPos(binding.c_str());
+}
+
+bool InputRecord::isValid(char const* s) const
+{
   DataRef ref = get(s);
-  if (ref.header == nullptr || ref.payload == nullptr) {
+  if (ref.header == nullptr) {
     return false;
   }
   return true;
 }
 
-bool
-InputRecord::isValid(int s) {
+bool InputRecord::isValid(int s) const
+{
+  if (s >= size()) {
+    return false;
+  }
   DataRef ref = getByPos(s);
-  if (ref.header == nullptr || ref.payload == nullptr) {
+  if (ref.header == nullptr) {
     return false;
   }
   return true;
 }
 
-} // namespace framework
-} // namespace o2
+size_t InputRecord::countValidInputs() const
+{
+  size_t count = 0;
+  for (auto&& _ : *this) {
+    ++count;
+  }
+  return count;
+}
+
+} // namespace o2::framework

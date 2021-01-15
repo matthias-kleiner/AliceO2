@@ -17,7 +17,7 @@
 
 #include "SimulationDataFormat/BaseHits.h"
 #include "DetectorsBase/Detector.h"
-#include "FDDSimulation/Hit.h"
+#include "DataFormatsFDD/Hit.h"
 #include "FDDBase/Geometry.h"
 
 class FairModule;
@@ -52,8 +52,9 @@ class Detector : public o2::base::DetImpl<Detector>
 
   std::vector<o2::fdd::Hit>* getHits(Int_t iColl)
   {
-    if (iColl == 0)
+    if (iColl == 0) {
       return mHits;
+    }
     return nullptr;
   }
 
@@ -76,7 +77,7 @@ class Detector : public o2::base::DetImpl<Detector>
 
   template <typename Det>
   friend class o2::base::DetImpl;
-  ClassDefOverride(Detector, 1)
+  ClassDefOverride(Detector, 1);
 };
 
 // Input and output function for standard C++ input/output.

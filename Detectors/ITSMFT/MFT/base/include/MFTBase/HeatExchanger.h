@@ -25,14 +25,14 @@ namespace o2
 namespace mft
 {
 
-class HeatExchanger : public TNamed
+class HeatExchanger
 {
 
  public:
   HeatExchanger();
   HeatExchanger(Double_t Rwater, Double_t DRPipe, Double_t HeatExchangerThickness, Double_t CarbonThickness);
 
-  ~HeatExchanger() override = default;
+  ~HeatExchanger() = default;
 
   TGeoVolumeAssembly* create(Int_t kHalf, Int_t disk);
 
@@ -42,6 +42,7 @@ class HeatExchanger : public TNamed
   void createHalfDisk3(Int_t half);
   void createHalfDisk4(Int_t half);
   void createManifold(Int_t disk);
+  void createCoolingPipes(Int_t half, Int_t disk);
 
   Double_t getWaterRadius() { return mRWater; }
   void setWaterRadius(Double_t& Rwater) { mRWater = Rwater; }
@@ -60,6 +61,7 @@ class HeatExchanger : public TNamed
   TGeoMedium* mPipe;
   TGeoMedium* mCarbon;
   TGeoMedium* mRohacell;
+  TGeoMedium* mPeek;
 
  private:
   void initParameters();
@@ -82,7 +84,8 @@ class HeatExchanger : public TNamed
 
   Double_t mRohacellThickness;
 
-  Double_t mMoreLength; // additional length of water pipes outside the rohacell plate
+  Double_t mMoreLength01; // additional length of carbon plates compare to the rohacell plate, disk 0 and 1
+  Double_t mMoreLength;   // additional length of carbon plates compare to the rohacell plate
 
   // Parameters for carbon and Rohacell
   Int_t mNDisks;      // number of planes
@@ -136,9 +139,9 @@ class HeatExchanger : public TNamed
   Double_t mAngle4fifth[4];  // angle of torus for fifth pipe of disk 4
   Double_t mRadius4fifth[4]; // radius of torus for fifth pipe of disk 4
 
-  ClassDefOverride(HeatExchanger, 2);
+  ClassDef(HeatExchanger, 2);
 };
-}
-}
+} // namespace mft
+} // namespace o2
 
 #endif

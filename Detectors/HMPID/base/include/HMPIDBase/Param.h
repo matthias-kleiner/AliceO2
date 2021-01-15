@@ -119,16 +119,18 @@ class Param
   static Int_t InHVSector(float y); //find HV sector
   static Int_t Radiator(float y)
   {
-    if (InHVSector(y) < 0)
+    if (InHVSector(y) < 0) {
       return -1;
+    }
     return InHVSector(y) / 2;
   }
 
   // height in the radiator to estimate temperature from gradient
   static double HinRad(float y)
   {
-    if (Radiator(y) < 0)
+    if (Radiator(y) < 0) {
       return -1;
+    }
     return y - Radiator(y) * fgkMinPcY[Radiator(y)];
   }
   //is point inside chamber boundaries?
@@ -190,7 +192,7 @@ class Param
         z = -1.25;
         break;
     }
-    double l[3] = { x - mX, y - mY, z };
+    double l[3] = {x - mX, y - mY, z};
     mM[c]->LocalToMaster(l, m);
   }
   TVector3 Lors2Mars(Int_t c, float x, float y, Int_t pl = kPc) const
@@ -223,7 +225,7 @@ class Param
   } //norm
   void Norm(Int_t c, double* n) const
   {
-    double l[3] = { 0, 0, 1 };
+    double l[3] = {0, 0, 1};
     mM[c]->LocalToMasterVect(l, n);
   }                                                                                   //norm
   void Point(Int_t c, double* p, Int_t plane) const { Lors2Mars(c, 0, 0, p, plane); } //point of given chamber plane
@@ -303,6 +305,6 @@ class Param
 
   ClassDefNV(Param, 1);
 };
-}
-}
+} // namespace hmpid
+} // namespace o2
 #endif
