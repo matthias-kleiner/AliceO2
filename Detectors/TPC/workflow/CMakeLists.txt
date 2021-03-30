@@ -63,6 +63,16 @@ o2_add_executable(calib-pedestal
                   SOURCES src/tpc-calib-pedestal.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
+o2_add_executable(integrate-IDC
+                  COMPONENT_NAME tpc
+                  SOURCES src/tpc-integrate-idc.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
+
+o2_add_executable(averagemerge-IDC
+                  COMPONENT_NAME tpc
+                  SOURCES src/tpc-averagemerge-idc.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
+
 o2_add_executable(track-reader
                   COMPONENT_NAME tpc
                   SOURCES src/TrackReaderWorkflow.cxx
