@@ -33,6 +33,7 @@
 #include "DataFormatsTPC/TPCSectorHeader.h"
 
 #include "TPCCalibration/CalibTreeDump.h"
+#include "CommonUtils/TreeStreamRedirector.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -51,12 +52,19 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   void init(o2::framework::InitContext& ic) final
   {
     LOGP(info, "init TPCIntegrateIDCDevice");
-    mIDCs = CalPad("IDC", PadSubset::ROC);
+    // mIDCs = CalPad("IDC", PadSubset::ROC);
+    mIDCs.push_back(CalPad("IDC", PadSubset::ROC));
   }
 
   void run(o2::framework::ProcessingContext& pc) final
   {
     LOGP(info, "run TPCIntegrateIDCDevice");
+    ++mEvents;
+    int counter = 0;
+
+    const std::string name = fmt::format("idcs_tree_{:02}.root", mLane);
+    o2::utils::TreeStreamRedirector pcstream(name.data(), "recreate");
+    pcstream.GetFile()->cd();
 
     for (int i = 0; i < mSectors.size(); ++i) {
       DataRef ref = pc.inputs().getByPos(i);
@@ -66,22 +74,38 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
       LOG(INFO) << "received " << inDigits.size() << " digits";
 
       for (const auto& digit : inDigits) {
-        const auto timeBin = digit.getTimeStamp();
+        auto timeBin = digit.getTimeStamp();
+
+        int indexCalDet = timeBin / mTimeStamps; // each mTimeStamps the IDCs are filled in a new object
+        while (indexCalDet>=mIDCs.size()) {
+          // code block to be executed
+          mIDCs.push_back(CalPad("IDC", PadSubset::ROC));
+        }
 
         const auto row = digit.getRow(); // global pad row
         const auto pad = digit.getPad(); // pad position
         const float charge = digit.getChargeFloat();
         o2::tpc::CRU cru = digit.getCRU();
         const auto sector = cru.sector();
-        const float tmpCharge = mIDCs.getValue(sector, row, pad);
-        mIDCs.setValue(sector, row, pad, tmpCharge + charge);
+        const float tmpCharge = mIDCs[indexCalDet].getValue(sector, row, pad);
+        mIDCs[indexCalDet].setValue(sector, row, pad, tmpCharge + charge);
+
+        ++counter;
+        pcstream << "tree"
+                 << "counter=" << counter
+                 << "timeBin=" << timeBin
+                 << "sec=" << i
+                 << "\n";
       }
     }
+    pcstream.Close();
   }
 
   void endOfStream(o2::framework::EndOfStreamContext& ec) final
   {
     LOGP(info, "endOfStream");
+    LOGP(info, "number of events processed {}", mEvents);
+
     dumpCalibData();
     sendOutput(ec.outputs());
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
@@ -89,12 +113,14 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 
  private:
   // const int nTimeBins = 200; ///< 200 zBins TODO FIX THIS
-  CalPad mIDCs;
+  std::vector<CalPad> mIDCs; ///< integrated IDCs for each time interval
+  // std::unordered_map<int,std::vector<float> > map;
   bool mIDCsSet = false;
-  // uint32_t mMaxEvents{0};           ///< maximum number of events to process
   uint32_t mPublishAfter{0};        ///< number of events after which to dump the calibration
   uint32_t mLane{0};                ///< lane number of processor
   std::vector<uint32_t> mSectors{}; ///< sectors to process in this instance
+  int mEvents{0};                   ///< number of processed events
+  int mTimeStamps{2000};            ///< number of time stamps for each integration interval
   // bool mReadyToQuit{false};         ///< if processor is ready to quit
   // bool mCalibDumped{false};         ///< if calibration object already dumped
   // bool mForceQuit{false};           ///< for quit after processing finished
@@ -103,14 +129,22 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   //____________________________________________________________________________
   void sendOutput(DataAllocator& output)
   {
-    LOGP(info, "sendOutput");
+    // LOGP(info, "sendOutput");
     auto image = o2::utils::MemFileHelper::createFileImage(&mIDCs, typeid(mIDCs), mIDCs.getName(), "data");
-    CDBType dataType{CDBType::CalPedestal};
-    int type = int(dataType);
-
-    header::DataHeader::SubSpecificationType subSpec{(header::DataHeader::SubSpecificationType)((mLane << 4))};
-    output.snapshot(Output{gDataOriginTPC, "CLBPART", subSpec}, *image.get());
-    output.snapshot(Output{gDataOriginTPC, "CLBPARTINFO", subSpec}, type);
+    // CDBType dataType{CDBType::CalPedestal};
+    // int type = int(dataType);
+    //
+    // range based for loop
+    // vector to Thorsten
+    // structured binding?
+    header::DataHeader::SubSpecificationType subSpec{ /*CRU*/ };
+    output.snapshot(Output{gDataOriginTPC, "CLBPART", subSpec}, *image.get());// in framework test
+    // std::vector<XYZ> v{1000};
+    // v[0] = XYZ{1, 2, 3};
+    // v[999] = XYZ{1, 2, 3};
+    // ctx.outputs().snapshot(Output{"TST", "VECTOR"}, v);
+    // test_MakeDPLObjects.cxx
+    // output.snapshot(Output{gDataOriginTPC, "CLBPARTINFO", subSpec}, type);
   }
 
   //____________________________________________________________________________
@@ -118,14 +152,14 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   {
     LOGP(info, "Dumping output");
 
-    CalibTreeDump dump;
-    dump.add(&mIDCs);
-    dump.dumpToFile(fmt::format("idcs{:02}.root", mLane));
-    mIDCsSet = true;
+    // CalibTreeDump dump;
+    // dump.add(&mIDCs);
+    // dump.dumpToFile(fmt::format("idcs{:02}.root", mLane));
+    // mIDCsSet = true;
 
     const std::string name = fmt::format("idcs_obj_{:02}.root", mLane);
     TFile f(name.data(), "recreate");
-    f.WriteObject(&mIDCs, mIDCs.getName().data());
+    f.WriteObject(&mIDCs, mIDCs[0].getName().data());
     f.Close();
   }
 };
@@ -133,7 +167,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 DataProcessorSpec getTPCIntegrateIDCSpec(uint32_t ilane = 0, std::vector<uint32_t> sectors = {}, uint32_t publishAfterTFs = 0)
 {
   std::vector<o2::framework::OutputSpec> outputs{
-    ConcreteDataTypeMatcher{gDataOriginTPC, "CLBPART"},
+    ConcreteDataTypeMatcher{gDataOriginTPC, "IDC"},
     ConcreteDataTypeMatcher{gDataOriginTPC, "CLBPARTINFO"}};
 
   std::vector<InputSpec> inputSpecs;

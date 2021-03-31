@@ -26,6 +26,9 @@
 #include "DPLUtils/RootTreeReader.h"
 #include "TPCWorkflow/PublisherSpec.h"
 
+// get info if triggered or continous readout was used
+// #include "Framework/ConfigurationOptionsRetriever.h"
+
 using Reader = o2::framework::RootTreeReader;
 using namespace o2::framework;
 
@@ -50,6 +53,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"no-write-ccdb", VariantType::Bool, false, {"skip sending the calibration output to CCDB"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
+    {"TPCtriggered", VariantType::Bool, false, {"Triggered readout."}},
     {"sectors", VariantType::String, sectorDefault.c_str(), {"List of TPC sectors, comma separated ranges, e.g. 0-3,7,9-15"}},
   };
 
@@ -103,6 +107,11 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
                                                           hook},
                                                         propagateMC));
 
+
+
+  // const std::string fileConf = "o2simdigitizerworkflow_configuration.ini";
+  // auto confDigitizer = ConfigurationFactory::getConfiguration("ini:/" + fileConf);
+
   for (int ilane = 0; ilane < nLanes; ++ilane) {
     auto first = tpcsectors.begin() + ilane * sectorsPerLane;
     if (first >= tpcsectors.end()) {
@@ -113,7 +122,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, publishAfterTFs));
   }
 
-  workflow.emplace_back(getCalDetMergerPublisherSpec(nLanes, skipCCDB, publishAfterTFs > 0));
+  // workflow.emplace_back(getCalDetMergerPublisherSpec(nLanes, skipCCDB, publishAfterTFs > 0));
 
   return workflow;
 }
