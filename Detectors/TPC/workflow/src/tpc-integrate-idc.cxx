@@ -49,6 +49,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   std::vector<ConfigParamSpec> options{
     // {"input-spec", VariantType::String, "digits:TPC/DIGITS/", {"selection string input specs"}},
     {"publish-after-tfs", VariantType::Int, 0, {"number of time frames after which to force publishing the objects"}},
+    {"nTimeBins", VariantType::Int, 2000, {"number of time bins for which the IDCs are integrated"}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCCalibPedestal.FirstTimeBin=10;...')"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"no-write-ccdb", VariantType::Bool, false, {"skip sending the calibration output to CCDB"}},
@@ -76,7 +77,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   // const std::string inputSpec = config.options().get<std::string>("input-spec");
   const auto skipCCDB = config.options().get<bool>("no-write-ccdb");
-  const auto publishAfterTFs = (uint32_t)config.options().get<int>("publish-after-tfs");
+  const auto nTimeBins = (uint32_t)config.options().get<int>("nTimeBins");
 
   const auto tpcsectors = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("sectors"));
   const auto nSectors = (uint32_t)tpcsectors.size();
@@ -90,25 +91,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     return workflow;
   }
 
-  using Type = std::vector<o2::tpc::Digit>;
-  const bool propagateMC = false;
-  std::vector<int> laneConfiguration = tpcsectors;
-  Reader::SpecialPublishHook* hook = nullptr; // what is this???
-  workflow.emplace_back(o2::tpc::getPublisherSpec<Type>(PublisherConf{
-                                                          "tpc-digit-reader",
-                                                          "tpcdigits.root",
-                                                          "o2sim",
-                                                          {"digitbranch", "TPCDigit", "Digit branch"},
-                                                          {"mcbranch", "TPCDigitMCTruth", "MC label branch"},
-                                                          OutputSpec{"TPC", "DIGITS"},
-                                                          OutputSpec{"TPC", "DIGITSMCTR"},
-                                                          tpcsectors,
-                                                          laneConfiguration,
-                                                          hook},
-                                                        propagateMC));
-
-
-
   // const std::string fileConf = "o2simdigitizerworkflow_configuration.ini";
   // auto confDigitizer = ConfigurationFactory::getConfiguration("ini:/" + fileConf);
 
@@ -119,10 +101,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     }
     auto last = std::min(tpcsectors.end(), first + sectorsPerLane);
     std::vector<uint32_t> range(first, last);
-    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, publishAfterTFs));
+    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, nTimeBins));
   }
-
-  // workflow.emplace_back(getCalDetMergerPublisherSpec(nLanes, skipCCDB, publishAfterTFs > 0));
 
   return workflow;
 }
