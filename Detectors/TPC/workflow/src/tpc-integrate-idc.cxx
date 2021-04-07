@@ -37,7 +37,6 @@ void customize(std::vector<o2::framework::CompletionPolicy>& policies)
 {
   using o2::framework::CompletionPolicy;
   policies.push_back(CompletionPolicyHelpers::defineByName("calib-tpc-integrateidc.*", CompletionPolicy::CompletionOp::Consume));
-  policies.push_back(CompletionPolicyHelpers::defineByName("calib-tpc-caldet-merger-publisher", CompletionPolicy::CompletionOp::Consume));
 }
 
 // we need to add workflow options before including Framework/runDataProcessing
@@ -63,12 +62,9 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
 #include "Framework/runDataProcessing.h"
 
-using RDH = o2::header::RAWDataHeader;
-
 WorkflowSpec defineDataProcessing(ConfigContext const& config)
 {
   using namespace o2::tpc;
-  LOGP(info, "defineDataProcessing");
 
   // set up configuration
   o2::conf::ConfigurableParam::updateFromFile(config.options().get<std::string>("configFile"));
@@ -76,7 +72,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   o2::conf::ConfigurableParam::writeINI("o2tpccalibration_configuration.ini");
 
   // const std::string inputSpec = config.options().get<std::string>("input-spec");
-  const auto skipCCDB = config.options().get<bool>("no-write-ccdb");
+  // const auto skipCCDB = config.options().get<bool>("no-write-ccdb");
   const auto nTimeBins = (uint32_t)config.options().get<int>("nTimeBins");
 
   const auto tpcsectors = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("sectors"));
