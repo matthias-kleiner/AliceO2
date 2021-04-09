@@ -18,18 +18,11 @@
 #include "Headers/DataHeader.h"
 #include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
-#include "DataFormatsTPC/Digit.h"
 #include <vector>
 #include <string>
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
-#include "TPCWorkflow/CalDetMergerPublisherSpec.h"
-#include "DPLUtils/RootTreeReader.h"
 #include "TPCWorkflow/PublisherSpec.h"
 
-// get info if triggered or continous readout was used
-// #include "Framework/ConfigurationOptionsRetriever.h"
-
-using Reader = o2::framework::RootTreeReader;
 using namespace o2::framework;
 
 // customize the completion policy
@@ -46,14 +39,10 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   int defaultlanes = std::max(1u, std::thread::hardware_concurrency() / 2);
 
   std::vector<ConfigParamSpec> options{
-    // {"input-spec", VariantType::String, "digits:TPC/DIGITS/", {"selection string input specs"}},
-    {"publish-after-tfs", VariantType::Int, 0, {"number of time frames after which to force publishing the objects"}},
-    {"nTimeBins", VariantType::Int, 2000, {"number of time bins for which the IDCs are integrated"}},
-    {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCCalibPedestal.FirstTimeBin=10;...')"}},
+    {"nOrbits", VariantType::Int, 12, {"number of orbits for which the IDCs are integrated"}},
+    {"outputFormat", VariantType::String, "Sim", {"setting the output type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
-    {"no-write-ccdb", VariantType::Bool, false, {"skip sending the calibration output to CCDB"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
-    {"TPCtriggered", VariantType::Bool, false, {"Triggered readout."}},
     {"sectors", VariantType::String, sectorDefault.c_str(), {"List of TPC sectors, comma separated ranges, e.g. 0-3,7,9-15"}},
   };
 
@@ -68,36 +57,30 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   // set up configuration
   o2::conf::ConfigurableParam::updateFromFile(config.options().get<std::string>("configFile"));
-  o2::conf::ConfigurableParam::updateFromString(config.options().get<std::string>("configKeyValues"));
-  o2::conf::ConfigurableParam::writeINI("o2tpccalibration_configuration.ini");
+  o2::conf::ConfigurableParam::writeINI("o2tpcidc_configuration.ini");
 
-  // const std::string inputSpec = config.options().get<std::string>("input-spec");
-  // const auto skipCCDB = config.options().get<bool>("no-write-ccdb");
-  const auto nTimeBins = (uint32_t)config.options().get<int>("nTimeBins");
+  const auto nOrbits = (uint32_t)config.options().get<int>("nOrbits");
+  const auto outputFormatStr = config.options().get<std::string>("outputFormat");
+  const TPCIntegrateIDCDevice::OutputFormat outputFormat = outputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::OutputFormat::Real : TPCIntegrateIDCDevice::OutputFormat::Sim;
 
   const auto tpcsectors = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("sectors"));
   const auto nSectors = (uint32_t)tpcsectors.size();
-  LOGP(info, "nSectors: {}", nSectors);
   const auto nLanes = std::min((uint32_t)config.options().get<int>("lanes"), nSectors);
   const auto sectorsPerLane = nSectors / nLanes + ((nSectors % nLanes) != 0);
 
   WorkflowSpec workflow;
-  LOGP(info, "workflow");
   if (nLanes <= 0) {
     return workflow;
   }
 
-  // const std::string fileConf = "o2simdigitizerworkflow_configuration.ini";
-  // auto confDigitizer = ConfigurationFactory::getConfiguration("ini:/" + fileConf);
-
   for (int ilane = 0; ilane < nLanes; ++ilane) {
-    auto first = tpcsectors.begin() + ilane * sectorsPerLane;
+    const auto first = tpcsectors.begin() + ilane * sectorsPerLane;
     if (first >= tpcsectors.end()) {
       break;
     }
-    auto last = std::min(tpcsectors.end(), first + sectorsPerLane);
-    std::vector<uint32_t> range(first, last);
-    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, nTimeBins));
+    const auto last = std::min(tpcsectors.end(), first + sectorsPerLane);
+    const std::vector<uint32_t> range(first, last);
+    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, nOrbits, outputFormat));
   }
 
   return workflow;
