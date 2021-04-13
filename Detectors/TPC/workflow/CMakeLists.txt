@@ -68,6 +68,11 @@ o2_add_executable(integrate-IDC
                   SOURCES src/tpc-integrate-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
+o2_add_executable(averagemerge-IDC
+                  COMPONENT_NAME tpc
+                  SOURCES src/tpc-averagemerge-idc.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
+
 o2_add_executable(track-reader
                   COMPONENT_NAME tpc
                   SOURCES src/TrackReaderWorkflow.cxx

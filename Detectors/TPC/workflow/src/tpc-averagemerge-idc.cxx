@@ -20,7 +20,7 @@
 #include "CommonUtils/ConfigurableParam.h"
 #include <vector>
 #include <string>
-#include "TPCWorkflow/TPCIntegrateIDCSpec.h"
+#include "TPCWorkflow/TPCAverageMergeIDCSpec.h"
 #include "TPCWorkflow/PublisherSpec.h"
 
 using namespace o2::framework;
@@ -29,22 +29,21 @@ using namespace o2::framework;
 void customize(std::vector<o2::framework::CompletionPolicy>& policies)
 {
   using o2::framework::CompletionPolicy;
-  policies.push_back(CompletionPolicyHelpers::defineByName("tpc-idc-integrateidc.*", CompletionPolicy::CompletionOp::Consume));
+  policies.push_back(CompletionPolicyHelpers::defineByName("tpc-idc-averagemerge.*", CompletionPolicy::CompletionOp::Consume));
 }
 
 // we need to add workflow options before including Framework/runDataProcessing
 void customize(std::vector<ConfigParamSpec>& workflowOptions)
 {
-  const std::string sectorDefault = "0-" + std::to_string(o2::tpc::Sector::MAXSECTOR - 1);
+  const std::string cruDefault = "0-" + std::to_string(o2::tpc::CRU::MaxCRU - 1);
   const int defaultlanes = std::max(1u, std::thread::hardware_concurrency() / 2);
 
   std::vector<ConfigParamSpec> options{
-    {"nOrbits", VariantType::Int, 12, {"number of orbits for which the IDCs are integrated"}},
-    {"outputFormat", VariantType::String, "Sim", {"setting the output format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
-    {"debug", VariantType::Bool, false, {"create debug tree"}},
+    {"inputFormat", VariantType::String, "Sim", {"setting the input format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
+    {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCCalibPedestal.FirstTimeBin=10;...')"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
-    {"sectors", VariantType::String, sectorDefault.c_str(), {"List of TPC sectors, comma separated ranges, e.g. 0-3,7,9-15"}},
+    {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
   };
 
   std::swap(workflowOptions, options);
@@ -58,17 +57,16 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   // set up configuration
   o2::conf::ConfigurableParam::updateFromFile(config.options().get<std::string>("configFile"));
-  o2::conf::ConfigurableParam::writeINI("o2tpcintegrateidc_configuration.ini");
+  o2::conf::ConfigurableParam::updateFromString(config.options().get<std::string>("configKeyValues"));
+  o2::conf::ConfigurableParam::writeINI("o2tpcaveragemergeidc_configuration.ini");
 
-  const auto nOrbits = (uint32_t)config.options().get<int>("nOrbits");
-  const auto outputFormatStr = config.options().get<std::string>("outputFormat");
-  const TPCIntegrateIDCDevice::IDCFormat outputFormat = outputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::IDCFormat::Real : TPCIntegrateIDCDevice::IDCFormat::Sim;
-  const auto debug = config.options().get<bool>("debug");
+  const auto inputFormatStr = config.options().get<std::string>("inputFormat");
+  const TPCIntegrateIDCDevice::IDCFormat inputFormat = inputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::IDCFormat::Real : TPCIntegrateIDCDevice::IDCFormat::Sim;
 
-  const auto tpcsectors = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("sectors"));
-  const auto nSectors = (uint32_t)tpcsectors.size();
-  const auto nLanes = std::min((uint32_t)config.options().get<int>("lanes"), nSectors);
-  const auto sectorsPerLane = nSectors / nLanes + ((nSectors % nLanes) != 0);
+  const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
+  const auto nCRUs = (uint32_t)tpcCRUs.size();
+  const auto nLanes = std::min((uint32_t)config.options().get<int>("lanes"), nCRUs);
+  const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
 
   WorkflowSpec workflow;
   if (nLanes <= 0) {
@@ -76,13 +74,13 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   }
 
   for (int ilane = 0; ilane < nLanes; ++ilane) {
-    const auto first = tpcsectors.begin() + ilane * sectorsPerLane;
-    if (first >= tpcsectors.end()) {
+    const auto first = tpcCRUs.begin() + ilane * crusPerLane;
+    if (first >= tpcCRUs.end()) {
       break;
     }
-    const auto last = std::min(tpcsectors.end(), first + sectorsPerLane);
+    const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
     const std::vector<uint32_t> range(first, last);
-    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, nOrbits, outputFormat, debug));
+    workflow.emplace_back(getTPCAverageMergeIDCSpec(ilane, range, inputFormat));
   }
 
   return workflow;

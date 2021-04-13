@@ -27,8 +27,9 @@
 #include "TPCBase/CDBInterface.h"
 #include "TPCBase/CRU.h"
 #include "DataFormatsTPC/TPCSectorHeader.h"
-#include "DataFormatsTPC/TPCCRUHeader.h"
 #include "DataFormatsTPC/Digit.h"
+#include "CommonConstants/LHCConstants.h"
+#include "DataFormatsTPC/Constants.h"
 
 #include "CommonUtils/TreeStreamRedirector.h" // for debugging
 
@@ -45,12 +46,12 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 {
  public:
   // enum for the output format of the integrated IDCs
-  enum class OutputFormat : int {
+  enum class IDCFormat : int {
     Sim = 0, // output format of simulation for faster processing
     Real = 1 // output format of real CRUs
   };
 
-  TPCIntegrateIDCDevice(const uint32_t lane, const std::vector<uint32_t>& sectors, const uint32_t nOrbitsPerIDCIntervall, const OutputFormat outputFormat) : mLane{lane}, mSectors{sectors}, mNOrbits{nOrbitsPerIDCIntervall}, mOutputFormat{outputFormat} {}
+  TPCIntegrateIDCDevice(const uint32_t lane, const std::vector<uint32_t>& sectors, const uint32_t nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mNOrbits{nOrbitsPerIDCIntervall}, mIDCFormat{outputFormat}, mDebug{debug} {}
 
   void run(o2::framework::ProcessingContext& pc) final
   {
@@ -115,10 +116,15 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 
   /// return the kind of the output for given type.
-  /// \param outputFormat type of the output format
-  static header::DataDescription getDataDescription(const OutputFormat outputFormat)
+  /// \param idcFormat type of the IDC format
+  static header::DataDescription getDataDescription(const IDCFormat idcFormat)
   {
-    return (outputFormat == OutputFormat::Sim) ? header::DataDescription{"IDCSIM"} : header::DataDescription{"IDC"};
+    return (idcFormat == IDCFormat::Sim) ? header::DataDescription{"IDCSIM"} : header::DataDescription{"IDC"};
+  }
+
+  static int getNIntegrationIntervals(const int nDigitsCRU, const int region)
+  {
+    return nDigitsCRU / mPadsPerRegion[region];
   }
 
  private:
@@ -139,27 +145,23 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
                                        0, 128, 258, 388, 520, 652, 784, 918, 1052, 1188, 1324, 1462};                              // region 9
   const uint32_t mLane{};                                                                                                          ///< lane number of processor
   const std::vector<uint32_t> mSectors{};                                                                                          ///< sectors to process in this instance
-  static constexpr const uint32_t mBunchCrossesPerOrbit{3564};                                                                     ///< maximum number of bunch crosses per orbit
-  static constexpr const uint32_t mLHCClock{40};                                                                                   ///< 40MHz LHC clock
-  static constexpr const uint32_t mSamplingSampas{5};                                                                              ///< sampling freqnecy of the SAMPAS
-  static constexpr const uint32_t mTimeBinWidth{mLHCClock / mSamplingSampas};                                                      ///< 8 MHz width of one TimeBin. 40MhZ LHC Clock / 5MHz Sampling freqency = 8Mhz
   static constexpr const uint32_t mLengthOfTF{256};                                                                                ///< length of one TF in units of orbits
   const uint32_t mNOrbits{12};                                                                                                     ///< integration of IDCs in units of orbits
-  const uint32_t mTimeStamps{mBunchCrossesPerOrbit / mTimeBinWidth * mNOrbits};                                                    ///< number of time stamps for each integration interval
+  const uint32_t mTimeStamps{o2::constants::lhc::LHCMaxBunches / o2::tpc::constants::LHCBCPERTIMEBIN * mNOrbits};                  ///< number of time stamps for each integration interval
   const uint32_t mIntegrationIntervalsPerTF{mLengthOfTF / mNOrbits + 1};                                                           ///< number of integration intervals per TF. Add 1: 256/12=21.333
-  const bool mDebug{true};                                                                                                         ///< dump IDCs to tree for debugging
-  const OutputFormat mOutputFormat{0};                                                                                             ///< type of the output format. 0=simulation, 1=realistic format
-  std::array<std::vector<float>, mRegions> mIDCs{                                                                                  ///< IDCs for one sector. The index of the array to the region.
-                                                 std::vector<float>(mPadsPerRegion[0] * mIntegrationIntervalsPerTF),               // region 0
-                                                 std::vector<float>(mPadsPerRegion[1] * mIntegrationIntervalsPerTF),               // region 1
-                                                 std::vector<float>(mPadsPerRegion[2] * mIntegrationIntervalsPerTF),               // region 2
-                                                 std::vector<float>(mPadsPerRegion[3] * mIntegrationIntervalsPerTF),               // region 3
-                                                 std::vector<float>(mPadsPerRegion[4] * mIntegrationIntervalsPerTF),               // region 4
-                                                 std::vector<float>(mPadsPerRegion[5] * mIntegrationIntervalsPerTF),               // region 5
-                                                 std::vector<float>(mPadsPerRegion[6] * mIntegrationIntervalsPerTF),               // region 6
-                                                 std::vector<float>(mPadsPerRegion[7] * mIntegrationIntervalsPerTF),               // region 7
-                                                 std::vector<float>(mPadsPerRegion[8] * mIntegrationIntervalsPerTF),               // region 8
-                                                 std::vector<float>(mPadsPerRegion[9] * mIntegrationIntervalsPerTF)};              // region 9
+  const IDCFormat mIDCFormat{IDCFormat::Sim};                                                                                      ///< type of the output format. Sim=simulation, Real=realistic format
+  const bool mDebug{false};                                                                                                        ///< dump IDCs to tree for debugging
+  std::array<std::vector<float>, mRegions> mIDCs{                                                                               ///< IDCs for one sector. The index of the array to the region.
+                                                    std::vector<float>(mPadsPerRegion[0] * mIntegrationIntervalsPerTF),            // region 0
+                                                    std::vector<float>(mPadsPerRegion[1] * mIntegrationIntervalsPerTF),            // region 1
+                                                    std::vector<float>(mPadsPerRegion[2] * mIntegrationIntervalsPerTF),            // region 2
+                                                    std::vector<float>(mPadsPerRegion[3] * mIntegrationIntervalsPerTF),            // region 3
+                                                    std::vector<float>(mPadsPerRegion[4] * mIntegrationIntervalsPerTF),            // region 4
+                                                    std::vector<float>(mPadsPerRegion[5] * mIntegrationIntervalsPerTF),            // region 5
+                                                    std::vector<float>(mPadsPerRegion[6] * mIntegrationIntervalsPerTF),            // region 6
+                                                    std::vector<float>(mPadsPerRegion[7] * mIntegrationIntervalsPerTF),            // region 7
+                                                    std::vector<float>(mPadsPerRegion[8] * mIntegrationIntervalsPerTF),            // region 8
+                                                    std::vector<float>(mPadsPerRegion[9] * mIntegrationIntervalsPerTF)};           // region 9
 
   /// \param row global pad row
   /// \param pad pad in row
@@ -181,13 +183,21 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   {
     unsigned int cru = sector * mRegions;
     for (const auto& idcs : mIDCs) {
-      if (mOutputFormat == OutputFormat::Sim) {
-        const TPCCRUHeader cruheader{cru};
+      if (mIDCFormat == IDCFormat::Sim) {
+        // const TPCCRUHeader cruheader{cru, mIntegrationIntervalsPerTF};
         const header::DataHeader::SubSpecificationType subSpec{cru << 7};
-        output.snapshot(Output{gDataOriginTPC, getDataDescription(mOutputFormat), subSpec, Lifetime::Timeframe, cruheader}, idcs);
+        // output.snapshot(Output{gDataOriginTPC, getDataDescription(mIDCFormat), subSpec, Lifetime::Timeframe, cruheader}, idcs);
+        output.snapshot(Output{gDataOriginTPC, getDataDescription(mIDCFormat), subSpec, Lifetime::Timeframe}, idcs);
+
       } else {
+        // TODO
         // convert to format from thorsten here
         // send.......
+        // DUMMY FOR NOW
+        // const TPCCRUHeader cruheader{cru, mIntegrationIntervalsPerTF};
+        const header::DataHeader::SubSpecificationType subSpec{cru << 7};
+        // output.snapshot(Output{gDataOriginTPC, getDataDescription(mIDCFormat), subSpec, Lifetime::Timeframe, cruheader}, idcs);
+        output.snapshot(Output{gDataOriginTPC, getDataDescription(mIDCFormat), subSpec, Lifetime::Timeframe}, idcs);
       }
       ++cru;
     }
@@ -278,7 +288,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCIntegrateIDCSpec(const uint32_t ilane = 0, const std::vector<uint32_t>& sectors = {}, const uint32_t nOrbits = 22, const TPCIntegrateIDCDevice::OutputFormat outputFormat = TPCIntegrateIDCDevice::OutputFormat::Sim)
+DataProcessorSpec getTPCIntegrateIDCSpec(const uint32_t ilane = 0, const std::vector<uint32_t>& sectors = {}, const uint32_t nOrbits = 22, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
 {
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(sectors.size());
@@ -305,7 +315,7 @@ DataProcessorSpec getTPCIntegrateIDCSpec(const uint32_t ilane = 0, const std::ve
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCIntegrateIDCDevice>(ilane, sectors, nOrbits, outputFormat)}}; // end DataProcessorSpec
+    AlgorithmSpec{adaptFromTask<TPCIntegrateIDCDevice>(ilane, sectors, nOrbits, outputFormat, debug)}}; // end DataProcessorSpec
 }
 
 } // namespace tpc

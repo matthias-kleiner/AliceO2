@@ -25,7 +25,6 @@ o2_add_library(
           src/ClusterNativeHelper.cxx
           src/WorkflowHelper.cxx
           src/CompressedClusters.cxx
-          src/TPCCRUHeader.cxx
   PUBLIC_LINK_LIBRARIES O2::GPUCommon
                         O2::SimulationDataFormat
                         O2::CommonDataFormat
