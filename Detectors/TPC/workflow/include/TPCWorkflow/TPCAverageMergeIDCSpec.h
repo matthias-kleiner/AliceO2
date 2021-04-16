@@ -8,8 +8,8 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifndef O2_CALIBRATION_TPCAverageMergeIDCSpec_H
-#define O2_CALIBRATION_TPCAverageMergeIDCSpec_H
+#ifndef O2_TPCAVERAGEMERGEIDCSPEC_H
+#define O2_TPCAVERAGEMERGEIDCSPEC_H
 
 /// @file   TPCAverageMergeIDCSpec.h
 /// @brief  TPC merging and averaging of IDCs
@@ -26,6 +26,7 @@
 #include "Headers/DataHeader.h"
 #include "TPCBase/CDBInterface.h"
 #include "TPCBase/CRU.h"
+#include "TPCSimulation/IDCSim.h"
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
 
 #include "CommonUtils/TreeStreamRedirector.h" // for debugging
@@ -39,6 +40,10 @@ namespace o2
 {
 namespace tpc
 {
+
+/*
+DUMMY CLASS
+*/
 
 class TPCAverageMergeIDCDevice : public o2::framework::Task
 {
@@ -75,7 +80,7 @@ class TPCAverageMergeIDCDevice : public o2::framework::Task
       const o2::tpc::CRU cruTmp(cru);
       unsigned int region = cruTmp.region();
 
-      const auto nIntegrationIntervals = TPCIntegrateIDCDevice::getNIntegrationIntervals(nDigits, region);
+      const auto nIntegrationIntervals = IDCSim::getNIntegrationIntervals(nDigits, region);
 
       std::vector<std::vector<float>> mIDCs{};
 
@@ -83,16 +88,8 @@ class TPCAverageMergeIDCDevice : public o2::framework::Task
       LOG(INFO) << "cru " << cru;
       LOG(INFO) << "nIntegrationIntervals " << nIntegrationIntervals;
 
-      const int nTotalPads = TPCIntegrateIDCDevice::getPadsPerRegion(region); // total number of pads for current region
+      const int nTotalPads = IDCSim::getPadsPerRegion(region); // total number of pads for current region
       const int facRows = mRowsPerRegion[region] / mMergeNRows;
-      // mMergeNPads
-      // mIDCs.push_back();
-
-      dumpIDCs(cru, inIDCs);
-
-      // for(auto& IDC : inIDCs){
-      // LOG(INFO) << "received " << IDC;
-      // }
     }
   }
 
@@ -101,8 +98,6 @@ class TPCAverageMergeIDCDevice : public o2::framework::Task
     LOGP(info, "endOfStream");
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
     createDebugTree();
-    // using namespace std::chrono_literals;
-    // std::this_thread::sleep_for(50s);
   }
 
  private:
@@ -151,7 +146,7 @@ class TPCAverageMergeIDCDevice : public o2::framework::Task
 
       const o2::tpc::CRU cruTmp(cru);
       unsigned int region = cruTmp.region();
-      const int padsPerCRU = TPCIntegrateIDCDevice::getPadsPerRegion(region); //mPadsPerCRU[region];
+      const int padsPerCRU = IDCSim::getPadsPerRegion(region); //mPadsPerCRU[region];
       std::vector<int> vRow(padsPerCRU);
       std::vector<int> vPad(padsPerCRU);
       std::vector<float> vXPos(padsPerCRU);
@@ -163,7 +158,7 @@ class TPCAverageMergeIDCDevice : public o2::framework::Task
       int sectorTmp = cruTmp.sector();
 
       for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
-        const GlobalPadNumber globalNum = TPCIntegrateIDCDevice::getGlobalPadOffset(region) + iPad; //mGlobalPadOffs[region] + iPad;
+        const GlobalPadNumber globalNum = IDCSim::getGlobalPadOffset(region) + iPad; //mGlobalPadOffs[region] + iPad;
         const auto& padPosLocal = mapper.padPos(globalNum);
         vRow[iPad] = padPosLocal.getRow();
         vPad[iPad] = padPosLocal.getPad();
@@ -176,9 +171,9 @@ class TPCAverageMergeIDCDevice : public o2::framework::Task
       }
       int cruiTmp = cru;
 
-      for (int iTimeBin = 0; iTimeBin < TPCIntegrateIDCDevice::getIntegrationIntervalls(*idcs, region); ++iTimeBin) {
+      for (int iTimeBin = 0; iTimeBin < IDCSim::getNIntegrationIntervals(idcs->size(), region); ++iTimeBin) {
         for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
-          idcsPerTimeBin[iPad] = (*idcs)[iPad + iTimeBin * TPCIntegrateIDCDevice::getPadsPerRegion(region)];
+          idcsPerTimeBin[iPad] = (*idcs)[iPad + iTimeBin * IDCSim::getPadsPerRegion(region)];
         }
 
         pcstream << "tree"

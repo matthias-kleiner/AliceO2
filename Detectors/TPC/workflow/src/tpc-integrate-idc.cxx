@@ -22,6 +22,9 @@
 #include <string>
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
 #include "TPCWorkflow/PublisherSpec.h"
+#include "DetectorsCommonDataFormats/NameConf.h"
+#include "DetectorsRaw/HBFUtils.h"
+#include "TPCSimulation/IDCSim.h"
 
 using namespace o2::framework;
 
@@ -40,12 +43,13 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
   std::vector<ConfigParamSpec> options{
     {"nOrbits", VariantType::Int, 12, {"number of orbits for which the IDCs are integrated"}},
+    {"orbitsperTF", VariantType::Int, 256, {"number of orbits per TF for debugging currently. Will be removed"}},
     {"outputFormat", VariantType::String, "Sim", {"setting the output format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
     {"debug", VariantType::Bool, false, {"create debug tree"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
     {"sectors", VariantType::String, sectorDefault.c_str(), {"List of TPC sectors, comma separated ranges, e.g. 0-3,7,9-15"}},
-  };
+    {"hbfutils-config", VariantType::String, std::string(o2::base::NameConf::DIGITIZATIONCONFIGFILE), {"config file for HBFUtils (or none)"}}};
 
   std::swap(workflowOptions, options);
 }
@@ -58,7 +62,19 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   // set up configuration
   o2::conf::ConfigurableParam::updateFromFile(config.options().get<std::string>("configFile"));
+  std::string confDig = config.options().get<std::string>("hbfutils-config");
+  if (!confDig.empty() && confDig != "none") {
+    o2::conf::ConfigurableParam::updateFromFile(confDig, "HBFUtils");
+  }
+
   o2::conf::ConfigurableParam::writeINI("o2tpcintegrateidc_configuration.ini");
+
+  const auto& hbfu = o2::raw::HBFUtils::Instance();
+  const int orbitsPerTF = hbfu.getNOrbitsPerTF();
+
+  // TODO remove this
+  const auto orbitsperTF = (uint32_t)config.options().get<int>("orbitsperTF");
+  o2::tpc::IDCSim::setNOrbitsPerTF(orbitsperTF);
 
   const auto nOrbits = (uint32_t)config.options().get<int>("nOrbits");
   const auto outputFormatStr = config.options().get<std::string>("outputFormat");
