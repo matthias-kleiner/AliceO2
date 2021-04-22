@@ -7,7 +7,7 @@
 # In applying this license CERN does not waive the privileges and immunities
 # granted to it by virtue of its status as an Intergovernmental Organization or
 # submit itself to any jurisdiction.
-                     
+
 o2_add_library(TPCWorkflow
                SOURCES src/RecoWorkflow.cxx
                        src/ClustererSpec.cxx
@@ -66,9 +66,14 @@ o2_add_executable(integrate-IDC
                   SOURCES src/tpc-integrate-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
-o2_add_executable(averagemerge-IDC
+o2_add_executable(averagegroup-IDC
                   COMPONENT_NAME tpc
-                  SOURCES src/tpc-averagemerge-idc.cxx
+                  SOURCES src/tpc-averagegroup-idc.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
+
+o2_add_executable(aggregate-IDC
+                  COMPONENT_NAME tpc
+                  SOURCES src/tpc-aggregate-grouped-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
 o2_add_executable(track-reader
