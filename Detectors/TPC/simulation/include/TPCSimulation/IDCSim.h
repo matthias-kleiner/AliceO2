@@ -18,13 +18,10 @@
 
 #include <vector>
 #include <array>
-#include <fmt/format.h>
-#include "Framework/Logger.h"
 #include "DataFormatsTPC/Digit.h"
 #include "CommonConstants/LHCConstants.h"
 #include "DataFormatsTPC/Constants.h"
 #include "CommonUtils/TreeStreamRedirector.h" // for debugging
-#include "TFile.h"
 #include <gsl/span>
 
 namespace o2
@@ -41,6 +38,7 @@ class IDCSim
 {
  public:
   /// constructor
+  /// \param sector sector for which the data is processed
   /// \param nOrbits length of integration intervals
   IDCSim(const uint32_t sector = 0, const uint32_t nOrbits = 12) : mSector{sector}, mNOrbits{nOrbits} {}
 
@@ -77,9 +75,11 @@ class IDCSim
   static uint32_t getNOrbitsPerTF() { return mOrbitsPerTF; }
 
   /// for debugging: dumping IDCs to ROOT file
+  /// \param timeframe timeframe of the IDCs to avoid overwriting the output file for same TF
   void dumpIDCs(const int timeframe);
 
   /// for debugging: creating debug tree for integrated IDCs
+  /// \param timeframe timeframe of the IDCs to avoid overwriting the output file for same TF
   void createDebugTree(const int timeframe);
 
   /// return return the IDCs for all sector
@@ -91,7 +91,7 @@ class IDCSim
 
  private:
   inline static uint32_t mOrbitsPerTF{256};                                                                                               ///< length of one TF in units of orbits
-  static constexpr int mRegions{10};                                                                                                      ///< number of regions per sector
+  static constexpr int mRegions{10};                                                                                                      ///< total number of regions in one sector
   static constexpr int mPadRows{152};                                                                                                     ///< total number of pad rows
   static constexpr int mPadsPerRegion[mRegions]{1200, 1200, 1440, 1440, 1440, 1440, 1600, 1600, 1600, 1600};                              ///< number of pads per CRU
   static constexpr int mGlobalPadOffs[mRegions]{0, 1200, 2400, 3840, 5280, 6720, 8160, 9760, 11360, 12960};                               ///< offset of number of pads for region used for debugging only
@@ -109,7 +109,7 @@ class IDCSim
   const uint32_t mSector{};                                                                                                               ///< sector for which the IDCs are integrated
   const uint32_t mNOrbits{12};                                                                                                            ///< integration intervals of IDCs in units of orbits
   const uint32_t mTimeStampsPerIntegrationInterval{(o2::constants::lhc::LHCMaxBunches * mNOrbits) / o2::tpc::constants::LHCBCPERTIMEBIN}; ///< number of time stamps for each integration interval (5346)
-  const bool mAddInterval{mOrbitsPerTF % mNOrbits > 0 ? true : false};                                                                    /// if the division has a reminder 256/12=21.333 then add an additional integration interval
+  const bool mAddInterval{mOrbitsPerTF % mNOrbits > 0 ? true : false};                                                                    ///< if the division has a reminder 256/12=21.333 then add an additional integration interval
   const uint32_t mIntegrationIntervalsPerTF{mOrbitsPerTF / mNOrbits + mAddInterval};                                                      ///< number of integration intervals per TF. Add 1: 256/12=21.333
   const uint32_t mTimeStampsReminder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                           ///< number time stamps which remain in one TF and will be buffered to the next TF
   int mTimeBinsOff{};                                                                                                                     ///< offset from last time bin
@@ -124,53 +124,33 @@ class IDCSim
                                                         std::vector<float>(mPadsPerRegion[6] * mIntegrationIntervalsPerTF),               // region 6
                                                         std::vector<float>(mPadsPerRegion[7] * mIntegrationIntervalsPerTF),               // region 7
                                                         std::vector<float>(mPadsPerRegion[8] * mIntegrationIntervalsPerTF),               // region 8
-                                                        std::vector<float>(mPadsPerRegion[9] * mIntegrationIntervalsPerTF)},
-                                                       {std::vector<float>(mPadsPerRegion[0] * mIntegrationIntervalsPerTF),   // region 0
-                                                        std::vector<float>(mPadsPerRegion[1] * mIntegrationIntervalsPerTF),   // region 1
-                                                        std::vector<float>(mPadsPerRegion[2] * mIntegrationIntervalsPerTF),   // region 2
-                                                        std::vector<float>(mPadsPerRegion[3] * mIntegrationIntervalsPerTF),   // region 3
-                                                        std::vector<float>(mPadsPerRegion[4] * mIntegrationIntervalsPerTF),   // region 4
-                                                        std::vector<float>(mPadsPerRegion[5] * mIntegrationIntervalsPerTF),   // region 5
-                                                        std::vector<float>(mPadsPerRegion[6] * mIntegrationIntervalsPerTF),   // region 6
-                                                        std::vector<float>(mPadsPerRegion[7] * mIntegrationIntervalsPerTF),   // region 7
-                                                        std::vector<float>(mPadsPerRegion[8] * mIntegrationIntervalsPerTF),   // region 8
-                                                        std::vector<float>(mPadsPerRegion[9] * mIntegrationIntervalsPerTF)}}; // region 9
+                                                        std::vector<float>(mPadsPerRegion[9] * mIntegrationIntervalsPerTF)},              // region 9
+                                                       {std::vector<float>(mPadsPerRegion[0] * mIntegrationIntervalsPerTF),               // region 0
+                                                        std::vector<float>(mPadsPerRegion[1] * mIntegrationIntervalsPerTF),               // region 1
+                                                        std::vector<float>(mPadsPerRegion[2] * mIntegrationIntervalsPerTF),               // region 2
+                                                        std::vector<float>(mPadsPerRegion[3] * mIntegrationIntervalsPerTF),               // region 3
+                                                        std::vector<float>(mPadsPerRegion[4] * mIntegrationIntervalsPerTF),               // region 4
+                                                        std::vector<float>(mPadsPerRegion[5] * mIntegrationIntervalsPerTF),               // region 5
+                                                        std::vector<float>(mPadsPerRegion[6] * mIntegrationIntervalsPerTF),               // region 6
+                                                        std::vector<float>(mPadsPerRegion[7] * mIntegrationIntervalsPerTF),               // region 7
+                                                        std::vector<float>(mPadsPerRegion[8] * mIntegrationIntervalsPerTF),               // region 8
+                                                        std::vector<float>(mPadsPerRegion[9] * mIntegrationIntervalsPerTF)}};             // region 9
 
-  unsigned int getLastTimeBinForSwitch() const
-  {
-    const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
-    return totaloffs >= mTimeStampsPerIntegrationInterval ? mIntegrationIntervalsPerTF * mTimeStampsPerIntegrationInterval : (mIntegrationIntervalsPerTF - mAddInterval) * mTimeStampsPerIntegrationInterval - mTimeBinsOff;
-  }
-
-  int getNewOffset() const
-  {
-    const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
-    return totaloffs >= mTimeStampsPerIntegrationInterval ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
-  }
+  unsigned int getLastTimeBinForSwitch() const;
+  int getNewOffset() const;
 
   /// set all IDC values to 0
-  void resetIDCs()
-  {
-    for (auto& idcs : mIDCsTmp[!mBufferIndex]) {
-      std::fill(idcs.begin(), idcs.end(), 0);
-    }
-  }
+  void resetIDCs();
 
   /// return orbit for given timeStamp
-  unsigned int getOrbit(const unsigned int timeStamp) const
-  {
-    return static_cast<unsigned int>((timeStamp + mTimeBinsOff) / mTimeStampsPerIntegrationInterval);
-  }
+  unsigned int getOrbit(const unsigned int timeStamp) const { return static_cast<unsigned int>((timeStamp + mTimeBinsOff) / mTimeStampsPerIntegrationInterval); }
 
   /// \return returns index in the vector of the mIDCs member
   /// \param timeStamp timeStamp for which the index is calculated
   /// \param region region in the sector
   /// \param row global pad row
   /// \param pad pad in row
-  unsigned int getIndex(const int timeStamp, const int region, const int row, const int pad) const
-  {
-    return getOrbit(timeStamp) * mPadsPerRegion[region] + getPadIndex(row, pad);
-  }
+  unsigned int getIndex(const int timeStamp, const int region, const int row, const int pad) const { return getOrbit(timeStamp) * mPadsPerRegion[region] + getPadIndex(row, pad); }
 };
 
 } // namespace tpc

@@ -9,24 +9,26 @@
 // or submit itself to any jurisdiction.
 
 #include <fmt/format.h>
+#include <vector>
+#include <string>
+
 #include "Algorithm/RangeTokenizer.h"
 #include "Framework/WorkflowSpec.h"
-#include "Framework/Logger.h"
 #include "Framework/ConfigParamSpec.h"
 #include "Framework/CompletionPolicy.h"
 #include "Framework/CompletionPolicyHelpers.h"
 #include "Headers/DataHeader.h"
 #include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
-#include <vector>
-#include <string>
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
 #include "TPCWorkflow/PublisherSpec.h"
 #include "DetectorsCommonDataFormats/NameConf.h"
 #include "DetectorsRaw/HBFUtils.h"
 #include "TPCSimulation/IDCSim.h"
+#include "TPCBase/Sector.h"
 
 using namespace o2::framework;
+
 
 // customize the completion policy
 void customize(std::vector<o2::framework::CompletionPolicy>& policies)

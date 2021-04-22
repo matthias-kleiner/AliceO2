@@ -25,8 +25,6 @@
 #include "Framework/DataProcessorSpec.h"
 #include "CommonUtils/MemFileHelper.h"
 #include "Headers/DataHeader.h"
-#include "TPCBase/CDBInterface.h"
-#include "TPCBase/CRU.h"
 #include "TPCSimulation/IDCSim.h"
 #include "DataFormatsTPC/TPCSectorHeader.h"
 #include "DataFormatsTPC/Digit.h"

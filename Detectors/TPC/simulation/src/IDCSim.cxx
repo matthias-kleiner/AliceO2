@@ -7,10 +7,11 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "CommonUtils/TreeStreamRedirector.h" // for debugging
 #include "TPCSimulation/IDCSim.h"
+#include "CommonUtils/TreeStreamRedirector.h" // for debugging
 #include "TFile.h"
 #include "TPCBase/Mapper.h"
+#include <fmt/format.h>
 
 void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Digit>& digits)
 {
@@ -35,6 +36,26 @@ void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Dig
   mTimeBinsOff = getNewOffset(); // set offset
 }
 
+unsigned int o2::tpc::IDCSim::getLastTimeBinForSwitch() const
+{
+  const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
+  return totaloffs >= mTimeStampsPerIntegrationInterval ? mIntegrationIntervalsPerTF * mTimeStampsPerIntegrationInterval : (mIntegrationIntervalsPerTF - mAddInterval) * mTimeStampsPerIntegrationInterval - mTimeBinsOff;
+}
+
+int o2::tpc::IDCSim::getNewOffset() const
+{
+  const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
+  return totaloffs >= mTimeStampsPerIntegrationInterval ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
+}
+
+/// set all IDC values to 0
+void o2::tpc::IDCSim::resetIDCs()
+{
+  for (auto& idcs : mIDCsTmp[!mBufferIndex]) {
+    std::fill(idcs.begin(), idcs.end(), 0);
+  }
+}
+
 void o2::tpc::IDCSim::dumpIDCs(const int timeframe)
 {
   const std::string name = fmt::format("idcs_obj_{:02}_{:02}.root", mSector, timeframe);
@@ -51,7 +72,6 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
 {
   const static Mapper& mapper = Mapper::instance();
 
-  LOGP(info, "mSector debug {}", mSector);
   const std::string nameTree = fmt::format("idcs_tree_{:02}_{:02}.root", mSector, timeframe);
   o2::utils::TreeStreamRedirector pcstream(nameTree.data(), "RECREATE");
   pcstream.GetFile()->cd();
@@ -78,17 +98,16 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
       vXPos[iPad] = mapper.getPadCentre(padPosLocal).X();
       vYPos[iPad] = mapper.getPadCentre(padPosLocal).Y();
 
-      const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), mSector);
+      const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), cruTmp.sector());
       vGlobalXPos[iPad] = globalPos.X();
       vGlobalYPos[iPad] = globalPos.Y();
     }
-    int cruiTmp = cru;
 
     for (int iTimeBin = 0; iTimeBin < mIntegrationIntervalsPerTF; ++iTimeBin) {
       for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
         idcsPerTimeBin[iPad] = (idcs)[iPad + iTimeBin * mPadsPerRegion[region]];
       }
-
+      int cruiTmp = cru;
       pcstream << "tree"
                << "cru=" << cruiTmp
                << "sector=" << sectorTmp
