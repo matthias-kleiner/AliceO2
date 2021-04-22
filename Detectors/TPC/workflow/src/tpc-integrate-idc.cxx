@@ -29,7 +29,6 @@
 
 using namespace o2::framework;
 
-
 // customize the completion policy
 void customize(std::vector<o2::framework::CompletionPolicy>& policies)
 {
