@@ -91,8 +91,8 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 
  private:
-  const int mLane{};                           ///< lane number of processor
-  const std::vector<unsigned int> mSectors{};           ///< sectors to process in this instance
+  const int mLane{};                                ///< lane number of processor
+  const std::vector<unsigned int> mSectors{};       ///< sectors to process in this instance
   const IDCFormat mIDCFormat{IDCFormat::Sim};       ///< type of the output format. Sim=simulation, Real=realistic format
   const bool mDebug{false};                         ///< dump IDCs to tree for debugging
   std::unordered_map<unsigned int, IDCSim> mIDCs{}; ///< integrated IDCs for one TF for all specified sectors
