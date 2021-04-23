@@ -63,7 +63,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
       mIDCs[cru].processIDCs();
 
       if (mDebug) {
-        mIDCs[cru].dumpToFile(fmt::format("IDCGroup_{}.root", mLane).data(), fmt::format("CRU_{}_gpads{}_grows{}_rowth{}_padth{}", cru, mIDCs[cru].getGroupRows(), mIDCs[cru].getGroupPads(), mIDCs[cru].getGroupLastRowsThreshold(), mIDCs[cru].getGroupLastPadsThreshold()).data());
+        mIDCs[cru].dumpToFile(fmt::format("IDCGroup_{}.root", mLane).data(), fmt::format("CRU_{}_gpads{}_grows{}_rowth{}_padth{}", cru, mIDCs[cru].getIDCGroup().getGroupRows(), mIDCs[cru].getIDCGroup().getGroupPads(), mIDCs[cru].getIDCGroup().getGroupLastRowsThreshold(), mIDCs[cru].getIDCGroup().getGroupLastPadsThreshold()).data());
       }
 
       // send the output for one CRU for one TF
