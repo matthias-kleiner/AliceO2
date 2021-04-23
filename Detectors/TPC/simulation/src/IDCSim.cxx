@@ -23,8 +23,8 @@ void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Dig
   if (mAddInterval) {
     // decrease the size of the vector if the last integration intervall is empty
     if (switchAfterTB == (mIntegrationIntervalsPerTF - 1) * mTimeStampsPerIntegrationInterval) {
-      for (unsigned int ireg = 0; ireg < mRegions; ++ireg) {
-        mIDCs[mBufferIndex][ireg].resize(mMaxIDCs[ireg] - mPadsPerRegion[ireg]);
+      for (unsigned int ireg = 0; ireg < o2::tpc::IDCHelper::NREGIONS; ++ireg) {
+        mIDCs[mBufferIndex][ireg].resize(mMaxIDCs[ireg] - o2::tpc::IDCHelper::PADSPERREGION[ireg]);
       }
     } else {
       for (auto& idcs : mIDCs[mBufferIndex]) {
@@ -74,7 +74,7 @@ void o2::tpc::IDCSim::dumpIDCs(const int timeframe)
 {
   const std::string name = fmt::format("idcs_obj_{:02}_{:02}.root", mSector, timeframe);
   TFile fOut(name.data(), "RECREATE");
-  int cru = mSector * mRegions;
+  int cru = mSector * o2::tpc::IDCHelper::NREGIONS;
   for (const auto& idcs : mIDCs[!mBufferIndex]) {
     fOut.WriteObject(&idcs, Form("cru_%i", cru));
     ++cru;
@@ -90,12 +90,12 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
   o2::utils::TreeStreamRedirector pcstream(nameTree.data(), "RECREATE");
   pcstream.GetFile()->cd();
 
-  int cru = mSector * mRegions;
+  int cru = mSector * o2::tpc::IDCHelper::NREGIONS;
   for (const auto& idcs : mIDCs[!mBufferIndex]) {
     int sectorTmp = mSector;
     const o2::tpc::CRU cruTmp(cru);
     unsigned int region = cruTmp.region();
-    const int padsPerCRU = mPadsPerRegion[region];
+    const int padsPerCRU = o2::tpc::IDCHelper::PADSPERREGION[region];
     std::vector<int> vRow(padsPerCRU);
     std::vector<int> vPad(padsPerCRU);
     std::vector<float> vXPos(padsPerCRU);
@@ -105,7 +105,7 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
     std::vector<float> idcsPerTimeBin(padsPerCRU); // idcs for one time bin
 
     for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
-      const GlobalPadNumber globalNum = mGlobalPadOffs[region] + iPad;
+      const GlobalPadNumber globalNum = o2::tpc::IDCHelper::GLOBALPADOFFSET[region] + iPad;
       const auto& padPosLocal = mapper.padPos(globalNum);
       vRow[iPad] = padPosLocal.getRow();
       vPad[iPad] = padPosLocal.getPad();
@@ -119,7 +119,7 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
 
     for (int iTimeBin = 0; iTimeBin < mIntegrationIntervalsPerTF; ++iTimeBin) {
       for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
-        idcsPerTimeBin[iPad] = (idcs)[iPad + iTimeBin * mPadsPerRegion[region]];
+        idcsPerTimeBin[iPad] = (idcs)[iPad + iTimeBin * o2::tpc::IDCHelper::PADSPERREGION[region]];
       }
       int cruiTmp = cru;
       pcstream << "tree"

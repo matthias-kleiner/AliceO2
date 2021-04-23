@@ -24,29 +24,29 @@ void o2::tpc::IDCAverageGroup::processIDCs()
     int rowGrouped = 0;
     for (int iRow = 0; iRow <= lastRow; iRow += mGroupRows) {
       for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
-        const int nPads = 0.5 * mPadsPerRow[mRegion][iRow];
+        const int nPads = 0.5 * IDCHelper::PADSPERROW[mRegion][iRow];
         const int lastPad = getLastPad(iRow);
         const int endPads = lastPad + nPads;
 
         const int halfPadsInRow = 0.5 * mIDCsGrouped.getPadsPerRow(rowGrouped);
         int padGrouped = !iYLocalSide ? halfPadsInRow - 1 : halfPadsInRow;
         for (int ipad = nPads; ipad <= endPads; ipad += mGroupPads) {
-          int endRows = iRow == lastRow ? (mRowsPerRegion[mRegion] - iRow) : mGroupRows;
+          int endRows = iRow == lastRow ? (IDCHelper::ROWSPERREGION[mRegion] - iRow) : mGroupRows;
 
           float idcAverage = 0;
           float idcCounter = 0;
           for (int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
             const int iRowTmp = iRow + iRowMerge;
-            const int offs = mAddPadsPerRow[mRegion][iRowTmp] - mAddPadsPerRow[mRegion][iRow];
+            const int offs = IDCHelper::ADDITIONALPADSPERROW[mRegion][iRowTmp] - IDCHelper::ADDITIONALPADSPERROW[mRegion][iRow];
             const int padStart = ipad == 0 ? 0 : offs;
-            const int endPadsTmp = ipad == endPads ? (mPadsPerRow[mRegion][iRowTmp] - ipad) : mGroupPads + offs;
+            const int endPadsTmp = ipad == endPads ? (IDCHelper::PADSPERROW[mRegion][iRowTmp] - ipad) : mGroupPads + offs;
             for (int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
               const int iPadTmp = ipad + ipadMerge;
-              const int nPadsInRow = mPadsPerRow[mRegion][iRowTmp];
+              const int nPadsInRow = IDCHelper::PADSPERROW[mRegion][iRowTmp];
               const int iPadSide = iYLocalSide == 0 ? nPadsInRow - iPadTmp - 1 : iPadTmp;
-              const int indexIDC = integrationInterval * mPadsPerRegion[mRegion] + mOffs[mRegion][iRowTmp] + iPadSide;
+              const int indexIDC = integrationInterval * IDCHelper::PADSPERREGION[mRegion] + IDCHelper::OFFSETCRULOCAL[mRegion][iRowTmp] + iPadSide;
 
-              idcAverage += mIDCs[indexIDC] * mPadArea[mRegion];
+              idcAverage += mIDCs[indexIDC] * IDCHelper::PADAREA[mRegion];
               ++idcCounter;
             }
           }
@@ -70,7 +70,7 @@ unsigned int o2::tpc::IDCAverageGroup::getGroupedRow(const unsigned int lrow) co
 
 int o2::tpc::IDCAverageGroup::getGroupedPad(const unsigned int pad, const unsigned int lrow) const
 {
-  const int relPadHalf = static_cast<int>(std::floor((pad - 0.5f * mPadsPerRow[mRegion][lrow]) / mGroupPads));
+  const int relPadHalf = static_cast<int>(std::floor((pad - 0.5f * IDCHelper::PADSPERROW[mRegion][lrow]) / mGroupPads));
   const int nGroupedPads = mIDCsGrouped.getPadsPerRow(getGroupedRow(lrow));
   const int nGroupedPadsHalf = static_cast<int>(0.5f * nGroupedPads);
   if (std::abs(relPadHalf) >= nGroupedPadsHalf) {
@@ -104,8 +104,8 @@ void o2::tpc::IDCAverageGroup::draw(const int integrationInterval) const
   lat.SetTextSize(2);
 
   poly->Draw("colz");
-  for (unsigned int irow = 0; irow < mRowsPerRegion[mRegion]; ++irow) {
-    for (unsigned int ipad = 0; ipad < mPadsPerRow[mRegion][irow]; ++ipad) {
+  for (unsigned int irow = 0; irow < IDCHelper::ROWSPERREGION[mRegion]; ++irow) {
+    for (unsigned int ipad = 0; ipad < IDCHelper::PADSPERROW[mRegion][irow]; ++ipad) {
       const GlobalPadNumber padNum = getGlobalPadNumber(irow, ipad);
       const auto coordinate = coords[padNum];
       const float yPos = -0.5 * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
@@ -119,7 +119,7 @@ void o2::tpc::IDCAverageGroup::draw(const int integrationInterval) const
 
 int o2::tpc::IDCAverageGroup::getLastRow() const
 {
-  const int nTotRows = mRowsPerRegion[mRegion];
+  const int nTotRows = IDCHelper::ROWSPERREGION[mRegion];
   const int rowsReminder = nTotRows % mGroupRows;
   int lastRow = nTotRows - rowsReminder;
   if (rowsReminder <= mGroupLastRowsThreshold) {
@@ -130,7 +130,7 @@ int o2::tpc::IDCAverageGroup::getLastRow() const
 
 int o2::tpc::IDCAverageGroup::getLastPad(const int row) const
 {
-  const int nPads = 0.5 * mPadsPerRow[mRegion][row];
+  const int nPads = 0.5 * IDCHelper::PADSPERROW[mRegion][row];
   const int padsReminder = nPads % mGroupPads;
   int lastPad = padsReminder == 0 ? nPads - mGroupPads : nPads - padsReminder;
   if (padsReminder && padsReminder <= mGroupLastPadsThreshold) {
