@@ -47,7 +47,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     Real = 1 // output format of real CRUs
   };
 
-  TPCIntegrateIDCDevice(const uint32_t lane, const std::vector<uint32_t>& sectors, const uint32_t nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
+  TPCIntegrateIDCDevice(const int lane, const std::vector<unsigned int>& sectors, const int nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
   {
     for (const auto& sector : mSectors) {
       mIDCs.emplace(sector, IDCSim(sector, nOrbitsPerIDCIntervall));
@@ -90,8 +90,8 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 
  private:
-  const uint32_t mLane{};                           ///< lane number of processor
-  const std::vector<uint32_t> mSectors{};           ///< sectors to process in this instance
+  const int mLane{};                           ///< lane number of processor
+  const std::vector<unsigned int> mSectors{};           ///< sectors to process in this instance
   const IDCFormat mIDCFormat{IDCFormat::Sim};       ///< type of the output format. Sim=simulation, Real=realistic format
   const bool mDebug{false};                         ///< dump IDCs to tree for debugging
   std::unordered_map<unsigned int, IDCSim> mIDCs{}; ///< integrated IDCs for one TF for all specified sectors
@@ -99,7 +99,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   // send output for one sector
   void sendOutput(DataAllocator& output, const int sector)
   {
-    unsigned int cru = sector * o2::tpc::IDCSim::getNRegions();
+    uint32_t cru = sector * o2::tpc::IDCSim::getNRegions();
     for (const auto& idcs : mIDCs[sector].get()) {
       if (mIDCFormat == IDCFormat::Sim) {
         const header::DataHeader::SubSpecificationType subSpec{cru << 7};
@@ -119,8 +119,10 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCIntegrateIDCSpec(const uint32_t ilane = 0, const std::vector<uint32_t>& sectors = {}, const uint32_t nOrbits = 12, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
+DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane = 0, const std::vector<unsigned int>& sectors = {}, const int nOrbits = 12, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
 {
+  // TPCIntegrateIDCDevice(const int lane, const std::vector<int>& sectors, const int nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
+
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(sectors.size());
 

@@ -59,8 +59,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   o2::conf::ConfigurableParam::writeINI("o2tpcaggregateidc_configuration.ini");
 
   const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
-  const auto nCRUs = (uint32_t)tpcCRUs.size();
-  const auto nLanes = std::min((uint32_t)config.options().get<int>("lanes"), nCRUs);
+  const auto nCRUs = tpcCRUs.size();
+  const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
   const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
   const auto debug = config.options().get<bool>("debug");
 
@@ -75,8 +75,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
       break;
     }
     const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
-    const std::vector<uint32_t> range(first, last);
-    workflow.emplace_back(getTPCAggregateGroupedIDCSpec(ilane, range, debug));
+    const std::vector<uint32_t> rangeCRUs(first, last);
+    workflow.emplace_back(getTPCAggregateGroupedIDCSpec(ilane, rangeCRUs, debug));
   }
 
   return workflow;

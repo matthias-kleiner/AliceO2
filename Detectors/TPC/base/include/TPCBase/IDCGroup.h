@@ -9,7 +9,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file IDCGroup.h
-/// \brief class for averaging/merging and storing to IDCs
+/// \brief class for storing grouped IDCs
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
 #ifndef ALICEO2_TPC_IDCGROUP_H_
@@ -35,7 +35,7 @@ class IDCGroup
  public:
   IDCGroup() = default;
 
-  void setRows(const uint32_t nRows)
+  void setRows(const unsigned int nRows)
   {
     mRows = nRows;
     mPadsPerRow.resize(mRows);
@@ -44,27 +44,29 @@ class IDCGroup
 
   /// \param row row of the grouped IDCs
   /// \param nPads number of pads of the grouped IDCs for given row
-  void setPadsPerRow(const uint32_t row, const uint32_t nPads) { mPadsPerRow[row] = nPads; }
+  void setPadsPerRow(const unsigned int row, const unsigned int nPads) { mPadsPerRow[row] = nPads; }
 
   /// \return returns the stored value
   /// \param row row of the grouped IDCs
   /// \param pad pad number of the grouped IDCs
-  const float& operator()(uint32_t row, uint32_t pad) const { return mIDCsGrouped[getIndex(row, pad)]; }
+  /// \param integrationInterval integration interval
+  const float& operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
 
   /// \return returns the stored value
   /// \param row row of the grouped IDCs
   /// \param pad pad number of the grouped IDCs
-  float& operator()(uint32_t row, uint32_t pad) { return mIDCsGrouped[getIndex(row, pad)]; }
+  /// \param integrationInterval integration interval
+  float& operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
 
   /// \return returns index to the data
   /// \param row row of the grouped IDCs
   /// \param pad pad of the grouped IDCs
-  uint32_t getIndex(const uint32_t row, const uint32_t pad) const { return mOffsRow[row] + pad; }
+  unsigned int getIndex(const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerCRU * integrationInterval + mOffsRow[row] + pad; }
 
-  uint32_t getNRows() const { return mRows; }
+  unsigned int getNRows() const { return mRows; }
 
   /// \param row row of the grouped IDCs
-  uint32_t getPadsPerRow(const uint32_t row) { return mPadsPerRow[row]; }
+  unsigned int getPadsPerRow(const unsigned int row) const { return mPadsPerRow[row]; }
 
   /// initialize the member containing the grouped IDCs
   void initStorage();
@@ -72,15 +74,23 @@ class IDCGroup
   const auto& getData() const { return mIDCsGrouped; }
   auto& getData() { return mIDCsGrouped; }
 
+  /// extend the size of the grouped and averaged IDC values corresponding to the number of integration intervals.
+  /// without using this function the object can hold only one integration interval
+  /// \param nIntegrationIntervals number of ontegration intervals for which teh IDCs are stored
+  void resize(const unsigned int nIntegrationIntervals) { mIDCsGrouped.resize(mNIDCsPerCRU * nIntegrationIntervals); }
+
   /// dump the IDCs to a tree
   /// \param outname name of the output file
   void dumpToTree(const char* outname = "IDCGroup.root") const;
 
+  int getNIntegrationIntervals() const { return mIDCsGrouped.size() / mNIDCsPerCRU; }
+
  private:
-  uint32_t mRows{};                    ///< number of rows
-  std::vector<uint32_t> mPadsPerRow{}; ///< number of pads per row
-  std::vector<uint32_t> mOffsRow{};    ///< offset to calculate the index in the data from row and pad
-  std::vector<float> mIDCsGrouped{};   ///< grouped and averaged IDC values
+  unsigned int mNIDCsPerCRU{1};            ///< total number of IDCs per CRU per intgeration interval
+  unsigned int mRows{};                    ///< number of rows
+  std::vector<unsigned int> mPadsPerRow{}; ///< number of pads per row
+  std::vector<unsigned int> mOffsRow{};    ///< offset to calculate the index in the data from row and pad
+  std::vector<float> mIDCsGrouped{};       ///< grouped and averaged IDC values
 
   ClassDefNV(IDCGroup, 1)
 };

@@ -43,26 +43,28 @@ class for grouping the IDCs and averaging them in those groups
 class TPCAverageGroupIDCDevice : public o2::framework::Task
 {
  public:
-  TPCAverageGroupIDCDevice(const uint32_t lane, const std::vector<uint32_t>& crus, const TPCIntegrateIDCDevice::IDCFormat inputFormat, const int groupPads, const int groupRows, const int groupLastRowsThreshold, const int groupLastPadsThreshold, const bool debug = false)
-    : mLane{lane}, mCRUs{crus}, mInputFormat{inputFormat}, mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mDebug{debug} {}
-
-  void init(o2::framework::InitContext& ic) final
+  TPCAverageGroupIDCDevice(const int lane, const std::vector<uint32_t>& crus, const TPCIntegrateIDCDevice::IDCFormat inputFormat, const int groupPads, const int groupRows, const int groupLastRowsThreshold, const int groupLastPadsThreshold, const bool debug = false)
+    : mLane{lane}, mCRUs{crus}, mInputFormat{inputFormat}, mDebug{debug}
   {
     for (const auto& cru : mCRUs) {
-      mIDCs.emplace(cru, IDCAverageGroup(mGroupPads, mGroupRows, mGroupLastRowsThreshold, mGroupLastPadsThreshold, cru));
+      mIDCs.emplace(cru, IDCAverageGroup(groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, static_cast<int>(cru)));
     }
   }
 
   void run(o2::framework::ProcessingContext& pc) final
   {
-    const int nCRUs = mCRUs.size();
-    for (int i = 0; i < nCRUs; ++i) {
+    LOGP(info, "averaging and grouping IDCs for one TF for CRUs {} to {}", mCRUs.front(), mCRUs.back());
+
+    for (int i = 0; i < mCRUs.size(); ++i) {
       const DataRef ref = pc.inputs().getByPos(i);
       auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
       const int cru = tpcCRUHeader->subSpecification >> 7;
-      LOGP(info, "averaging and grouping digits for one TF for CRU: {} ", cru);
       mIDCs[cru].setIDCs(pc.inputs().get<std::vector<float>>(ref));
-      mIDCs[cru].processIDCs(mDebug, mLane);
+      mIDCs[cru].processIDCs();
+
+      if (mDebug) {
+        mIDCs[cru].dumpToFile(fmt::format("IDCGroup_{}.root", mLane).data(), fmt::format("CRU_{}_gpads{}_grows{}_rowth{}_padth{}", cru, mIDCs[cru].getGroupRows(), mIDCs[cru].getGroupPads(), mIDCs[cru].getGroupLastRowsThreshold(), mIDCs[cru].getGroupLastPadsThreshold()).data());
+      }
 
       // send the output for one CRU for one TF
       sendOutput(pc.outputs(), cru);
@@ -76,15 +78,11 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   }
 
  private:
-  const uint32_t mLane{0};                                   ///< lane number of processor
+  const int mLane{0};                                        ///< lane number of processor
   const std::vector<uint32_t> mCRUs{};                       ///< CRUs to process in this instance
   const TPCIntegrateIDCDevice::IDCFormat mInputFormat{};     ///< type of the input format. Sim=simulation, Real=realistic format
+  const bool mDebug{};                                       ///< dump IDCs to tree for debugging
   std::unordered_map<unsigned int, IDCAverageGroup> mIDCs{}; ///< object for averaging and grouping the IDCs
-  const int mGroupPads{4};                                   ///< group 4 pads
-  const int mGroupRows{4};                                   ///< group 4 pads -> 4x4
-  const int mGroupLastRowsThreshold{2};                      ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
-  const int mGroupLastPadsThreshold{2};                      ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
-  const bool mDebug{false};                                  ///< dump IDCs to tree for debugging
 
   void sendOutput(DataAllocator& output, const uint32_t cru)
   {
@@ -93,7 +91,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCAverageGroupIDCSpec(const uint32_t ilane = 0, const std::vector<uint32_t>& crus = {}, const TPCIntegrateIDCDevice::IDCFormat inputFormat = {}, const int groupPads = {}, const int groupRows = {}, const int groupLastRowsThreshold = {}, const int groupLastPadsThreshold = {}, const bool debug = false)
+DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vector<uint32_t>& crus = {}, const TPCIntegrateIDCDevice::IDCFormat inputFormat = {}, const int groupPads = {}, const int groupRows = {}, const int groupLastRowsThreshold = {}, const int groupLastPadsThreshold = {}, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   outputSpecs.reserve(crus.size());

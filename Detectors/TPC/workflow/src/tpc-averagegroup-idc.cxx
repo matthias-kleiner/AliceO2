@@ -68,14 +68,14 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const TPCIntegrateIDCDevice::IDCFormat inputFormat = inputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::IDCFormat::Real : TPCIntegrateIDCDevice::IDCFormat::Sim;
 
   const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
-  const auto nCRUs = (uint32_t)tpcCRUs.size();
-  const auto nLanes = std::min((uint32_t)config.options().get<int>("lanes"), nCRUs);
+  const auto nCRUs = tpcCRUs.size();
+  const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
   const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
 
-  const auto groupPads = (uint32_t)config.options().get<int>("groupPads");
-  const auto groupRows = (uint32_t)config.options().get<int>("groupRows");
-  const auto groupLastRowsThreshold = (uint32_t)config.options().get<int>("groupLastRowsThreshold");
-  const auto groupLastPadsThreshold = (uint32_t)config.options().get<int>("groupLastPadsThreshold");
+  const auto groupPads = config.options().get<int>("groupPads");
+  const auto groupRows = config.options().get<int>("groupRows");
+  const auto groupLastRowsThreshold = config.options().get<int>("groupLastRowsThreshold");
+  const auto groupLastPadsThreshold = config.options().get<int>("groupLastPadsThreshold");
   const auto debug = config.options().get<bool>("debug");
 
   WorkflowSpec workflow;
@@ -89,8 +89,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
       break;
     }
     const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
-    const std::vector<uint32_t> range(first, last);
-    workflow.emplace_back(getTPCAverageGroupIDCSpec(ilane, range, inputFormat, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug));
+    const std::vector<uint32_t> rangeCRUs(first, last);
+    workflow.emplace_back(getTPCAverageGroupIDCSpec(ilane, rangeCRUs, inputFormat, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug));
   }
 
   return workflow;
