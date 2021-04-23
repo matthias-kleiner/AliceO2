@@ -28,6 +28,7 @@
 #include "TPCSimulation/IDCSim.h"
 #include "DataFormatsTPC/TPCSectorHeader.h"
 #include "DataFormatsTPC/Digit.h"
+#include "TPCBase/IDCHelper.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -99,7 +100,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   // send output for one sector
   void sendOutput(DataAllocator& output, const int sector)
   {
-    uint32_t cru = sector * o2::tpc::IDCSim::getNRegions();
+    uint32_t cru = sector * o2::tpc::IDCHelper::NREGIONS;
     for (const auto& idcs : mIDCs[sector].get()) {
       if (mIDCFormat == IDCFormat::Sim) {
         const header::DataHeader::SubSpecificationType subSpec{cru << 7};
@@ -127,16 +128,15 @@ DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane = 0, const std::vector<
   inputSpecs.reserve(sectors.size());
 
   std::vector<OutputSpec> outputSpecs;
-  const int nRegions = IDCSim::getNRegions();
-  outputSpecs.reserve(sectors.size() * nRegions);
+  outputSpecs.reserve(sectors.size() * IDCHelper::NREGIONS);
 
   // define input and output specs
   for (const auto& sector : sectors) {
     inputSpecs.emplace_back(InputSpec{"digits", gDataOriginTPC, "DIGITS", sector, Lifetime::Timeframe});
 
     // output spec
-    unsigned int cru = sector * nRegions;
-    for (int iRegion = 0; iRegion < nRegions; ++iRegion) {
+    unsigned int cru = sector * IDCHelper::NREGIONS;
+    for (int iRegion = 0; iRegion < IDCHelper::NREGIONS; ++iRegion) {
       const header::DataHeader::SubSpecificationType subSpec{cru << 7};
       outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(outputFormat), subSpec});
       ++cru;

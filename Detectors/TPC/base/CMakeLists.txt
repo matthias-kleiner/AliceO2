@@ -62,7 +62,8 @@ o2_target_root_dictionary(TPCBase
                                   include/TPCBase/Sector.h
                                   include/TPCBase/ZeroSuppress.h
                                   include/TPCBase/Utils.h
-                                  include/TPCBase/IDCGroup.h)
+                                  include/TPCBase/IDCGroup.h
+                                  include/TPCBase/IDCHelper.h)
 
 o2_add_test(Base
             COMPONENT_NAME tpc
