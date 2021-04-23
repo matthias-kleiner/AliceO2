@@ -19,16 +19,30 @@ void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Dig
 
   // loop over digits from one sector for ALL Time Frames
   const unsigned int switchAfterTB = getLastTimeBinForSwitch();
+
+  if (mAddInterval) {
+    // decrease the size of the vector if the last integration intervall is empty
+    if (switchAfterTB == (mIntegrationIntervalsPerTF - 1) * mTimeStampsPerIntegrationInterval) {
+      for (unsigned int ireg = 0; ireg < mRegions; ++ireg) {
+        mIDCs[mBufferIndex][ireg].resize(mMaxIDCs[ireg] - mPadsPerRegion[ireg]);
+      }
+    } else {
+      for (auto& idcs : mIDCs[mBufferIndex]) {
+        idcs.resize(idcs.capacity());
+      }
+    }
+  }
+
   for (const auto& digit : digits) {
     const o2::tpc::CRU cru(digit.getCRU());
     const unsigned int region = cru.region();
     const int timeStamp = digit.getTimeStamp();
     if (timeStamp < switchAfterTB) {
       const unsigned int indexPad = getIndex(timeStamp, region, digit.getRow(), digit.getPad());
-      mIDCsTmp[mBufferIndex][region][indexPad] += digit.getChargeFloat();
+      mIDCs[mBufferIndex][region][indexPad] += digit.getChargeFloat();
     } else {
       const unsigned int indexPad = getIndex(timeStamp - switchAfterTB, region, digit.getRow(), digit.getPad());
-      mIDCsTmp[!mBufferIndex][region][indexPad] += digit.getChargeFloat();
+      mIDCs[!mBufferIndex][region][indexPad] += digit.getChargeFloat();
     }
   }
 
@@ -51,7 +65,7 @@ int o2::tpc::IDCSim::getNewOffset() const
 /// set all IDC values to 0
 void o2::tpc::IDCSim::resetIDCs()
 {
-  for (auto& idcs : mIDCsTmp[!mBufferIndex]) {
+  for (auto& idcs : mIDCs[!mBufferIndex]) {
     std::fill(idcs.begin(), idcs.end(), 0);
   }
 }
@@ -61,7 +75,7 @@ void o2::tpc::IDCSim::dumpIDCs(const int timeframe)
   const std::string name = fmt::format("idcs_obj_{:02}_{:02}.root", mSector, timeframe);
   TFile fOut(name.data(), "RECREATE");
   int cru = mSector * mRegions;
-  for (const auto& idcs : mIDCsTmp[!mBufferIndex]) {
+  for (const auto& idcs : mIDCs[!mBufferIndex]) {
     fOut.WriteObject(&idcs, Form("cru_%i", cru));
     ++cru;
   }
@@ -77,7 +91,7 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
   pcstream.GetFile()->cd();
 
   int cru = mSector * mRegions;
-  for (const auto& idcs : mIDCsTmp[!mBufferIndex]) {
+  for (const auto& idcs : mIDCs[!mBufferIndex]) {
     int sectorTmp = mSector;
     const o2::tpc::CRU cruTmp(cru);
     unsigned int region = cruTmp.region();

@@ -14,11 +14,11 @@
 
 void o2::tpc::IDCGroup::initStorage()
 {
-  const uint32_t nTotalIDC = std::accumulate(mPadsPerRow.begin(), mPadsPerRow.end(), decltype(mPadsPerRow)::value_type(0));
-  mIDCsGrouped.resize(nTotalIDC);
+  mNIDCsPerCRU = std::accumulate(mPadsPerRow.begin(), mPadsPerRow.end(), decltype(mPadsPerRow)::value_type(0));
+  mIDCsGrouped.resize(mNIDCsPerCRU);
 
-  for (uint32_t i = 1; i < mRows; ++i) {
-    const uint32_t lastInd = i - 1;
+  for (unsigned int i = 1; i < mRows; ++i) {
+    const unsigned int lastInd = i - 1;
     mOffsRow[i] = mOffsRow[lastInd] + mPadsPerRow[lastInd];
   }
 }
@@ -27,14 +27,16 @@ void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
 {
   o2::utils::TreeStreamRedirector pcstream(outname, "RECREATE");
   pcstream.GetFile()->cd();
-  for (int irow = 0; irow < mRows; ++irow) {
-    for (int ipad = 0; ipad < mPadsPerRow[irow]; ++ipad) {
-      float idc = (*this)(irow, ipad);
-      pcstream << "idcs"
-               << "row=" << irow
-               << "pad=" << ipad
-               << "IDC=" << idc
-               << "\n";
+  for (int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
+    for (int irow = 0; irow < mRows; ++irow) {
+      for (int ipad = 0; ipad < mPadsPerRow[irow]; ++ipad) {
+        float idc = (*this)(irow, ipad, integrationInterval);
+        pcstream << "idcs"
+                 << "row=" << irow
+                 << "pad=" << ipad
+                 << "IDC=" << idc
+                 << "\n";
+      }
     }
   }
   pcstream.Close();

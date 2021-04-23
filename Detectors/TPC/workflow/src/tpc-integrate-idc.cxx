@@ -29,7 +29,6 @@
 
 using namespace o2::framework;
 
-
 // customize the completion policy
 void customize(std::vector<o2::framework::CompletionPolicy>& policies)
 {
@@ -75,17 +74,17 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const int orbitsPerTF = hbfu.getNOrbitsPerTF();
 
   // TODO remove this
-  const auto orbitsperTF = (uint32_t)config.options().get<int>("orbitsperTF");
+  const auto orbitsperTF = config.options().get<int>("orbitsperTF");
   o2::tpc::IDCSim::setNOrbitsPerTF(orbitsperTF);
 
-  const auto nOrbits = (uint32_t)config.options().get<int>("nOrbits");
+  const auto nOrbits = config.options().get<int>("nOrbits");
   const auto outputFormatStr = config.options().get<std::string>("outputFormat");
   const TPCIntegrateIDCDevice::IDCFormat outputFormat = outputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::IDCFormat::Real : TPCIntegrateIDCDevice::IDCFormat::Sim;
   const auto debug = config.options().get<bool>("debug");
 
   const auto tpcsectors = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("sectors"));
-  const auto nSectors = (uint32_t)tpcsectors.size();
-  const auto nLanes = std::min((uint32_t)config.options().get<int>("lanes"), nSectors);
+  const auto nSectors = tpcsectors.size();
+  const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nSectors);
   const auto sectorsPerLane = nSectors / nLanes + ((nSectors % nLanes) != 0);
 
   WorkflowSpec workflow;
@@ -99,8 +98,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
       break;
     }
     const auto last = std::min(tpcsectors.end(), first + sectorsPerLane);
-    const std::vector<uint32_t> range(first, last);
-    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, range, nOrbits, outputFormat, debug));
+    const std::vector<unsigned int> rangeSectors(first, last);
+    workflow.emplace_back(getTPCIntegrateIDCSpec(ilane, rangeSectors, nOrbits, outputFormat, debug));
   }
 
   return workflow;

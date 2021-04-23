@@ -44,7 +44,7 @@ class for aggregation of grouped IDCs
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const uint32_t lane, const std::vector<uint32_t>& crus, const bool debug = false) : mLane{lane}, mCRUs{crus}, mDebug{debug} {}
+  TPCAggregateGroupedIDCSpec(const int lane, const std::vector<uint32_t>& crus, const bool debug = false) : mLane{lane}, mCRUs{crus}, mDebug{debug} {}
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -74,7 +74,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 
  private:
-  const uint32_t mLane{0};                            ///< lane number of processor
+  const int mLane{0};                                 ///< lane number of processor
   const std::vector<uint32_t> mCRUs{};                ///< CRUs to process in this instance
   std::unordered_map<unsigned int, IDCGroup> mIDCs{}; ///< object for averaging and grouping the IDCs
   const bool mDebug{false};                           ///< dump IDCs to tree for debugging
@@ -89,7 +89,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const uint32_t ilane = 0, const std::vector<uint32_t>& crus = {}, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const int ilane = 0, const std::vector<uint32_t>& crus = {}, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   outputSpecs.reserve(crus.size());
