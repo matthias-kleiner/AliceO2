@@ -28,7 +28,7 @@
 #include "TPCSimulation/IDCSim.h"
 #include "DataFormatsTPC/TPCSectorHeader.h"
 #include "DataFormatsTPC/Digit.h"
-#include "TPCBase/IDCHelper.h"
+#include "TPCBase/Mapper.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -55,6 +55,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     }
   }
 
+
   void run(o2::framework::ProcessingContext& pc) final
   {
     // loop over sectors
@@ -66,6 +67,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
       // integrate digits for given sector
       const gsl::span<const o2::tpc::Digit> digits = pc.inputs().get<gsl::span<o2::tpc::Digit>>(ref);
       mIDCs[sector].integrateDigitsForOneTF(digits);
+
 
       if (mDebug) {
         // mIDCs[sector].dumpIDCs(0);
@@ -82,6 +84,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     LOGP(info, "endOfStream");
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
+
 
   /// return the kind of the output for given type.
   /// \param idcFormat type of the IDC format
@@ -100,7 +103,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   // send output for one sector
   void sendOutput(DataAllocator& output, const int sector)
   {
-    uint32_t cru = sector * o2::tpc::IDCHelper::NREGIONS;
+    uint32_t cru = sector * Mapper::NREGIONS;
     for (const auto& idcs : mIDCs[sector].get()) {
       if (mIDCFormat == IDCFormat::Sim) {
         const header::DataHeader::SubSpecificationType subSpec{cru << 7};
@@ -123,20 +126,19 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane = 0, const std::vector<unsigned int>& sectors = {}, const int nOrbits = 12, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
 {
   // TPCIntegrateIDCDevice(const int lane, const std::vector<int>& sectors, const int nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
-
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(sectors.size());
 
   std::vector<OutputSpec> outputSpecs;
-  outputSpecs.reserve(sectors.size() * IDCHelper::NREGIONS);
+  outputSpecs.reserve(sectors.size() * Mapper::NREGIONS);
 
   // define input and output specs
   for (const auto& sector : sectors) {
     inputSpecs.emplace_back(InputSpec{"digits", gDataOriginTPC, "DIGITS", sector, Lifetime::Timeframe});
 
     // output spec
-    unsigned int cru = sector * IDCHelper::NREGIONS;
-    for (int iRegion = 0; iRegion < IDCHelper::NREGIONS; ++iRegion) {
+    unsigned int cru = sector * Mapper::NREGIONS;
+    for (int iRegion = 0; iRegion < Mapper::NREGIONS; ++iRegion) {
       const header::DataHeader::SubSpecificationType subSpec{cru << 7};
       outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(outputFormat), subSpec});
       ++cru;

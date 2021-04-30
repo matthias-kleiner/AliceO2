@@ -8,8 +8,8 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "TPCBase/IDCGroup.h"
-#include "TPCBase/IDCHelper.h"
+#include "TPCCalibration/IDCGroup.h"
+#include "TPCBase/Mapper.h"
 #include "CommonUtils/TreeStreamRedirector.h" // for debugging
 #include "TPCBase/Painter.h"
 #include "TH2Poly.h"
@@ -47,19 +47,19 @@ void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
   pcstream.Close();
 }
 
-unsigned int o2::tpc::IDCGroup::getGroupedRow(const unsigned int lrow) const
+unsigned int o2::tpc::IDCGroup::getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int rows)
 {
-  const unsigned int row = lrow / mGroupRows;
-  if (row >= getNRows()) {
-    return getNRows() - 1;
+  const unsigned int row = lrow / groupRows;
+  if (row >= rows) {
+    return rows - 1;
   }
   return row;
 }
 
-int o2::tpc::IDCGroup::getGroupedPad(const unsigned int pad, const unsigned int lrow) const
+int o2::tpc::IDCGroup::getGroupedPad(const unsigned int pad, const unsigned int lrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int rows, const std::vector<unsigned int>& padsPerRow)
 {
-  const int relPadHalf = static_cast<int>(std::floor((pad - 0.5f * IDCHelper::PADSPERROW[mRegion][lrow]) / mGroupPads));
-  const int nGroupedPads = getPadsPerRow(getGroupedRow(lrow));
+  const int relPadHalf = static_cast<int>(std::floor((pad - 0.5f * Mapper::PADSPERROW[region][lrow]) / groupPads));
+  const int nGroupedPads = padsPerRow[getGroupedRow(lrow, groupRows, rows)];
   const int nGroupedPadsHalf = static_cast<int>(0.5f * nGroupedPads);
   if (std::abs(relPadHalf) >= nGroupedPadsHalf) {
     if (std::signbit(relPadHalf)) {
@@ -71,7 +71,14 @@ int o2::tpc::IDCGroup::getGroupedPad(const unsigned int pad, const unsigned int 
   return nGroupedPadsHalf + relPadHalf;
 }
 
-void o2::tpc::IDCGroup::draw(const int integrationInterval) const
+void o2::tpc::IDCGroup::setRows(const unsigned int nRows)
+{
+  mRows = nRows;
+  mPadsPerRow.resize(mRows);
+  mOffsRow.resize(mRows);
+}
+
+void o2::tpc::IDCGroup::draw(const unsigned int integrationInterval, const std::string filename) const
 {
   const auto coords = o2::tpc::painter::getPadCoordinatesSector();
   TH2Poly* poly = o2::tpc::painter::makeSectorHist("hSector", "Sector;local #it{x} (cm);local #it{y} (cm); #it{IDC}");
@@ -92,22 +99,27 @@ void o2::tpc::IDCGroup::draw(const int integrationInterval) const
   lat.SetTextSize(2);
 
   poly->Draw("colz");
-  for (unsigned int irow = 0; irow < IDCHelper::ROWSPERREGION[mRegion]; ++irow) {
-    for (unsigned int ipad = 0; ipad < IDCHelper::PADSPERROW[mRegion][irow]; ++ipad) {
-      const GlobalPadNumber padNum = getGlobalPadNumber(irow, ipad);
+  for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[mRegion]; ++irow) {
+    for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[mRegion][irow]; ++ipad) {
+      const auto padNum = getGlobalPadNumber(irow, ipad);
       const auto coordinate = coords[padNum];
       const float yPos = -0.5 * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
       const float xPos = 0.5 * (coordinate.xVals[0] + coordinate.xVals[2]);
-      poly->Fill(xPos, yPos, (*this)(getGroupedRow(irow), getGroupedPad(ipad, irow), integrationInterval));
+      poly->Fill(xPos, yPos, (*this)(getGroupedRow(irow, mGroupRows, mRows), getGroupedPad(ipad, irow, mRegion, mGroupPads, mGroupRows, mRows, mPadsPerRow), integrationInterval));
       lat.SetTextAlign(12);
       lat.DrawLatex(xPos, yPos, Form("%i", ipad));
     }
+  }
+  if (!filename.empty()) {
+    can->SaveAs(filename.data());
+    delete poly;
+    delete can;
   }
 }
 
 int o2::tpc::IDCGroup::getLastRow() const
 {
-  const int nTotRows = IDCHelper::ROWSPERREGION[mRegion];
+  const int nTotRows = Mapper::ROWSPERREGION[mRegion];
   const int rowsReminder = nTotRows % mGroupRows;
   int lastRow = nTotRows - rowsReminder;
   if (rowsReminder <= mGroupLastRowsThreshold) {
@@ -118,7 +130,7 @@ int o2::tpc::IDCGroup::getLastRow() const
 
 int o2::tpc::IDCGroup::getLastPad(const int row) const
 {
-  const int nPads = 0.5 * IDCHelper::PADSPERROW[mRegion][row];
+  const int nPads = 0.5 * Mapper::PADSPERROW[mRegion][row];
   const int padsReminder = nPads % mGroupPads;
   int lastPad = padsReminder == 0 ? nPads - mGroupPads : nPads - padsReminder;
   if (padsReminder && padsReminder <= mGroupLastPadsThreshold) {
@@ -134,8 +146,14 @@ void o2::tpc::IDCGroup::initIDCGroup()
   setRows(nRows);
   for (int irow = 0; irow < nRows; ++irow) {
     const int row = irow * mGroupRows;
-    const int nPadsInRow = 2 * (getLastPad(row) / mGroupPads + 1);
-    setPadsPerRow(irow, nPadsInRow);
+    mPadsPerRow[irow] = 2 * (getLastPad(row) / mGroupPads + 1);
   }
   initStorage();
+}
+
+void o2::tpc::IDCGroup::dumpToFile(const char* outFileName, const char* outName) const
+{
+  TFile fOut(outFileName, "UPDATE");
+  fOut.WriteObject(this, outName);
+  fOut.Close();
 }
