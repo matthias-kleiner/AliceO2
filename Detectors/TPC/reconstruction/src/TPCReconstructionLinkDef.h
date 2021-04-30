@@ -29,7 +29,6 @@
 #pragma link C++ class o2::tpc::KrBoxClusterFinder + ;
 #pragma link C++ class o2::tpc::KrCluster + ;
 #pragma link C++ class std::vector<o2::tpc::KrCluster> + ;
-#pragma link C++ class o2::tpc::IDCAverageGroup + ;
 
 #pragma link C++ class o2::tpc::Clusterer + ;
 #pragma link C++ class o2::tpc::ClustererTask + ;

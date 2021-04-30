@@ -45,7 +45,6 @@
 #pragma link C++ class o2::tpc::PartitionInfo;
 #pragma link C++ class o2::tpc::ROC;
 #pragma link C++ class o2::tpc::Sector;
-#pragma link C++ class o2::tpc::IDCGroup;
 
 #pragma link C++ namespace o2::tpc::painter;
 #pragma link C++ function o2::tpc::painter::draw(o2::tpc::CalArray <float>&);

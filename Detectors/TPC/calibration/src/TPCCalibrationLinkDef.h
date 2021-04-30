@@ -28,5 +28,9 @@
 #pragma link C++ class o2::tpc::CalibPadGainTracks;
 #pragma link C++ class o2::tpc::FastHisto<float> +;
 #pragma link C++ class o2::tpc::FastHisto<unsigned int> +;
+#pragma link C++ class o2::tpc::IDCGroup +;
+#pragma link C++ struct o2::tpc::ParameterIDCGroup;
+#pragma link C++ class o2::tpc::IDCAverageGroup + ;
+#pragma link C++ class o2::tpc::IDCFactorization + ;
 
 #endif

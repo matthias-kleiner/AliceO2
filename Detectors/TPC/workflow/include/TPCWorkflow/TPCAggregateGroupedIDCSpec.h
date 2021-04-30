@@ -26,7 +26,9 @@
 #include "CommonUtils/MemFileHelper.h"
 #include "Headers/DataHeader.h"
 #include "TPCBase/CDBInterface.h"
-#include "TPCBase/IDCGroup.h"
+#include "TPCCalibration/IDCFactorization.h"
+#include "CCDB/CcdbApi.h"
+#include "Framework/ConfigParamRegistry.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -44,28 +46,61 @@ class for aggregation of grouped IDCs
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const int lane, const std::vector<uint32_t>& crus, const bool debug = false) : mLane{lane}, mCRUs{crus}, mDebug{debug} {}
+  TPCAggregateGroupedIDCSpec(const int lane, const std::vector<uint32_t>& crus, const unsigned int timeframes, const bool debug = false) : mLane{lane}, mCRUs{crus}, mTimeFrames{timeframes}, mDebug{debug}
+  {
+    for (unsigned int cru = 0; cru < Mapper::NSECTORS * Mapper::NREGIONS; ++cru) {
+      mIDCsTmp[cru].resize(mTimeFrames);
+    }
+  }
 
   void init(o2::framework::InitContext& ic) final
   {
-    LOGP(info, "init TPCAggregateGroupedIDCSpec");
+    mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
+    mWriteToDB = mDBapi.isHostReachable() ? true : false;
   }
+
 
   void run(o2::framework::ProcessingContext& pc) final
   {
-    LOGP(info, "RUN aggreating IDCs for CRU ");
-
     const int nCRUs = mCRUs.size();
     for (int i = 0; i < nCRUs; ++i) {
       const DataRef ref = pc.inputs().getByPos(i);
       auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
       const int cru = tpcCRUHeader->subSpecification >> 7;
-      auto idcGroup = pc.inputs().get<IDCGroup*>(ref);
+      mIDCsTmp[cru][mProcessedTFs] = std::move(pc.inputs().get<std::vector<float>>(ref));
+    }
+    ++mProcessedTFs;
 
-      const int nrows = idcGroup->getNRows();
-      LOGP(info, "nrows: {} ", nrows);
+    if (mProcessedTFs == mTimeFrames /*(10s)*/) {
+      LOGP(info, "DUMPING AGGREGATED IDCS TO FILE");
+      sendOutput(pc.outputs());
+      auto& paramIDCGroup = ParameterIDCGroup::Instance();
+
+      std::array<unsigned int, Mapper::NREGIONS> groupPads{};
+      std::array<unsigned int, Mapper::NREGIONS> groupRows{};
+      std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold{};
+      std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold{};
+      std::copy(std::begin(paramIDCGroup.GroupPads), std::end(paramIDCGroup.GroupPads), std::begin(groupPads));
+      std::copy(std::begin(paramIDCGroup.GroupRows), std::end(paramIDCGroup.GroupRows), std::begin(groupRows));
+      std::copy(std::begin(paramIDCGroup.GroupLastRowsThreshold), std::end(paramIDCGroup.GroupLastRowsThreshold), std::begin(groupLastRowsThreshold));
+      std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
+
+      IDCFactorization mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, mTimeFrames};
+      LOGP(info, "SET IDCS");
+      mIDCs.setIDCs(mIDCsTmp);
+      mIDCs.calcfinalIDCs();
+      LOGP(info, "IDCS SET");
+
+      if (mWriteToDB) {
+        mDBapi.storeAsTFileAny(&mIDCs, "TPC/Calib/IDC", mMetadata);
+        LOGP(info, "DUMPING AGGREGATED IDCS TO CCDB");
+      }
+      if (mDebug) {
+        mIDCs.dumpToFile();
+      }
     }
   }
+
 
   void endOfStream(o2::framework::EndOfStreamContext& ec) final
   {
@@ -74,22 +109,20 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 
  private:
-  const int mLane{0};                                 ///< lane number of processor
-  const std::vector<uint32_t> mCRUs{};                ///< CRUs to process in this instance
-  std::unordered_map<unsigned int, IDCGroup> mIDCs{}; ///< object for averaging and grouping the IDCs
-  const bool mDebug{false};                           ///< dump IDCs to tree for debugging
+  const int mLane{0};                                                                          ///< lane number of processor
+  const std::vector<uint32_t> mCRUs{};                                                         ///< CRUs to process in this instance
+  const unsigned int mTimeFrames{};                                                            ///< number of time frames which will be aggregated
+  int mProcessedTFs{0};                                                                        ///< number of processed time frames to keep track of when the writing to CCDB will be done
+  const bool mDebug{false};                                                                    ///< dump IDCs to tree for debugging
+  o2::ccdb::CcdbApi mDBapi;                                                                    ///< object for storing the IDCs at CCDB
+  std::map<std::string, std::string> mMetadata;                                                ///< meta data of the stored object in CCDB
+  bool mWriteToDB{};                                                                           ///< flag if writing to CCDB will be done
+  std::array<std::vector<std::vector<float>>, Mapper::NSECTORS * Mapper::NREGIONS> mIDCsTmp{}; ///< grouped and IDCs for the whole TPC. sector -> region -> time frame -> IDCs
 
-  void sendOutput(DataAllocator& output)
-  {
-    for (const auto& [cru, idcs] : mIDCs) {
-      const header::DataHeader::SubSpecificationType subSpec{cru << 7};
-      // auto image = o2::utils::MemFileHelper::createFileImage(idcs.getIDCGroup(), typeid(*idcs.getIDCGroup()), cal->getName(), "data");
-      // output.snapshot(Output{gDataOriginTPC, "IDCGroup", subSpec, Lifetime::Timeframe}, idcs.getIDCGroup());
-    }
-  }
+  void sendOutput(DataAllocator& output) {}
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const int ilane = 0, const std::vector<uint32_t>& crus = {}, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const int ilane, const std::vector<uint32_t>& crus, const int timeframes, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   outputSpecs.reserve(crus.size());
@@ -108,8 +141,8 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const int ilane = 0, const std::
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(ilane, crus, debug)},
-  }; // end DataProcessorSpec
+    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(ilane, crus, timeframes, debug)},
+    Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
 } // namespace tpc

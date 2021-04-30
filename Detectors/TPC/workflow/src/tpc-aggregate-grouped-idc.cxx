@@ -39,7 +39,8 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   const int defaultlanes = std::max(1u, std::thread::hardware_concurrency() / 2);
 
   std::vector<ConfigParamSpec> options{
-    {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
+    {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
+    {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
@@ -61,6 +62,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
   const auto nCRUs = tpcCRUs.size();
   const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
+  const auto timeframes = static_cast<unsigned long>(config.options().get<int>("timeframes"));
+
   const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
   const auto debug = config.options().get<bool>("debug");
 
@@ -76,7 +79,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     }
     const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
     const std::vector<uint32_t> rangeCRUs(first, last);
-    workflow.emplace_back(getTPCAggregateGroupedIDCSpec(ilane, rangeCRUs, debug));
+    workflow.emplace_back(getTPCAggregateGroupedIDCSpec(ilane, rangeCRUs, timeframes, debug));
   }
 
   return workflow;

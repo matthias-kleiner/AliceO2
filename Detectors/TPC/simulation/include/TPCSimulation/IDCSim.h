@@ -19,10 +19,9 @@
 #include <vector>
 #include <array>
 #include "DataFormatsTPC/Digit.h"
-#include "CommonConstants/LHCConstants.h"
 #include "DataFormatsTPC/Constants.h"
-#include "CommonUtils/TreeStreamRedirector.h" // for debugging
-#include "TPCBase/IDCHelper.h"
+#include "CommonConstants/LHCConstants.h"
+#include "TPCBase/Mapper.h"
 #include <gsl/span>
 
 namespace o2
@@ -50,12 +49,12 @@ class IDCSim
   /// \return returns the total number of integration intervals for one TF
   /// \param nIDCs total number of IDCs for one TF for region
   /// \param region region of the tpc
-  static int getNIntegrationIntervals(const int nIDCs, const int region) { return nIDCs / o2::tpc::IDCHelper::PADSPERREGION[region]; }
+  static int getNIntegrationIntervals(const int nIDCs, const int region) { return nIDCs / Mapper::PADSPERREGION[region]; }
 
   /// \param row global pad row
   /// \param pad pad in row
   /// \return returns local pad number in region
-  static unsigned int getPadIndex(const int row, const int pad) { return o2::tpc::IDCHelper::OFFSETCRUGLOBAL[row] + pad; }
+  static unsigned int getPadIndex(const int row, const int pad) { return Mapper::OFFSETCRUGLOBAL[row] + pad; }
 
   /// set number of orbits per TF which is used to determine the size of the vectors etc.
   /// \param nOrbitsPerTF number of orbits per TF
@@ -89,19 +88,19 @@ class IDCSim
   const unsigned int mTimeStampsReminder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                           ///< number time stamps which remain in one TF and will be buffered to the next TF
   int mTimeBinsOff{};                                                                                                                         ///< offset from last time bin
   int mBufferIndex{};                                                                                                                         ///< index for the buffer
-  const std::array<unsigned int, o2::tpc::IDCHelper::NREGIONS> mMaxIDCs{
-    o2::tpc::IDCHelper::PADSPERREGION[0] * mIntegrationIntervalsPerTF, // region 0
-    o2::tpc::IDCHelper::PADSPERREGION[1] * mIntegrationIntervalsPerTF, // region 1
-    o2::tpc::IDCHelper::PADSPERREGION[2] * mIntegrationIntervalsPerTF, // region 2
-    o2::tpc::IDCHelper::PADSPERREGION[3] * mIntegrationIntervalsPerTF, // region 3
-    o2::tpc::IDCHelper::PADSPERREGION[4] * mIntegrationIntervalsPerTF, // region 4
-    o2::tpc::IDCHelper::PADSPERREGION[5] * mIntegrationIntervalsPerTF, // region 5
-    o2::tpc::IDCHelper::PADSPERREGION[6] * mIntegrationIntervalsPerTF, // region 6
-    o2::tpc::IDCHelper::PADSPERREGION[7] * mIntegrationIntervalsPerTF, // region 7
-    o2::tpc::IDCHelper::PADSPERREGION[8] * mIntegrationIntervalsPerTF, // region 8
-    o2::tpc::IDCHelper::PADSPERREGION[9] * mIntegrationIntervalsPerTF  // region 9
+  const std::array<unsigned int, Mapper::NREGIONS> mMaxIDCs{
+    Mapper::PADSPERREGION[0] * mIntegrationIntervalsPerTF, // region 0
+    Mapper::PADSPERREGION[1] * mIntegrationIntervalsPerTF, // region 1
+    Mapper::PADSPERREGION[2] * mIntegrationIntervalsPerTF, // region 2
+    Mapper::PADSPERREGION[3] * mIntegrationIntervalsPerTF, // region 3
+    Mapper::PADSPERREGION[4] * mIntegrationIntervalsPerTF, // region 4
+    Mapper::PADSPERREGION[5] * mIntegrationIntervalsPerTF, // region 5
+    Mapper::PADSPERREGION[6] * mIntegrationIntervalsPerTF, // region 6
+    Mapper::PADSPERREGION[7] * mIntegrationIntervalsPerTF, // region 7
+    Mapper::PADSPERREGION[8] * mIntegrationIntervalsPerTF, // region 8
+    Mapper::PADSPERREGION[9] * mIntegrationIntervalsPerTF  // region 9
   };                                                                   ///< maximum number of IDCs per region
-  std::array<std::vector<float>, o2::tpc::IDCHelper::NREGIONS> mIDCs[2]{
+  std::array<std::vector<float>, Mapper::NREGIONS> mIDCs[2]{
     {std::vector<float>(mMaxIDCs[0]),  // region 0
      std::vector<float>(mMaxIDCs[1]),  // region 1
      std::vector<float>(mMaxIDCs[2]),  // region 2
@@ -124,6 +123,7 @@ class IDCSim
      std::vector<float>(mMaxIDCs[9])}  // region 9
   };                                   ///< IDCs for one sector. The array is needed to buffer the IDCs for the last integration interval
 
+  /// \return returns the last time bin after which the buffer is switched
   unsigned int getLastTimeBinForSwitch() const;
   int getNewOffset() const;
 
@@ -138,7 +138,7 @@ class IDCSim
   /// \param region region in the sector
   /// \param row global pad row
   /// \param pad pad in row
-  unsigned int getIndex(const int timeStamp, const int region, const int row, const int pad) const { return getOrbit(timeStamp) * o2::tpc::IDCHelper::PADSPERREGION[region] + getPadIndex(row, pad); }
+  unsigned int getIndex(const int timeStamp, const int region, const int row, const int pad) const { return getOrbit(timeStamp) * Mapper::PADSPERREGION[region] + getPadIndex(row, pad); }
 };
 
 } // namespace tpc
