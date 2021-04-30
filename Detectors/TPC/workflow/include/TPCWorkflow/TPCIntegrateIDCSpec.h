@@ -55,7 +55,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     }
   }
 
-
   void run(o2::framework::ProcessingContext& pc) final
   {
     // loop over sectors
@@ -67,7 +66,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
       // integrate digits for given sector
       const gsl::span<const o2::tpc::Digit> digits = pc.inputs().get<gsl::span<o2::tpc::Digit>>(ref);
       mIDCs[sector].integrateDigitsForOneTF(digits);
-
 
       if (mDebug) {
         // mIDCs[sector].dumpIDCs(0);
@@ -84,7 +82,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     LOGP(info, "endOfStream");
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
-
 
   /// return the kind of the output for given type.
   /// \param idcFormat type of the IDC format

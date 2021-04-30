@@ -19,6 +19,10 @@
 #include "TPCCalibration/IDCGroup.h"
 #include "TPCBase/Mapper.h"
 
+#if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
+#include <omp.h>
+#endif
+
 namespace o2
 {
 namespace tpc
@@ -100,8 +104,18 @@ class IDCAverageGroup
   /// \param integrationInterval integration interval
   const float& getGroupedIDCVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped.getVal(urow, upad, integrationInterval); }
 
+  /// get the number of threads used for some of the calculations
+  static int getNThreads() { return sNThreads; }
+
+  /// set the number of threads used for some of the calculations
+  static void setNThreads(const int nThreads)
+  {
+    sNThreads = nThreads;
+  }
 
  private:
+  inline static int sNThreads{1}; ///< number of threads which are used during the calculations
+
   std::vector<float> mIDCsUngrouped{}; ///< integrated ungrouped IDC values per pad
   IDCGroup mIDCsGrouped{};             ///< grouped and averaged IDC values
 };

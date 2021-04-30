@@ -32,5 +32,7 @@
 #pragma link C++ struct o2::tpc::ParameterIDCGroup;
 #pragma link C++ class o2::tpc::IDCAverageGroup + ;
 #pragma link C++ class o2::tpc::IDCFactorization + ;
+#pragma link C++ struct o2::tpc::IDCDelta;
+#pragma link C++ struct o2::tpc::IDCZeroOne;
 
 #endif

@@ -61,17 +61,17 @@ o2_add_executable(calib-pedestal
                   SOURCES src/tpc-calib-pedestal.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
-o2_add_executable(integrate-IDC
+o2_add_executable(integrate-idc
                   COMPONENT_NAME tpc
                   SOURCES src/tpc-integrate-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
-o2_add_executable(averagegroup-IDC
+o2_add_executable(averagegroup-idc
                   COMPONENT_NAME tpc
                   SOURCES src/tpc-averagegroup-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
-o2_add_executable(aggregate-IDC
+o2_add_executable(aggregate-idc
                   COMPONENT_NAME tpc
                   SOURCES src/tpc-aggregate-grouped-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
