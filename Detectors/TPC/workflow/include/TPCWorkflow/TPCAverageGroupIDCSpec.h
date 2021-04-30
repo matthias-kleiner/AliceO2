@@ -27,7 +27,6 @@
 #include "TPCCalibration/IDCAverageGroup.h"
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
 #include "TPCBase/Mapper.h"
-
 #include "TPCCalibration/ParameterIDCGroup.h"
 
 using namespace o2::framework;
@@ -58,7 +57,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
 
   void run(o2::framework::ProcessingContext& pc) final
   {
-    LOGP(info, "averaging and grouping IDCs for one TF for CRUs {} to {}", mCRUs.front(), mCRUs.back());
+    LOGP(info, "averaging and grouping IDCs for one TF for CRUs {} to {} using {} threads", mCRUs.front(), mCRUs.back(), mIDCs.begin()->second.getNThreads());
 
     for (int i = 0; i < mCRUs.size(); ++i) {
       const DataRef ref = pc.inputs().getByPos(i);

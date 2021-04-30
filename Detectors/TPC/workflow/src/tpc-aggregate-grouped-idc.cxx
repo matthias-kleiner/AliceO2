@@ -22,6 +22,7 @@
 #include <string>
 #include "TPCWorkflow/TPCAggregateGroupedIDCSpec.h"
 #include "TPCWorkflow/PublisherSpec.h"
+#include "TPCCalibration/IDCFactorization.h"
 
 using namespace o2::framework;
 
@@ -41,6 +42,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   std::vector<ConfigParamSpec> options{
     {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
     {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated."}},
+    {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
@@ -63,6 +65,9 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto nCRUs = tpcCRUs.size();
   const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
   const auto timeframes = static_cast<unsigned long>(config.options().get<int>("timeframes"));
+
+  const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
+  IDCFactorization::setNThreads(nthreads);
 
   const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
   const auto debug = config.options().get<bool>("debug");

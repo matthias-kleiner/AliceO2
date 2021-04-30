@@ -27,6 +27,7 @@
 #include "Framework/Variant.h"
 #include <boost/lexical_cast.hpp>
 #include <boost/tokenizer.hpp>
+#include "TPCCalibration/IDCAverageGroup.h"
 
 using namespace o2::framework;
 
@@ -53,6 +54,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
+    {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during averaging and grouping."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
     {"groupPads", VariantType::String, "4,4,4,4,4,4,4,4,4,4", {"number of pads in a row which will be grouped per region"}},
     {"groupRows", VariantType::String, "4,4,4,4,4,4,4,4,4,4", {"number of pads in row direction which will be grouped per region"}},
@@ -75,6 +77,9 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto nCRUs = tpcCRUs.size();
   const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
   const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
+
+  const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
+  IDCAverageGroup::setNThreads(nthreads);
 
   const std::string sgroupPads = config.options().get<std::string>("groupPads");
   const std::string sgroupRows = config.options().get<std::string>("groupRows");

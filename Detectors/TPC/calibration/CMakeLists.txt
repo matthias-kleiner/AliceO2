@@ -11,6 +11,7 @@
 add_subdirectory(SpacePoints)
 
 o2_add_library(TPCCalibration
+               TARGETVARNAME targetName
                SOURCES src/CalibRawBase.cxx
                        src/CalibPedestal.cxx
                        src/CalibPulser.cxx
@@ -42,7 +43,8 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/IDCAverageGroup.h
                                   include/TPCCalibration/IDCGroup.h
                                   include/TPCCalibration/IDCFactorization.h
-                                  include/TPCCalibration/ParameterIDCGroup.h)
+                                  include/TPCCalibration/ParameterIDCGroup.h
+                                  include/TPCCalibration/IDCFactorizationContainer.h)
 
 o2_add_test_root_macro(macro/comparePedestalsAndNoise.C
                        PUBLIC_LINK_LIBRARIES O2::TPCBase
@@ -75,3 +77,8 @@ o2_add_test_root_macro(macro/extractGainMap.C
 o2_add_test_root_macro(macro/preparePedestalFiles.C
                        PUBLIC_LINK_LIBRARIES O2::TPCCalibration
                        LABELS tpc)
+
+if (OpenMP_CXX_FOUND)
+    target_compile_definitions(${targetName} PRIVATE WITH_OPENMP)
+    target_link_libraries(${targetName} PRIVATE OpenMP::OpenMP_CXX)
+endif()

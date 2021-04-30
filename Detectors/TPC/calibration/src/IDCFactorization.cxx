@@ -23,6 +23,10 @@
 o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames)
   : mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mTimeFrames{timeFrames}
 {
+  for (unsigned int cru = 0; cru < Mapper::NSECTORS * Mapper::NREGIONS; ++cru) {
+    mIDCs[cru].resize(mTimeFrames);
+  }
+
   for (unsigned int reg = 0; reg < Mapper::NREGIONS; ++reg) {
     const IDCGroup groupTmp(mGroupPads[reg], mGroupRows[reg], mGroupLastRowsThreshold[reg], mGroupLastPadsThreshold[reg], reg);
     mNIDCsPerCRU[reg] = groupTmp.getNIDCsPerCRU();
@@ -148,21 +152,6 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
   }
 }
 
-void o2::tpc::IDCFactorization::setIDCs(const std::array<std::vector<std::vector<float>>, Mapper::NREGIONS * Mapper::NSECTORS>& idcs)
-{
-  for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
-    const unsigned int nIntegrationIntervals = idcs[0][0].size() / mNIDCsPerCRU[0]; // must be the same for all sectors and regions
-    for (unsigned int integrationInterval = 0; integrationInterval < nIntegrationIntervals; ++integrationInterval) {
-      for (unsigned int cru = 0; cru < Mapper::NSECTORS * Mapper::NREGIONS; ++cru) {
-        auto& idcsTmp = idcs[cru][timeframe];
-        const auto itStart = idcsTmp.begin() + integrationInterval * mNIDCsPerCRU[cru % Mapper::NREGIONS];
-        const auto itEnd = itStart + mNIDCsPerCRU[cru % Mapper::NREGIONS];
-        mIDCs.insert(mIDCs.end(), std::make_move_iterator(itStart), std::make_move_iterator(itEnd));
-      }
-    }
-  }
-}
-
 void o2::tpc::IDCFactorization::dumpToFile(const char* outFileName, const char* outName) const
 {
   TFile fOut(outFileName, "RECREATE");
@@ -180,10 +169,9 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
     integrationIntervals = getNIntegrationIntervals();
   }
 
-  std::vector<float> idcOneA = mIDCOne[0];
-  std::vector<float> idcOneC = mIDCOne[1];
+  std::vector<float> idcOneA = mIDCZeroOne.mIDCOne[0];
+  std::vector<float> idcOneC = mIDCZeroOne.mIDCOne[1];
   for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
-    std::cout << "integrationInterval: " << integrationInterval << std::endl;
     const unsigned int nIDCsSector = Mapper::getPadsInSector() * Mapper::NSECTORS;
     std::vector<int> vRow(nIDCsSector);
     std::vector<int> vPad(nIDCsSector);
@@ -194,7 +182,7 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
     std::vector<float> idcs(nIDCsSector);
     std::vector<float> idcsZero(nIDCsSector);
     std::vector<float> idcsDelta(nIDCsSector);
-    std::vector<int> sectorv(nIDCsSector);
+    std::vector<unsigned int> sectorv(nIDCsSector);
 
     unsigned int index = 0;
     for (unsigned int sector = 0; sector < Mapper::NSECTORS; ++sector) {
@@ -208,7 +196,7 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
             vPad[index] = padPosLocal.getPad();
             vXPos[index] = mapper.getPadCentre(padPosLocal).X();
             vYPos[index] = mapper.getPadCentre(padPosLocal).Y();
-            const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[index], vYPos[index]), sector);
+            const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[index], vYPos[index]), Sector(sector));
             vGlobalXPos[index] = globalPos.X();
             vGlobalYPos[index] = globalPos.Y();
             idcs[index] = getIDCVal(sector, region, irow, padTmp, integrationInterval);
@@ -242,46 +230,67 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
 void o2::tpc::IDCFactorization::calcIDCZero()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * o2::tpc::SECTORSPERSIDE;
-  const unsigned int nIDCsTPC = 2 * nIDCsSide;
-  mIDCZero[Side::A].resize(nIDCsSide);
-  mIDCZero[Side::C].resize(nIDCsSide);
-  for (unsigned int i = 0; i < mIDCs.size(); ++i) {
-    const unsigned int side = (i % nIDCsTPC) / nIDCsSide;
-    mIDCZero[side][i % nIDCsSide] += mIDCs[i];
+  mIDCZeroOne.mIDCZero[Side::A].resize(nIDCsSide);
+  mIDCZeroOne.mIDCZero[Side::C].resize(nIDCsSide);
+
+#pragma omp parallel for num_threads(sNThreads)
+  for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
+    const o2::tpc::CRU cruTmp(cru);
+    const unsigned int region = cruTmp.region();
+    for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
+      for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
+        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
+        mIDCZeroOne.getValueIDCZero(cruTmp.side(), indexGlob % nIDCsSide) += mIDCs[cru][timeframe][idcs];
+      }
+    }
   }
-  std::transform(mIDCZero[Side::A].begin(), mIDCZero[Side::A].end(), mIDCZero[Side::A].begin(), std::bind(std::divides<float>(), std::placeholders::_1, getNIntegrationIntervals()));
-  std::transform(mIDCZero[Side::C].begin(), mIDCZero[Side::C].end(), mIDCZero[Side::C].begin(), std::bind(std::divides<float>(), std::placeholders::_1, getNIntegrationIntervals()));
+  std::transform(mIDCZeroOne.mIDCZero[Side::A].begin(), mIDCZeroOne.mIDCZero[Side::A].end(), mIDCZeroOne.mIDCZero[Side::A].begin(), std::bind(std::divides<float>(), std::placeholders::_1, getNIntegrationIntervals()));
+  std::transform(mIDCZeroOne.mIDCZero[Side::C].begin(), mIDCZeroOne.mIDCZero[Side::C].end(), mIDCZeroOne.mIDCZero[Side::C].begin(), std::bind(std::divides<float>(), std::placeholders::_1, getNIntegrationIntervals()));
 }
 
 void o2::tpc::IDCFactorization::calcIDCOne()
 {
-  const unsigned int nIDCsTPC = mNIDCsPerSector * Mapper::NSECTORS;
-  const unsigned int nIDCsSide = nIDCsTPC / 2;
+  const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
   const unsigned int integrationIntervals = getNIntegrationIntervals();
-  mIDCOne[Side::A].resize(integrationIntervals);
-  mIDCOne[Side::C].resize(integrationIntervals);
-  for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
-    for (unsigned int iside = 0; iside < SIDES; ++iside) {
-      for (unsigned int indIDCTPC = 0; indIDCTPC < nIDCsSide; ++indIDCTPC) {
-        mIDCOne[iside][integrationInterval] += mIDCs[indIDCTPC + iside * nIDCsSide + integrationInterval * nIDCsTPC] / mIDCZero[iside][indIDCTPC];
+  mIDCZeroOne.mIDCOne[Side::A].resize(integrationIntervals);
+  mIDCZeroOne.mIDCOne[Side::C].resize(integrationIntervals);
+
+#pragma omp parallel for num_threads(sNThreads)
+  for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
+    const o2::tpc::CRU cruTmp(cru);
+    const unsigned int region = cruTmp.region();
+    for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
+      for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
+        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region];
+        const auto side = cruTmp.side();
+        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
+        mIDCZeroOne.mIDCOne[side][integrationInterval] += mIDCs[cru][timeframe][idcs] / mIDCZeroOne.mIDCZero[side][indexGlob % nIDCsSide];
       }
     }
   }
-  std::transform(mIDCOne[Side::A].begin(), mIDCOne[Side::A].end(), mIDCOne[Side::A].begin(), std::bind(std::divides<float>(), std::placeholders::_1, nIDCsSide));
-  std::transform(mIDCOne[Side::C].begin(), mIDCOne[Side::C].end(), mIDCOne[Side::C].begin(), std::bind(std::divides<float>(), std::placeholders::_1, nIDCsSide));
+
+  std::transform(mIDCZeroOne.mIDCOne[Side::A].begin(), mIDCZeroOne.mIDCOne[Side::A].end(), mIDCZeroOne.mIDCOne[Side::A].begin(), std::bind(std::divides<float>(), std::placeholders::_1, nIDCsSide));
+  std::transform(mIDCZeroOne.mIDCOne[Side::C].begin(), mIDCZeroOne.mIDCOne[Side::C].end(), mIDCZeroOne.mIDCOne[Side::C].begin(), std::bind(std::divides<float>(), std::placeholders::_1, nIDCsSide));
 }
 
 void o2::tpc::IDCFactorization::calcIDCDelta()
 {
-  const unsigned int nIDCsTPC = mNIDCsPerSector * Mapper::NSECTORS;
-  const unsigned int nIDCsSide = nIDCsTPC / 2;
-  const unsigned int idcs = mIDCs.size() / 2;
-  mIDCDelta[Side::A].resize(idcs);
-  mIDCDelta[Side::C].resize(idcs);
-  for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
-    for (unsigned int iside = 0; iside < SIDES; ++iside) {
-      for (unsigned int indIDCTPC = 0; indIDCTPC < nIDCsSide; ++indIDCTPC) {
-        mIDCDelta[iside][indIDCTPC + integrationInterval * nIDCsSide] += mIDCs[indIDCTPC + iside * nIDCsSide + integrationInterval * nIDCsTPC] / (mIDCZero[iside][indIDCTPC] * mIDCOne[iside][integrationInterval]);
+  const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
+  const unsigned int idcsSide = nIDCsSide * getNIntegrationIntervals();
+  mIDCDelta.mIDCDelta[Side::A].resize(idcsSide);
+  mIDCDelta.mIDCDelta[Side::C].resize(idcsSide);
+
+#pragma omp parallel for num_threads(sNThreads)
+  for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
+    const o2::tpc::CRU cruTmp(cru);
+    const unsigned int region = cruTmp.region();
+    for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
+      for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
+        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region];
+        const auto side = cruTmp.side();
+        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
+        const unsigned int indexGlobMod = indexGlob % nIDCsSide;
+        mIDCDelta.mIDCDelta[side][indexGlobMod + integrationInterval * nIDCsSide] += mIDCs[cru][timeframe][idcs] / (mIDCZeroOne.mIDCZero[side][indexGlobMod] * mIDCZeroOne.mIDCOne[side][integrationInterval]);
       }
     }
   }

@@ -18,6 +18,7 @@
 
 void o2::tpc::IDCAverageGroup::processIDCs()
 {
+#pragma omp parallel for num_threads(sNThreads)
   for (int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
     const int lastRow = mIDCsGrouped.getLastRow();
     int rowGrouped = 0;
