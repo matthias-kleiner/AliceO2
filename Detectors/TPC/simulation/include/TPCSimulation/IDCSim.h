@@ -99,7 +99,7 @@ class IDCSim
     Mapper::PADSPERREGION[7] * mIntegrationIntervalsPerTF, // region 7
     Mapper::PADSPERREGION[8] * mIntegrationIntervalsPerTF, // region 8
     Mapper::PADSPERREGION[9] * mIntegrationIntervalsPerTF  // region 9
-  };                                                                   ///< maximum number of IDCs per region
+  };                                                       ///< maximum number of IDCs per region
   std::array<std::vector<float>, Mapper::NREGIONS> mIDCs[2]{
     {std::vector<float>(mMaxIDCs[0]),  // region 0
      std::vector<float>(mMaxIDCs[1]),  // region 1
