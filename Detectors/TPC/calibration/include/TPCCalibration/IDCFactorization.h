@@ -111,7 +111,7 @@ class IDCFactorization
   /// \param upad pad number of the ungrouped IDCs
   const float& getIDCZeroVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad) const
   {
-    return mIDCZeroOne.getValueIDCOne(getSide(sector), getIndex(sector % o2::tpc::SECTORSPERSIDE, region, getGroupedRow(region, urow), getGroupedPad(region, urow, upad), 0));
+    return mIDCZeroOne.getValueIDCZero(getSide(sector), getIndex(sector % o2::tpc::SECTORSPERSIDE, region, getGroupedRow(region, urow), getGroupedPad(region, urow, upad), 0));
   }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
@@ -246,7 +246,7 @@ class IDCFactorization
   /// \param Side side which will be drawn
   /// \param integrationInterval which will be drawn
   /// \param filename name of the output file. If empty the canvas is drawn.
-  void drawIDCDeltaSide(const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename = "IDCZeroSide.pdf") const
+  void drawIDCDeltaSide(const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename = "IDCDeltaSide.pdf") const
   {
     drawSide(IDCType::IDCDelta, side, integrationInterval, filename);
   }
@@ -256,7 +256,7 @@ class IDCFactorization
   /// \param outName name of the object in the output file
   void dumpToFile(const char* outFileName = "IDCFactorized.root", const char* outName = "IDCFactorized") const;
 
-  void dumpIDCsToTree(int integrationIntervals) const;
+  void dumpIDCsToTree(int integrationIntervals = -1) const;
 
  private:
   const std::array<unsigned int, Mapper::NREGIONS> mGroupPads{};                            ///< grouping definition in pad direction (How many pads are grouped)
@@ -290,7 +290,7 @@ class IDCFactorization
   /// \return returns index to the data
   /// \param row row of the grouped IDCs
   /// \param pad pad of the grouped IDCs
-  unsigned int getIndex(const unsigned int sector, const unsigned int region, const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerSector * (integrationInterval * Mapper::NSECTORS + sector) + mRegionOffs[region] + mOffsRow[region][row] + pad; }
+  unsigned int getIndex(const unsigned int sector, const unsigned int region, const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerSector * (integrationInterval * SECTORSPERSIDE + sector) + mRegionOffs[region] + mOffsRow[region][row] + pad; }
 
   /// draw IDCs for one sector for one integration interval
   /// \param sector sector which will be drawn
@@ -304,7 +304,7 @@ class IDCFactorization
   /// \param filename name of the output file. If empty the canvas is drawn.
   void drawSide(const IDCType type, const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename) const;
 
-  Side getSide(const unsigned int sector) const { return sector < SECTORSPERSIDE ? Side::A : Side::C; }
+  Side getSide(const unsigned int sector) const { return (sector < SECTORSPERSIDE) ? Side::A : Side::C; }
 
   ClassDefNV(IDCFactorization, 1)
 };

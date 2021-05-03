@@ -8,7 +8,6 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-// #include <fmt/format.h>
 #include <vector>
 #include <string>
 
@@ -72,6 +71,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   const auto& hbfu = o2::raw::HBFUtils::Instance();
   const int orbitsPerTF = hbfu.getNOrbitsPerTF();
+  hbfu.printKeyValues();
 
   // TODO remove this
   const auto orbitsperTF = config.options().get<int>("orbitsperTF");

@@ -67,14 +67,18 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     ++mProcessedTFs;
 
     if (mProcessedTFs == mIDCs.getNTimeframes()) {
-      LOGP(info, "DUMPING AGGREGATED IDCS TO FILE");
+      mProcessedTFs = 0;
       mIDCs.factorizeIDCs();
       if (mWriteToDB) {
         mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
         mDBapi.storeAsTFileAny(&mIDCs.getIDCDelta(), "TPC/Calib/IDC", mMetadata);
       }
       if (mDebug) {
-        mIDCs.dumpToFile();
+        LOGP(info, "dumping aggregated IDCS to file");
+        const DataRef ref = pc.inputs().getByPos(0);
+        auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
+        const auto tf = tpcCRUHeader->tfCounter;
+        mIDCs.dumpToFile(Form("IDCFactorized_%i.root", tf));
       }
     }
   }
@@ -86,15 +90,14 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 
  private:
-  const int mLane{0};                  ///< lane number of processor
-  const std::vector<uint32_t> mCRUs{}; ///< CRUs to process in this instance
-  int mProcessedTFs{0};                ///< number of processed time frames to keep track of when the writing to CCDB will be done
-  IDCFactorization mIDCs{};
+  const int mLane{0};                           ///< lane number of processor
+  const std::vector<uint32_t> mCRUs{};          ///< CRUs to process in this instance
+  int mProcessedTFs{0};                         ///< number of processed time frames to keep track of when the writing to CCDB will be done
+  IDCFactorization mIDCs{};                     ///< object aggregating the IDCs and performing the factorization of the IDCs
   const bool mDebug{false};                     ///< dump IDCs to tree for debugging
   o2::ccdb::CcdbApi mDBapi;                     ///< object for storing the IDCs at CCDB
   std::map<std::string, std::string> mMetadata; ///< meta data of the stored object in CCDB
   bool mWriteToDB{};                            ///< flag if writing to CCDB will be done
-
   // void sendOutput(DataAllocator& output) {}
 };
 

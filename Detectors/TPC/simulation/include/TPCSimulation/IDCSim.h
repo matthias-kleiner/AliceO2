@@ -54,7 +54,7 @@ class IDCSim
   /// \param row global pad row
   /// \param pad pad in row
   /// \return returns local pad number in region
-  static unsigned int getPadIndex(const int row, const int pad) { return Mapper::OFFSETCRUGLOBAL[row] + pad; }
+  static unsigned int getPadIndex(const unsigned int row, const unsigned int pad) { return Mapper::OFFSETCRUGLOBAL[row] + pad; }
 
   /// set number of orbits per TF which is used to determine the size of the vectors etc.
   /// \param nOrbitsPerTF number of orbits per TF
@@ -64,12 +64,12 @@ class IDCSim
   static unsigned int getNOrbitsPerTF() { return mOrbitsPerTF; }
 
   /// for debugging: dumping IDCs to ROOT file
-  /// \param timeframe timeframe of the IDCs to avoid overwriting the output file for same TF
-  void dumpIDCs(const int timeframe);
+  /// \param filename name of the output file
+  void dumpIDCs(const char* filename);
 
   /// for debugging: creating debug tree for integrated IDCs
-  /// \param timeframe timeframe of the IDCs to avoid overwriting the output file for same TF
-  void createDebugTree(const int timeframe);
+  /// \param nameTree name of the output file
+  void createDebugTree(const char* nameTree);
 
   /// return return the IDCs for all sector
   auto& get() { return mIDCs[!mBufferIndex]; }
@@ -83,7 +83,7 @@ class IDCSim
   const unsigned int mSector{};                                                                                                               ///< sector for which the IDCs are integrated
   const unsigned int mNOrbits{12};                                                                                                            ///< integration intervals of IDCs in units of orbits
   const unsigned int mTimeStampsPerIntegrationInterval{(o2::constants::lhc::LHCMaxBunches * mNOrbits) / o2::tpc::constants::LHCBCPERTIMEBIN}; ///< number of time stamps for each integration interval (5346)
-  const bool mAddInterval{mOrbitsPerTF % mNOrbits > 0 ? true : false};                                                                        ///< if the division has a reminder 256/12=21.333 then add an additional integration interval
+  const bool mAddInterval{(mOrbitsPerTF % mNOrbits) > 0 ? true : false};                                                                      ///< if the division has a reminder 256/12=21.333 then add an additional integration interval
   const unsigned int mIntegrationIntervalsPerTF{mOrbitsPerTF / mNOrbits + mAddInterval};                                                      ///< number of integration intervals per TF. Add 1: 256/12=21.333
   const unsigned int mTimeStampsReminder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                           ///< number time stamps which remain in one TF and will be buffered to the next TF
   int mTimeBinsOff{};                                                                                                                         ///< offset from last time bin
@@ -138,7 +138,7 @@ class IDCSim
   /// \param region region in the sector
   /// \param row global pad row
   /// \param pad pad in row
-  unsigned int getIndex(const int timeStamp, const int region, const int row, const int pad) const { return getOrbit(timeStamp) * Mapper::PADSPERREGION[region] + getPadIndex(row, pad); }
+  unsigned int getIndex(const unsigned int timeStamp, const unsigned int region, const unsigned int row, const unsigned int pad) const { return getOrbit(timeStamp) * Mapper::PADSPERREGION[region] + getPadIndex(row, pad); }
 };
 
 } // namespace tpc

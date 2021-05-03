@@ -17,7 +17,6 @@
 #include "TFile.h"
 #include "TCanvas.h"
 #include "TLatex.h"
-#include "Framework/Logger.h"
 #include <functional>
 
 o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames)
