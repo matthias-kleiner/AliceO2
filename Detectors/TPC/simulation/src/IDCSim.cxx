@@ -12,6 +12,7 @@
 #include "TFile.h"
 #include "TPCBase/Mapper.h"
 #include <fmt/format.h>
+#include "Framework/Logger.h"
 
 void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Digit>& digits)
 {
@@ -53,13 +54,13 @@ void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Dig
 unsigned int o2::tpc::IDCSim::getLastTimeBinForSwitch() const
 {
   const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
-  return totaloffs >= mTimeStampsPerIntegrationInterval ? mIntegrationIntervalsPerTF * mTimeStampsPerIntegrationInterval : (mIntegrationIntervalsPerTF - mAddInterval) * mTimeStampsPerIntegrationInterval - mTimeBinsOff;
+  return (totaloffs >= mTimeStampsPerIntegrationInterval) ? mIntegrationIntervalsPerTF * mTimeStampsPerIntegrationInterval - mTimeBinsOff : (mIntegrationIntervalsPerTF - mAddInterval) * mTimeStampsPerIntegrationInterval - mTimeBinsOff;
 }
 
 int o2::tpc::IDCSim::getNewOffset() const
 {
   const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
-  return totaloffs >= mTimeStampsPerIntegrationInterval ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
+  return (totaloffs >= mTimeStampsPerIntegrationInterval) ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
 }
 
 /// set all IDC values to 0
@@ -70,10 +71,10 @@ void o2::tpc::IDCSim::resetIDCs()
   }
 }
 
-void o2::tpc::IDCSim::dumpIDCs(const int timeframe)
+void o2::tpc::IDCSim::dumpIDCs(const char* filename)
 {
-  const std::string name = fmt::format("idcs_obj_{:02}_{:02}.root", mSector, timeframe);
-  TFile fOut(name.data(), "RECREATE");
+  // const std::string name = fmt::format("idcs_obj_{:02}_{:02}.root", mSector, timeframe);
+  TFile fOut(filename, "RECREATE");
   int cru = mSector * Mapper::NREGIONS;
   for (const auto& idcs : mIDCs[!mBufferIndex]) {
     fOut.WriteObject(&idcs, Form("cru_%i", cru));
@@ -82,12 +83,12 @@ void o2::tpc::IDCSim::dumpIDCs(const int timeframe)
   fOut.Close();
 }
 
-void o2::tpc::IDCSim::createDebugTree(const int timeframe)
+void o2::tpc::IDCSim::createDebugTree(const char* nameTree)
 {
   const static Mapper& mapper = Mapper::instance();
 
-  const std::string nameTree = fmt::format("idcs_tree_{:02}_{:02}.root", mSector, timeframe);
-  o2::utils::TreeStreamRedirector pcstream(nameTree.data(), "RECREATE");
+  // const std::string nameTree = fmt::format("idcs_tree_{:02}_{:02}.root", mSector, timeframe);
+  o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
   pcstream.GetFile()->cd();
 
   int cru = mSector * Mapper::NREGIONS;
@@ -95,7 +96,7 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
     int sectorTmp = mSector;
     const o2::tpc::CRU cruTmp(cru);
     unsigned int region = cruTmp.region();
-    const int padsPerCRU = Mapper::PADSPERREGION[region];
+    const unsigned long padsPerCRU = Mapper::PADSPERREGION[region];
     std::vector<int> vRow(padsPerCRU);
     std::vector<int> vPad(padsPerCRU);
     std::vector<float> vXPos(padsPerCRU);
@@ -104,7 +105,7 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
     std::vector<float> vGlobalYPos(padsPerCRU);
     std::vector<float> idcsPerTimeBin(padsPerCRU); // idcs for one time bin
 
-    for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
+    for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
       const GlobalPadNumber globalNum = Mapper::GLOBALPADOFFSET[region] + iPad;
       const auto& padPosLocal = mapper.padPos(globalNum);
       vRow[iPad] = padPosLocal.getRow();
@@ -118,7 +119,7 @@ void o2::tpc::IDCSim::createDebugTree(const int timeframe)
     }
 
     for (int iTimeBin = 0; iTimeBin < mIntegrationIntervalsPerTF; ++iTimeBin) {
-      for (int iPad = 0; iPad < padsPerCRU; ++iPad) {
+      for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
         idcsPerTimeBin[iPad] = (idcs)[iPad + iTimeBin * Mapper::PADSPERREGION[region]];
       }
       int cruiTmp = cru;

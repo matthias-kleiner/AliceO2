@@ -57,19 +57,21 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 
   void run(o2::framework::ProcessingContext& pc) final
   {
-    // loop over sectors
+    LOGP(info, "integrating digits for sectors {} to {}", mSectors.front(), mSectors.back());
+
     for (int iSec = 0; iSec < mSectors.size(); ++iSec) {
       const DataRef ref = pc.inputs().getByPos(iSec);
       auto const* tpcSectorHeader = o2::framework::DataRefUtils::getHeader<o2::tpc::TPCSectorHeader*>(ref);
       const int sector = tpcSectorHeader->sector();
 
       // integrate digits for given sector
-      const gsl::span<const o2::tpc::Digit> digits = pc.inputs().get<gsl::span<o2::tpc::Digit>>(ref);
-      mIDCs[sector].integrateDigitsForOneTF(digits);
+      mIDCs[sector].integrateDigitsForOneTF(pc.inputs().get<gsl::span<o2::tpc::Digit>>(ref));
 
       if (mDebug) {
-        // mIDCs[sector].dumpIDCs(0);
-        mIDCs[sector].createDebugTree(0);
+        auto const* tpcHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
+        const auto tf = tpcHeader->tfCounter;
+        mIDCs[sector].dumpIDCs(fmt::format("idcs_obj_sec{:02}_tf{:02}.root", sector, tf).data());
+        mIDCs[sector].createDebugTree(fmt::format("idcs_tree_sec{:02}_tf{:02}.root", sector, tf).data());
       }
 
       // send the output for one sector for one TF

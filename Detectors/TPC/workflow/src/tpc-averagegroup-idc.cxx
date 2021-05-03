@@ -44,11 +44,6 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   const std::string cruDefault = "0-" + std::to_string(o2::tpc::CRU::MaxCRU - 1);
   const int defaultlanes = std::max(1u, std::thread::hardware_concurrency() / 2);
 
-  // std::string groupPads{"4,4,4,4,4,4,4,4,4,4"};
-  // std::string groupRows{"4,4,4,4,4,4,4,4,4,4"};
-  // std::string groupLastRowsThreshold{"2,2,2,2,2,2,2,2,2,2"};
-  // std::string groupLastPadsThreshold{"2,2,2,2,2,2,2,2,2,2"};
-
   std::vector<ConfigParamSpec> options{
     {"inputFormat", VariantType::String, "Sim", {"setting the input format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},

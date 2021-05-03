@@ -37,14 +37,13 @@ void customize(std::vector<o2::framework::CompletionPolicy>& policies)
 void customize(std::vector<ConfigParamSpec>& workflowOptions)
 {
   const std::string cruDefault = "0-" + std::to_string(o2::tpc::CRU::MaxCRU - 1);
-  const int defaultlanes = std::max(1u, std::thread::hardware_concurrency() / 2);
 
   std::vector<ConfigParamSpec> options{
     {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
     {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated."}},
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
-    {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
+    {"lanes", VariantType::Int, 1, {"Number of parallel processing lanes."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
   };
 
