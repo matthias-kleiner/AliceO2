@@ -43,7 +43,6 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
   std::vector<ConfigParamSpec> options{
     {"nOrbits", VariantType::Int, 12, {"number of orbits for which the IDCs are integrated"}},
-    {"orbitsperTF", VariantType::Int, 256, {"number of orbits per TF for debugging currently. Will be removed"}},
     {"outputFormat", VariantType::String, "Sim", {"setting the output format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
     {"debug", VariantType::Bool, false, {"create debug tree"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
@@ -70,11 +69,8 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   o2::conf::ConfigurableParam::writeINI("o2tpcintegrateidc_configuration.ini");
 
   const auto& hbfu = o2::raw::HBFUtils::Instance();
-  const int orbitsPerTF = hbfu.getNOrbitsPerTF();
+  const int orbitsperTF = hbfu.getNOrbitsPerTF();
   hbfu.printKeyValues();
-
-  // TODO remove this
-  const auto orbitsperTF = config.options().get<int>("orbitsperTF");
   o2::tpc::IDCSim::setNOrbitsPerTF(orbitsperTF);
 
   const auto nOrbits = config.options().get<int>("nOrbits");

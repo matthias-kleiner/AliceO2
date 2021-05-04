@@ -9,9 +9,11 @@
 // or submit itself to any jurisdiction.
 
 #include "TPCCalibration/IDCAverageGroup.h"
+#include "TPCCalibration/IDCGroup.h"
+#include "TPCCalibration/RobustAverage.h"
+
 #include "TFile.h"
 #include "TPCBase/Painter.h"
-#include "TPCCalibration/IDCGroup.h"
 #include "TH2Poly.h"
 #include "TCanvas.h"
 #include "TLatex.h"
@@ -35,8 +37,10 @@ void o2::tpc::IDCAverageGroup::processIDCs()
         for (int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
           int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
 
-          float idcAverage = 0;
-          float idcCounter = 0;
+          // TODO Mapper::ADDITIONALPADSPERROW[region].back() factor is to large, but doesnt really matter
+          const unsigned int maxGoup = (mIDCsGrouped.getGroupRows() + mIDCsGrouped.getGroupLastRowsThreshold()) * (mIDCsGrouped.getGroupPads() + mIDCsGrouped.getGroupLastPadsThreshold() + Mapper::ADDITIONALPADSPERROW[region].back());
+          RobustAverage robustAverage(maxGoup);
+
           for (int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
             const int iRowTmp = iRow + iRowMerge;
             const auto offs = Mapper::ADDITIONALPADSPERROW[region][iRowTmp] - Mapper::ADDITIONALPADSPERROW[region][iRow];
@@ -47,11 +51,11 @@ void o2::tpc::IDCAverageGroup::processIDCs()
               const int iPadSide = iYLocalSide == 0 ? Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1 : iPadTmp;
               const int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
 
-              idcAverage += mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region];
-              ++idcCounter;
+              robustAverage.addValue(mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region]);
             }
           }
-          mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = idcAverage / idcCounter;
+          mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = robustAverage.getFilteredAverage();
+
           iYLocalSide ? ++padGrouped : --padGrouped;
         }
       }
