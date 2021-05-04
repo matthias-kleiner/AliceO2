@@ -51,7 +51,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during averaging and grouping."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
-    {"groupPads", VariantType::String, "4,4,4,4,4,4,4,4,4,4", {"number of pads in a row which will be grouped per region"}},
+    {"groupPads", VariantType::String, "8,8,8,8,8,8,8,8,8,8", {"number of pads in a row which will be grouped per region"}},
     {"groupRows", VariantType::String, "4,4,4,4,4,4,4,4,4,4", {"number of pads in row direction which will be grouped per region"}},
     {"groupLastRowsThreshold", VariantType::String, "2,2,2,2,2,2,2,2,2,2", {"set threshold in row direction for merging the last group to the previous group per region"}},
     {"groupLastPadsThreshold", VariantType::String, "2,2,2,2,2,2,2,2,2,2", {"set threshold in pad direction for merging the last group to the previous group per region"}}};
@@ -123,10 +123,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     vgroupLastPadsThreshold = std::vector<unsigned int>(Mapper::NREGIONS, vgroupLastPadsThreshold.front());
   } else if (vgroupLastPadsThreshold.size() != Mapper::NREGIONS) {
     LOGP(error, "wrong number of parameters inserted for groupLastPadsThreshold (n={}). Number should be 1 or {}", vgroupLastPadsThreshold.size(), Mapper::NREGIONS);
-  }
-
-  for (int i = 0; i < vgroupPads.size(); ++i) {
-    LOGP(info, "vgroupPads {} {}", i, vgroupPads[i]);
   }
 
   for (int i = 0; i < Mapper::NREGIONS; ++i) {

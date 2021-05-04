@@ -44,7 +44,8 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/IDCGroup.h
                                   include/TPCCalibration/IDCFactorization.h
                                   include/TPCCalibration/ParameterIDCGroup.h
-                                  include/TPCCalibration/IDCFactorizationContainer.h)
+                                  include/TPCCalibration/IDCFactorizationContainer.h
+                                  include/TPCCalibration/RobustAverage.h)
 
 o2_add_test_root_macro(macro/comparePedestalsAndNoise.C
                        PUBLIC_LINK_LIBRARIES O2::TPCBase

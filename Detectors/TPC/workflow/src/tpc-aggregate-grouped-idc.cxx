@@ -43,7 +43,6 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated."}},
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
-    {"lanes", VariantType::Int, 1, {"Number of parallel processing lanes."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
   };
 
@@ -62,29 +61,16 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
   const auto nCRUs = tpcCRUs.size();
-  const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
   const auto timeframes = static_cast<unsigned long>(config.options().get<int>("timeframes"));
-
+  const auto debug = config.options().get<bool>("debug");
   const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
   IDCFactorization::setNThreads(nthreads);
 
-  const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
-  const auto debug = config.options().get<bool>("debug");
-
   WorkflowSpec workflow;
-  if (nLanes <= 0) {
-    return workflow;
-  }
-
-  for (int ilane = 0; ilane < nLanes; ++ilane) {
-    const auto first = tpcCRUs.begin() + ilane * crusPerLane;
-    if (first >= tpcCRUs.end()) {
-      break;
-    }
-    const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
-    const std::vector<uint32_t> rangeCRUs(first, last);
-    workflow.emplace_back(getTPCAggregateGroupedIDCSpec(ilane, rangeCRUs, timeframes, debug));
-  }
+  const auto first = tpcCRUs.begin();
+  const auto last = std::min(tpcCRUs.end(), first + nCRUs);
+  const std::vector<uint32_t> rangeCRUs(first, last);
+  workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, debug));
 
   return workflow;
 }

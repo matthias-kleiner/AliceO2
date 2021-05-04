@@ -216,6 +216,14 @@ class IDCFactorization
     drawSector(IDCType::IDCZero, sector, 0, filename);
   }
 
+  /// draw IDC one I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+  /// \param filename name of the output file. If empty the canvas is drawn.
+  /// \param Side side which will be drawn
+  void drawIDCOne(const o2::tpc::Side side, const std::string filename = "IDCOne.pdf") const
+  {
+    
+  }
+
   /// draw IDCDelta for one sector for one integration interval
   /// \param sector sector which will be drawn
   /// \param integrationInterval which will be drawn

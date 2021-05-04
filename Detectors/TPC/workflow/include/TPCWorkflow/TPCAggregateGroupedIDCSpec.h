@@ -46,8 +46,8 @@ class for aggregation of grouped IDCs
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const int lane, const std::vector<uint32_t>& crus, const unsigned int timeframes, std::array<unsigned int, Mapper::NREGIONS> groupPads, std::array<unsigned int, Mapper::NREGIONS> groupRows,
-                             std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold, std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const bool debug = false) : mLane{lane}, mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes}, mDebug{debug} {};
+  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, std::array<unsigned int, Mapper::NREGIONS> groupPads, std::array<unsigned int, Mapper::NREGIONS> groupRows,
+                             std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold, std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const bool debug = false) : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -70,8 +70,8 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mProcessedTFs = 0;
       mIDCs.factorizeIDCs();
       if (mWriteToDB) {
-        mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
-        mDBapi.storeAsTFileAny(&mIDCs.getIDCDelta(), "TPC/Calib/IDC", mMetadata);
+        // mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
+        // mDBapi.storeAsTFileAny(&mIDCs.getIDCDelta(), "TPC/Calib/IDC", mMetadata);
       }
       if (mDebug) {
         LOGP(info, "dumping aggregated IDCS to file");
@@ -90,7 +90,6 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 
  private:
-  const int mLane{0};                           ///< lane number of processor
   const std::vector<uint32_t> mCRUs{};          ///< CRUs to process in this instance
   int mProcessedTFs{0};                         ///< number of processed time frames to keep track of when the writing to CCDB will be done
   IDCFactorization mIDCs{};                     ///< object aggregating the IDCs and performing the factorization of the IDCs
@@ -101,7 +100,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   // void sendOutput(DataAllocator& output) {}
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const int ilane, const std::vector<uint32_t>& crus, const int timeframes, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   outputSpecs.reserve(crus.size());
@@ -125,12 +124,12 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const int ilane, const std::vect
   std::copy(std::begin(paramIDCGroup.GroupLastRowsThreshold), std::end(paramIDCGroup.GroupLastRowsThreshold), std::begin(groupLastRowsThreshold));
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
 
-  const auto id = fmt::format("tpc-aggregate-IDC-{:02}", ilane);
+  const auto id = fmt::format("tpc-aggregate-IDC");
   return DataProcessorSpec{
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(ilane, crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
+    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
