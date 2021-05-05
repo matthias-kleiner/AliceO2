@@ -44,6 +44,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
+    {"compression", VariantType::Int, 0, {"level of compression of IDC delta. 0: float, 1: ushort, 2: uchar"}}
   };
 
   std::swap(workflowOptions, options);
@@ -64,7 +65,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto timeframes = static_cast<unsigned long>(config.options().get<int>("timeframes"));
   const auto debug = config.options().get<bool>("debug");
   const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
-  IDCFactorization::setNThreads(nthreads);
+  IDCFactorization<float>::setNThreads(nthreads);
 
   WorkflowSpec workflow;
   const auto first = tpcCRUs.begin();
