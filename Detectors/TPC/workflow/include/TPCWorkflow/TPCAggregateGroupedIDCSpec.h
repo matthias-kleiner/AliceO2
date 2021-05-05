@@ -43,6 +43,7 @@ namespace tpc
 class for aggregation of grouped IDCs
 */
 
+template <typename DataT = float>
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
@@ -92,18 +93,35 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
  private:
   const std::vector<uint32_t> mCRUs{};          ///< CRUs to process in this instance
   int mProcessedTFs{0};                         ///< number of processed time frames to keep track of when the writing to CCDB will be done
-  IDCFactorization mIDCs{};                     ///< object aggregating the IDCs and performing the factorization of the IDCs
+  IDCFactorization<DataT> mIDCs{};              ///< object aggregating the IDCs and performing the factorization of the IDCs
   const bool mDebug{false};                     ///< dump IDCs to tree for debugging
   o2::ccdb::CcdbApi mDBapi;                     ///< object for storing the IDCs at CCDB
   std::map<std::string, std::string> mMetadata; ///< meta data of the stored object in CCDB
   bool mWriteToDB{};                            ///< flag if writing to CCDB will be done
-  // void sendOutput(DataAllocator& output) {}
+
+  void sendOutput(DataAllocator& output)
+  {
+    // send the output per side
+    for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+      const o2::tpc::Side side = iSide ? Side::C : Side::A;
+      const header::DataHeader::SubSpecificationType subSpec{iSide};
+      output.snapshot(Output{gDataOriginTPC, "IDCZERO", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
+      output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
+      output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDelta(side));
+    }
+  }
 };
 
 DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
-  outputSpecs.reserve(crus.size());
+
+  for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+    const header::DataHeader::SubSpecificationType subSpec{iSide};
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCZERO", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCONE", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCDELTA", subSpec});
+  }
 
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(crus.size());
@@ -111,7 +129,6 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   for (const auto& cru : crus) {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
     inputSpecs.emplace_back(InputSpec{"idcsgroup", gDataOriginTPC, "IDCGROUP", subSpec, Lifetime::Timeframe});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCAGGREGATED", subSpec});
   }
 
   const auto& paramIDCGroup = ParameterIDCGroup::Instance();
@@ -125,12 +142,23 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
 
   const auto id = fmt::format("tpc-aggregate-IDC");
-  return DataProcessorSpec{
-    id.data(),
-    inputSpecs,
-    outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
-    Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
+
+  int aa = 0;
+  if (aa == 0) {
+    return DataProcessorSpec{
+      id.data(),
+      inputSpecs,
+      outputSpecs,
+      AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec<float>>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
+      Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
+  } else {
+  }
+  // return DataProcessorSpec{
+  //   id.data(),
+  //   inputSpecs,
+  //   outputSpecs,
+  //   AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
+  //   Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
 } // namespace tpc

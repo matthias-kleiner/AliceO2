@@ -18,8 +18,10 @@
 #include "TCanvas.h"
 #include "TLatex.h"
 #include <functional>
+#include <type_traits>
 
-o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames)
+template <typename DataT>
+o2::tpc::IDCFactorization<DataT>::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames)
   : mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mTimeFrames{timeFrames}
 {
   for (unsigned int cru = 0; cru < Mapper::NSECTORS * Mapper::NREGIONS; ++cru) {
@@ -37,10 +39,11 @@ o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mappe
       mRegionOffs[reg] = mRegionOffs[lastInd] + mNIDCsPerCRU[lastInd];
     }
   }
-  mNIDCsPerSector = std::accumulate(mNIDCsPerCRU.begin(), mNIDCsPerCRU.end(), decltype(mNIDCsPerCRU)::value_type(0));
+  mNIDCsPerSector = std::accumulate(mNIDCsPerCRU.begin(), mNIDCsPerCRU.end(), 0);
 }
 
-void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned int sector, const unsigned int integrationInterval, const std::string filename) const
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::drawSector(const IDCType type, const unsigned int sector, const unsigned int integrationInterval, const std::string filename) const
 {
   const auto coords = o2::tpc::painter::getPadCoordinatesSector();
   TH2Poly* poly = o2::tpc::painter::makeSectorHist("hSector", "Sector;local #it{x} (cm);local #it{y} (cm); #it{IDC}");
@@ -95,7 +98,8 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   }
 }
 
-void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename) const
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::drawSide(const IDCType type, const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename) const
 {
   const auto coords = o2::tpc::painter::getPadCoordinatesSector();
   TH2Poly* poly = o2::tpc::painter::makeSideHist(side);
@@ -151,14 +155,16 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
   }
 }
 
-void o2::tpc::IDCFactorization::dumpToFile(const char* outFileName, const char* outName) const
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::dumpToFile(const char* outFileName, const char* outName) const
 {
   TFile fOut(outFileName, "RECREATE");
   fOut.WriteObject(this, outName);
   fOut.Close();
 }
 
-void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::dumpIDCsToTree(int integrationIntervals) const
 {
   const static Mapper& mapper = Mapper::instance();
   o2::utils::TreeStreamRedirector pcstream("IDCTree.root", "RECREATE");
@@ -226,7 +232,8 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
   pcstream.Close();
 }
 
-void o2::tpc::IDCFactorization::calcIDCZero()
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::calcIDCZero()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * o2::tpc::SECTORSPERSIDE;
   mIDCZeroOne.mIDCZero[Side::A].resize(nIDCsSide);
@@ -247,7 +254,8 @@ void o2::tpc::IDCFactorization::calcIDCZero()
   std::transform(mIDCZeroOne.mIDCZero[Side::C].begin(), mIDCZeroOne.mIDCZero[Side::C].end(), mIDCZeroOne.mIDCZero[Side::C].begin(), std::bind(std::divides<float>(), std::placeholders::_1, getNIntegrationIntervals()));
 }
 
-void o2::tpc::IDCFactorization::calcIDCOne()
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::calcIDCOne()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
   const unsigned int integrationIntervals = getNIntegrationIntervals();
@@ -272,7 +280,8 @@ void o2::tpc::IDCFactorization::calcIDCOne()
   std::transform(mIDCZeroOne.mIDCOne[Side::C].begin(), mIDCZeroOne.mIDCOne[Side::C].end(), mIDCZeroOne.mIDCOne[Side::C].begin(), std::bind(std::divides<float>(), std::placeholders::_1, nIDCsSide));
 }
 
-void o2::tpc::IDCFactorization::calcIDCDelta()
+template <typename DataT>
+void o2::tpc::IDCFactorization<DataT>::calcIDCDelta()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
   const unsigned int idcsSide = nIDCsSide * getNIntegrationIntervals();
@@ -294,3 +303,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
     }
   }
 }
+
+template class o2::tpc::IDCFactorization<float>;
+template class o2::tpc::IDCFactorization<unsigned short>;
+template class o2::tpc::IDCFactorization<unsigned char>;

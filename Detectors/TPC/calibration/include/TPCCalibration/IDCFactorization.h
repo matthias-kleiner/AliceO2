@@ -31,6 +31,7 @@ namespace o2
 {
 namespace tpc
 {
+template <typename DataT = float>
 class IDCFactorization
 {
  public:
@@ -221,7 +222,6 @@ class IDCFactorization
   /// \param Side side which will be drawn
   void drawIDCOne(const o2::tpc::Side side, const std::string filename = "IDCOne.pdf") const
   {
-    
   }
 
   /// draw IDCDelta for one sector for one integration interval
@@ -278,7 +278,7 @@ class IDCFactorization
   // std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{};                                 ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   // std::array<std::vector<float>, o2::tpc::SIDES> mIDCDelta{};                               ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   IDCZeroOne mIDCZeroOne{};                                              ///< I_0(r,\phi) = <I(r,\phi,t)>_t and I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-  IDCDelta mIDCDelta{};                                                  ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+  IDCDelta<DataT> mIDCDelta{};                                           ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   unsigned int mNIDCsPerSector{};                                        ///< number of grouped IDCs per sector
   std::array<unsigned int, Mapper::NREGIONS> mRows{};                    ///< number of grouped rows per region
   std::array<unsigned int, Mapper::NREGIONS> mRegionOffs{};              ///< offset for the region per region
