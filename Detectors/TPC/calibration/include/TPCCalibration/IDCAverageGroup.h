@@ -29,18 +29,40 @@ namespace tpc
 {
 class IDCAverageGroup
 {
+  /// class for averaging and grouping IDCs
+  /// usage:
+  /// 1. Define grouping parameters
+  /// const int region = 3;
+  /// IDCAverageGroup idcaverage(6, 4, 3, 2, region);
+  /// 2. set the ungrouped IDCs for one CRU
+  /// const int nIntegrationIntervals = 3;
+  /// std::vector<float> idcsungrouped(nIntegrationIntervals*Mapper::PADSPERREGION[region], 11.11); // vector containing IDCs for one region
+  /// idcaverage.setIDCs(idcsungrouped)
+  /// 3. perform the averaging and grouping
+  /// idcaverage.processIDCs();
+  /// 4. draw IDCs
+  /// idcaverage.drawUngroupedIDCs(0)
+  /// idcaverage.drawGroupedIDCs(0)
 
  public:
+  /// constructor
+  /// \param groupPads number of pads in pad direction which will be grouped
+  /// \param groupRows number of pads in row direction which will be grouped
+  /// \param groupLastRowsThreshold minimum number of pads in row direction for the last group in row direction
+  /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction
+  /// \param region region of the TPC
   IDCAverageGroup(const unsigned int groupPads = 4, const unsigned int groupRows = 4, const unsigned int groupLastRowsThreshold = 2, const unsigned int groupLastPadsThreshold = 2, const unsigned int region = 0)
     : mIDCsGrouped{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, region} {}
 
-  /// \param IDCs vector containing the IDCs
+  /// set the IDCs which will be averaged and grouped
+  /// \param idcs vector containing the IDCs
   void setIDCs(const std::vector<float>& idcs)
   {
     mIDCsUngrouped = idcs;
     mIDCsGrouped.resize(getNIntegrationIntervals());
   }
 
+  /// set the IDCs which will be averaged and grouped using move operator
   /// \param IDCs vector containing the IDCs
   void setIDCs(std::vector<float>&& idcs)
   {
@@ -76,48 +98,41 @@ class IDCAverageGroup
   /// \param urow ungrouped local row in region
   /// \param upad ungrouped pad in pad direction
   /// \param integrationInterval integration interval for which the IDCs will be returned
-  const float& getUngroupedIDCVal(const unsigned int urow, const unsigned int upad, const unsigned int integrationInterval) const
-  {
-    const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRULOCAL[mIDCsGrouped.getRegion()][urow] + upad;
-    return mIDCsUngrouped[indexIDC];
-  }
+  const float& getUngroupedIDCVal(const unsigned int urow, const unsigned int upad, const unsigned int integrationInterval) const { return mIDCsUngrouped[getUngroupedIndex(urow, upad, integrationInterval)]; }
 
   /// \return returns the stored ungrouped IDC value for local ungrouped pad row and ungrouped pad
   /// \param urow ungrouped local row in region
   /// \param upad ungrouped pad in pad direction
   /// \param integrationInterval integration interval for which the IDCs will be returned
-  float& getUngroupedIDCVal(const unsigned int urow, const unsigned int upad, const unsigned int integrationInterval)
-  {
-    const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRULOCAL[mIDCsGrouped.getRegion()][urow] + upad;
-    return mIDCsUngrouped[indexIDC];
-  }
+  float& getUngroupedIDCVal(const unsigned int urow, const unsigned int upad, const unsigned int integrationInterval) { return mIDCsUngrouped[getUngroupedIndex(urow, upad, integrationInterval)]; }
 
   /// \return returns the stored grouped IDC value for local ungrouped pad row and ungrouped pad
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float& getGroupedIDCVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped.getVal(urow, upad, integrationInterval); }
+  float& getGroupedIDCVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped.getValUngrouped(urow, upad, integrationInterval); }
 
   /// \return returns the stored grouped IDC value for local ungrouped pad row and ungrouped pad
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  const float& getGroupedIDCVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped.getVal(urow, upad, integrationInterval); }
+  const float& getGroupedIDCVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped.getValUngrouped(urow, upad, integrationInterval); }
 
   /// get the number of threads used for some of the calculations
   static int getNThreads() { return sNThreads; }
 
   /// set the number of threads used for some of the calculations
-  static void setNThreads(const int nThreads)
-  {
-    sNThreads = nThreads;
-  }
+  static void setNThreads(const int nThreads) { sNThreads = nThreads; }
 
  private:
-  inline static int sNThreads{1}; ///< number of threads which are used during the calculations
-
+  inline static int sNThreads{1};      ///< number of threads which are used during the calculations
   std::vector<float> mIDCsUngrouped{}; ///< integrated ungrouped IDC values per pad
   IDCGroup mIDCsGrouped{};             ///< grouped and averaged IDC values
+
+  unsigned int getUngroupedIndex(const unsigned int urow, const unsigned int upad, const unsigned int integrationInterval) const
+  {
+    return integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRULOCAL[mIDCsGrouped.getRegion()][urow] + upad;
+  }
 };
 
 } // namespace tpc

@@ -23,7 +23,7 @@ o2_add_library(TPCCalibration
                        src/CalibPadGainTracks.cxx
                        src/IDCAverageGroup.cxx
                        src/IDCGroup.cxx
-                       src/ParameterIDCGroup.cxx
+                       src/ParameterIDC.cxx
                        src/IDCFactorization.cxx
                PUBLIC_LINK_LIBRARIES O2::DataFormatsTPC O2::TPCBase
                                      O2::TPCReconstruction ROOT::Minuit
@@ -43,7 +43,7 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/IDCAverageGroup.h
                                   include/TPCCalibration/IDCGroup.h
                                   include/TPCCalibration/IDCFactorization.h
-                                  include/TPCCalibration/ParameterIDCGroup.h
+                                  include/TPCCalibration/ParameterIDC.h
                                   include/TPCCalibration/IDCFactorizationContainer.h
                                   include/TPCCalibration/RobustAverage.h)
 

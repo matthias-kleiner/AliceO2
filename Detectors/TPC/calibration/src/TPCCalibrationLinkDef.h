@@ -30,13 +30,14 @@
 #pragma link C++ class o2::tpc::FastHisto<unsigned int> +;
 #pragma link C++ class o2::tpc::IDCGroup +;
 #pragma link C++ struct o2::tpc::ParameterIDCGroup;
+#pragma link C++ struct o2::tpc::ParameterIDCCompression;
 #pragma link C++ class o2::tpc::IDCAverageGroup + ;
-#pragma link C++ class o2::tpc::IDCFactorization<float> + ;
-#pragma link C++ class o2::tpc::IDCFactorization<unsigned short> + ;
-#pragma link C++ class o2::tpc::IDCFactorization<unsigned char> + ;
+#pragma link C++ class o2::tpc::IDCFactorization + ;
 #pragma link C++ struct o2::tpc::IDCDelta<float> +;
-#pragma link C++ struct o2::tpc::IDCDelta<unsigned short> +;
-#pragma link C++ struct o2::tpc::IDCDelta<unsigned char> +;
+#pragma link C++ struct o2::tpc::IDCDelta<short> +;
+#pragma link C++ struct o2::tpc::IDCDelta<char> +;
+#pragma link C++ class o2::tpc::IDCDeltaCompressionHelper<short> + ;
+#pragma link C++ class o2::tpc::IDCDeltaCompressionHelper<char> + ;
 #pragma link C++ struct o2::tpc::IDCZeroOne;
 #pragma link C++ class o2::tpc::RobustAverage +;
 

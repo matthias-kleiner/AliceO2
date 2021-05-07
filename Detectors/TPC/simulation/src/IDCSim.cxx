@@ -47,8 +47,8 @@ void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Dig
     }
   }
 
-  mBufferIndex = !mBufferIndex;  // switch buffer index
-  mTimeBinsOff = getNewOffset(); // set offset
+  mBufferIndex = !mBufferIndex; // switch buffer index
+  setNewOffset();               // set offset
 }
 
 unsigned int o2::tpc::IDCSim::getLastTimeBinForSwitch() const
@@ -57,10 +57,10 @@ unsigned int o2::tpc::IDCSim::getLastTimeBinForSwitch() const
   return (totaloffs >= mTimeStampsPerIntegrationInterval) ? mIntegrationIntervalsPerTF * mTimeStampsPerIntegrationInterval - mTimeBinsOff : (mIntegrationIntervalsPerTF - mAddInterval) * mTimeStampsPerIntegrationInterval - mTimeBinsOff;
 }
 
-int o2::tpc::IDCSim::getNewOffset() const
+void o2::tpc::IDCSim::setNewOffset()
 {
   const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
-  return (totaloffs >= mTimeStampsPerIntegrationInterval) ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
+  mTimeBinsOff = (totaloffs >= mTimeStampsPerIntegrationInterval) ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
 }
 
 /// set all IDC values to 0
@@ -85,9 +85,7 @@ void o2::tpc::IDCSim::dumpIDCs(const char* filename)
 
 void o2::tpc::IDCSim::createDebugTree(const char* nameTree)
 {
-  const static Mapper& mapper = Mapper::instance();
-
-  // const std::string nameTree = fmt::format("idcs_tree_{:02}_{:02}.root", mSector, timeframe);
+  const Mapper& mapper = Mapper::instance();
   o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
   pcstream.GetFile()->cd();
 
@@ -122,6 +120,7 @@ void o2::tpc::IDCSim::createDebugTree(const char* nameTree)
       for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
         idcsPerTimeBin[iPad] = (idcs)[iPad + iTimeBin * Mapper::PADSPERREGION[region]];
       }
+
       int cruiTmp = cru;
       pcstream << "tree"
                << "cru=" << cruiTmp

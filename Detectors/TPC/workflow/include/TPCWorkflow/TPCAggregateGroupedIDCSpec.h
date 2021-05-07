@@ -29,6 +29,7 @@
 #include "TPCCalibration/IDCFactorization.h"
 #include "CCDB/CcdbApi.h"
 #include "Framework/ConfigParamRegistry.h"
+#include "TPCCalibration/ParameterIDC.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -43,12 +44,13 @@ namespace tpc
 class for aggregation of grouped IDCs
 */
 
-template <typename DataT = float>
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, std::array<unsigned int, Mapper::NREGIONS> groupPads, std::array<unsigned int, Mapper::NREGIONS> groupRows,
-                             std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold, std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const bool debug = false) : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes}, mDebug{debug} {};
+  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, std::array<unsigned int, Mapper::NREGIONS> groupPads,
+                             std::array<unsigned int, Mapper::NREGIONS> groupRows, std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold,
+                             std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const IDCDeltaCompression compression, const bool debug = false)
+    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -70,10 +72,27 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     if (mProcessedTFs == mIDCs.getNTimeframes()) {
       mProcessedTFs = 0;
       mIDCs.factorizeIDCs();
+
       if (mWriteToDB) {
-        // mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
-        // mDBapi.storeAsTFileAny(&mIDCs.getIDCDelta(), "TPC/Calib/IDC", mMetadata);
+        mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
+        switch (mCompressionDeltaIDC) {
+          case IDCDeltaCompression::MEDIUM: {
+            auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed();
+            mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC", mMetadata);
+            break;
+          }
+          case IDCDeltaCompression::HIGH: {
+            auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed();
+            mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC", mMetadata);
+            break;
+          }
+          case IDCDeltaCompression::NO:
+          default:
+            mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(), "TPC/Calib/IDC", mMetadata);
+            break;
+        }
       }
+
       if (mDebug) {
         LOGP(info, "dumping aggregated IDCS to file");
         const DataRef ref = pc.inputs().getByPos(0);
@@ -91,28 +110,30 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 
  private:
-  const std::vector<uint32_t> mCRUs{};          ///< CRUs to process in this instance
-  int mProcessedTFs{0};                         ///< number of processed time frames to keep track of when the writing to CCDB will be done
-  IDCFactorization<DataT> mIDCs{};              ///< object aggregating the IDCs and performing the factorization of the IDCs
-  const bool mDebug{false};                     ///< dump IDCs to tree for debugging
-  o2::ccdb::CcdbApi mDBapi;                     ///< object for storing the IDCs at CCDB
-  std::map<std::string, std::string> mMetadata; ///< meta data of the stored object in CCDB
-  bool mWriteToDB{};                            ///< flag if writing to CCDB will be done
+  const std::vector<uint32_t> mCRUs{};              ///< CRUs to process in this instance
+  int mProcessedTFs{0};                             ///< number of processed time frames to keep track of when the writing to CCDB will be done
+  IDCFactorization mIDCs{};                         ///< object aggregating the IDCs and performing the factorization of the IDCs
+  const IDCDeltaCompression mCompressionDeltaIDC{}; ///< compression type of IDC delta
+  const bool mDebug{false};                         ///< dump IDCs to tree for debugging
+  o2::ccdb::CcdbApi mDBapi;                         ///< object for storing the IDCs at CCDB
+  std::map<std::string, std::string> mMetadata;     ///< meta data of the stored object in CCDB
+  bool mWriteToDB{};                                ///< flag if writing to CCDB will be done
 
   void sendOutput(DataAllocator& output)
   {
     // send the output per side
+    const auto idcDelta = mIDCs.getIDCDeltaUncompressed();
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
       const o2::tpc::Side side = iSide ? Side::C : Side::A;
       const header::DataHeader::SubSpecificationType subSpec{iSide};
-      output.snapshot(Output{gDataOriginTPC, "IDCZERO", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
-      output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
-      output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDelta(side));
+      // output.snapshot(Output{gDataOriginTPC, "IDCZERO", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
+      // output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
+      // output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDelta(side));
     }
   }
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const IDCDeltaCompression compression, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
 
@@ -142,23 +163,12 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
 
   const auto id = fmt::format("tpc-aggregate-IDC");
-
-  int aa = 0;
-  if (aa == 0) {
-    return DataProcessorSpec{
-      id.data(),
-      inputSpecs,
-      outputSpecs,
-      AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec<float>>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
-      Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
-  } else {
-  }
-  // return DataProcessorSpec{
-  //   id.data(),
-  //   inputSpecs,
-  //   outputSpecs,
-  //   AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, debug)},
-  //   Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
+  return DataProcessorSpec{
+    id.data(),
+    inputSpecs,
+    outputSpecs,
+    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, compression, debug)},
+    Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
 } // namespace tpc

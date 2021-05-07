@@ -26,14 +26,18 @@ namespace o2
 namespace tpc
 {
 struct ParameterIDCGroup : public o2::conf::ConfigurableParamHelper<ParameterIDCGroup> {
-  /// \todo O2ParamDef takes no std::vectors/arrays, therefore the c-style
-  unsigned int GroupPads[Mapper::NREGIONS]{4, 4, 4, 4, 4, 4, 4, 4, 4, 4};              // [Mapper::NREGIONS] ///< group 4 pads
-  unsigned int GroupRows[Mapper::NREGIONS]{4, 4, 4, 4, 4, 4, 4, 4, 4, 4};              // [Mapper::NREGIONS] ///< group 4 pads -> 4x4
-  unsigned int GroupLastRowsThreshold[Mapper::NREGIONS]{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; // [Mapper::NREGIONS] ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
-  unsigned int GroupLastPadsThreshold[Mapper::NREGIONS]{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; // [Mapper::NREGIONS] ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
-
+  unsigned int GroupPads[Mapper::NREGIONS]{4, 4, 4, 4, 4, 4, 4, 4, 4, 4};              ///< group 4 pads
+  unsigned int GroupRows[Mapper::NREGIONS]{4, 4, 4, 4, 4, 4, 4, 4, 4, 4};              ///< group 4 pads -> 4x4
+  unsigned int GroupLastRowsThreshold[Mapper::NREGIONS]{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
+  unsigned int GroupLastPadsThreshold[Mapper::NREGIONS]{2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
   O2ParamDef(ParameterIDCGroup, "TPCIDCGroupParam");
 };
+
+struct ParameterIDCCompression : public o2::conf::ConfigurableParamHelper<ParameterIDCCompression> {
+  float MaxIDCDeltaValue = 0.3f; ///< maximum Delta IDC
+  O2ParamDef(ParameterIDCCompression, "TPCIDCCompressionParam");
+};
+
 } // namespace tpc
 } // namespace o2
 
