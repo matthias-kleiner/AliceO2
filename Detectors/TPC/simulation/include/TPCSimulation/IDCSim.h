@@ -46,22 +46,9 @@ class IDCSim
   /// \param digits digits for one sector for one Time Frame
   void integrateDigitsForOneTF(const gsl::span<const o2::tpc::Digit>& digits);
 
-  /// \return returns the total number of integration intervals for one TF
-  /// \param nIDCs total number of IDCs for one TF for region
-  /// \param region region of the tpc
-  static int getNIntegrationIntervals(const int nIDCs, const int region) { return nIDCs / Mapper::PADSPERREGION[region]; }
-
-  /// \param row global pad row
-  /// \param pad pad in row
-  /// \return returns local pad number in region
-  static unsigned int getPadIndex(const unsigned int row, const unsigned int pad) { return Mapper::OFFSETCRUGLOBAL[row] + pad; }
-
   /// set number of orbits per TF which is used to determine the size of the vectors etc.
   /// \param nOrbitsPerTF number of orbits per TF
   static void setNOrbitsPerTF(const unsigned int nOrbitsPerTF) { mOrbitsPerTF = nOrbitsPerTF; }
-
-  /// \return returns the number of orbits for one TF
-  static unsigned int getNOrbitsPerTF() { return mOrbitsPerTF; }
 
   /// for debugging: dumping IDCs to ROOT file
   /// \param filename name of the output file
@@ -71,12 +58,20 @@ class IDCSim
   /// \param nameTree name of the output file
   void createDebugTree(const char* nameTree);
 
-  /// return return the IDCs for all sector
+  /// \param row global pad row
+  /// \param pad pad in row
+  /// \return returns local pad number in region
+  static unsigned int getPadIndex(const unsigned int row, const unsigned int pad) { return Mapper::OFFSETCRUGLOBAL[row] + pad; }
+
+  /// \return returns the IDCs for all regions
   auto& get() { return mIDCs[!mBufferIndex]; }
   const auto& get() const { return mIDCs[!mBufferIndex]; }
 
   /// \return returns the sector for which the IDCs are integrated
   unsigned int getSector() const { return mSector; }
+
+  /// \return returns the number of orbits for one TF
+  static unsigned int getNOrbitsPerTF() { return mOrbitsPerTF; }
 
  private:
   inline static unsigned int mOrbitsPerTF{256};                                                                                               ///< length of one TF in units of orbits
@@ -125,7 +120,9 @@ class IDCSim
 
   /// \return returns the last time bin after which the buffer is switched
   unsigned int getLastTimeBinForSwitch() const;
-  int getNewOffset() const;
+
+  // set offset for the next time frame
+  void setNewOffset();
 
   /// set all IDC values to 0
   void resetIDCs();

@@ -61,8 +61,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 
     for (int iSec = 0; iSec < mSectors.size(); ++iSec) {
       const DataRef ref = pc.inputs().getByPos(iSec);
-      auto const* tpcSectorHeader = o2::framework::DataRefUtils::getHeader<o2::tpc::TPCSectorHeader*>(ref);
-      const int sector = tpcSectorHeader->sector();
+      const int sector = o2::framework::DataRefUtils::getHeader<o2::tpc::TPCSectorHeader*>(ref)->sector();
 
       // integrate digits for given sector
       mIDCs[sector].integrateDigitsForOneTF(pc.inputs().get<gsl::span<o2::tpc::Digit>>(ref));
@@ -71,7 +70,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
         auto const* tpcHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
         const auto tf = tpcHeader->tfCounter;
         mIDCs[sector].dumpIDCs(fmt::format("idcs_obj_sec{:02}_tf{:02}.root", sector, tf).data());
-        mIDCs[sector].createDebugTree(fmt::format("idcs_tree_sec{:02}_tf{:02}.root", sector, tf).data());
       }
 
       // send the output for one sector for one TF
@@ -81,7 +79,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 
   void endOfStream(o2::framework::EndOfStreamContext& ec) final
   {
-    LOGP(info, "endOfStream");
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
 
@@ -104,17 +101,15 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   {
     uint32_t cru = sector * Mapper::NREGIONS;
     for (const auto& idcs : mIDCs[sector].get()) {
+      const header::DataHeader::SubSpecificationType subSpec{cru << 7};
       if (mIDCFormat == IDCFormat::Sim) {
-        const header::DataHeader::SubSpecificationType subSpec{cru << 7};
         output.snapshot(Output{gDataOriginTPC, getDataDescription(mIDCFormat), subSpec, Lifetime::Timeframe}, idcs);
-
       } else {
         // TODO
         // convert to format from thorsten here
         // send.......
         // DUMMY FOR NOW
         // const TPCCRUHeader cruheader{cru, mIntegrationIntervalsPerTF};
-        const header::DataHeader::SubSpecificationType subSpec{cru << 7};
         output.snapshot(Output{gDataOriginTPC, getDataDescription(mIDCFormat), subSpec, Lifetime::Timeframe}, idcs);
       }
       ++cru;
@@ -124,7 +119,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 
 DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane = 0, const std::vector<unsigned int>& sectors = {}, const int nOrbits = 12, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
 {
-  // TPCIntegrateIDCDevice(const int lane, const std::vector<int>& sectors, const int nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(sectors.size());
 

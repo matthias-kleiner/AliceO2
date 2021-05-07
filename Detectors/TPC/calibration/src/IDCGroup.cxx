@@ -32,9 +32,9 @@ void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
 {
   o2::utils::TreeStreamRedirector pcstream(outname, "RECREATE");
   pcstream.GetFile()->cd();
-  for (int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
-    for (int irow = 0; irow < mRows; ++irow) {
-      for (int ipad = 0; ipad < mPadsPerRow[irow]; ++ipad) {
+  for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
+    for (unsigned int irow = 0; irow < mRows; ++irow) {
+      for (unsigned int ipad = 0; ipad < mPadsPerRow[irow]; ++ipad) {
         float idc = (*this)(irow, ipad, integrationInterval);
         pcstream << "idcs"
                  << "row=" << irow
@@ -47,28 +47,21 @@ void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
   pcstream.Close();
 }
 
-unsigned int o2::tpc::IDCGroup::getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int rows)
+unsigned int o2::tpc::IDCGroup::getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int groupedrows)
 {
   const unsigned int row = lrow / groupRows;
-  if (row >= rows) {
-    return rows - 1;
-  }
-  return row;
+  return (row >= groupedrows) ? (groupedrows - 1) : row;
 }
 
-int o2::tpc::IDCGroup::getGroupedPad(const unsigned int pad, const unsigned int lrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int rows, const std::vector<unsigned int>& padsPerRow)
+unsigned int o2::tpc::IDCGroup::getGroupedPad(const unsigned int pad, const unsigned int lrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int groupedrows, const std::vector<unsigned int>& padsPerRow)
 {
   const int relPadHalf = static_cast<int>(std::floor((pad - 0.5f * Mapper::PADSPERROW[region][lrow]) / groupPads));
-  const int nGroupedPads = padsPerRow[getGroupedRow(lrow, groupRows, rows)];
-  const int nGroupedPadsHalf = static_cast<int>(0.5f * nGroupedPads);
+  const unsigned int nGroupedPads = padsPerRow[getGroupedRow(lrow, groupRows, groupedrows)];
+  const unsigned int nGroupedPadsHalf = (nGroupedPads / 2);
   if (std::abs(relPadHalf) >= nGroupedPadsHalf) {
-    if (std::signbit(relPadHalf)) {
-      return 0; // if pad is negative
-    } else {
-      return nGroupedPads - 1;
-    }
+    return std::signbit(relPadHalf) ? 0 : nGroupedPads - 1;
   }
-  return nGroupedPadsHalf + relPadHalf;
+  return static_cast<unsigned int>(static_cast<int>(nGroupedPadsHalf) + relPadHalf);
 }
 
 void o2::tpc::IDCGroup::setRows(const unsigned int nRows)
@@ -103,8 +96,8 @@ void o2::tpc::IDCGroup::draw(const unsigned int integrationInterval, const std::
     for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[mRegion][irow]; ++ipad) {
       const auto padNum = getGlobalPadNumber(irow, ipad);
       const auto coordinate = coords[padNum];
-      const float yPos = -0.5 * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
-      const float xPos = 0.5 * (coordinate.xVals[0] + coordinate.xVals[2]);
+      const float yPos = -0.5f * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
+      const float xPos = 0.5f * (coordinate.xVals[0] + coordinate.xVals[2]);
       poly->Fill(xPos, yPos, (*this)(getGroupedRow(irow, mGroupRows, mRows), getGroupedPad(ipad, irow, mRegion, mGroupPads, mGroupRows, mRows, mPadsPerRow), integrationInterval));
       lat.SetTextAlign(12);
       lat.DrawLatex(xPos, yPos, Form("%i", ipad));
@@ -117,22 +110,22 @@ void o2::tpc::IDCGroup::draw(const unsigned int integrationInterval, const std::
   }
 }
 
-int o2::tpc::IDCGroup::getLastRow() const
+unsigned int o2::tpc::IDCGroup::getLastRow() const
 {
-  const int nTotRows = Mapper::ROWSPERREGION[mRegion];
-  const int rowsReminder = nTotRows % mGroupRows;
-  int lastRow = nTotRows - rowsReminder;
+  const unsigned int nTotRows = Mapper::ROWSPERREGION[mRegion];
+  const unsigned int rowsReminder = nTotRows % mGroupRows;
+  unsigned int lastRow = nTotRows - rowsReminder;
   if (rowsReminder <= mGroupLastRowsThreshold) {
     lastRow -= mGroupRows;
   }
   return lastRow;
 }
 
-int o2::tpc::IDCGroup::getLastPad(const int row) const
+unsigned int o2::tpc::IDCGroup::getLastPad(const unsigned int row) const
 {
-  const int nPads = 0.5 * Mapper::PADSPERROW[mRegion][row];
-  const int padsReminder = nPads % mGroupPads;
-  int lastPad = padsReminder == 0 ? nPads - mGroupPads : nPads - padsReminder;
+  const unsigned int nPads = Mapper::PADSPERROW[mRegion][row] / 2;
+  const unsigned int padsReminder = nPads % mGroupPads;
+  int unsigned lastPad = (padsReminder == 0) ? nPads - mGroupPads : nPads - padsReminder;
   if (padsReminder && padsReminder <= mGroupLastPadsThreshold) {
     lastPad -= mGroupPads;
   }
@@ -141,11 +134,11 @@ int o2::tpc::IDCGroup::getLastPad(const int row) const
 
 void o2::tpc::IDCGroup::initIDCGroup()
 {
-  const int lastRow = getLastRow();
-  const int nRows = lastRow / mGroupRows + 1;
+  const unsigned int lastRow = getLastRow();
+  const unsigned int nRows = lastRow / mGroupRows + 1;
   setRows(nRows);
-  for (int irow = 0; irow < nRows; ++irow) {
-    const int row = irow * mGroupRows;
+  for (unsigned int irow = 0; irow < nRows; ++irow) {
+    const unsigned int row = irow * mGroupRows;
     mPadsPerRow[irow] = 2 * (getLastPad(row) / mGroupPads + 1);
   }
   initStorage();

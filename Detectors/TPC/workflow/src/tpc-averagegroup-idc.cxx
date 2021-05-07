@@ -9,6 +9,9 @@
 // or submit itself to any jurisdiction.
 
 #include <fmt/format.h>
+#include <vector>
+#include <string>
+
 #include "Algorithm/RangeTokenizer.h"
 #include "Framework/WorkflowSpec.h"
 #include "Framework/Logger.h"
@@ -18,8 +21,6 @@
 #include "Headers/DataHeader.h"
 #include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
-#include <vector>
-#include <string>
 #include "TPCWorkflow/TPCAverageGroupIDCSpec.h"
 #include "TPCWorkflow/PublisherSpec.h"
 #include "TPCBase/CRU.h"
@@ -72,7 +73,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto nCRUs = tpcCRUs.size();
   const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nCRUs);
   const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
-
+  const auto debug = config.options().get<bool>("debug");
   const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
   IDCAverageGroup::setNThreads(nthreads);
 
@@ -135,8 +136,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   // set up configuration
   o2::conf::ConfigurableParam::updateFromFile(config.options().get<std::string>("configFile"));
   o2::conf::ConfigurableParam::writeINI("o2tpcaveragegroupidc_configuration.ini");
-
-  const auto debug = config.options().get<bool>("debug");
 
   WorkflowSpec workflow;
   if (nLanes <= 0) {

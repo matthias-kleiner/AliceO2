@@ -19,25 +19,33 @@
 #include <numeric>
 #include "Rtypes.h"
 #include "TPCBase/Mapper.h"
-#include "TPCCalibration/ParameterIDCGroup.h"
 
 namespace o2
 {
 namespace tpc
 {
 
-/// Class to hold grouped and averaged IDC values for one CRU for one TF
-/// Usage: TODO
-/// 1. set the number of integration intervals after creation the object if the number of integration intervals which will be stored are larger than 1 by using resize(nIntegrationIntervals)
+/// Class to hold grouped IDC values for one CRU for one TF
 
 class IDCGroup
 {
  public:
+  /// constructor
+  /// \param groupPads number of pads in pad direction which will be grouped
+  /// \param groupRows number of pads in row direction which will be grouped
+  /// \param groupLastRowsThreshold minimum number of pads in row direction for the last group in row direction
+  /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction
+  /// \param region region of the TPC
   IDCGroup(const unsigned int groupPads = 4, const unsigned int groupRows = 4, const unsigned int groupLastRowsThreshold = 2, const unsigned int groupLastPadsThreshold = 2, const unsigned int region = 0)
     : mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mRegion{region}
   {
     initIDCGroup();
   }
+
+  /// extend the size of the grouped and averaged IDC values corresponding to the number of integration intervals.
+  /// without using this function the object can hold only one integration interval
+  /// \param nIntegrationIntervals number of ontegration intervals for which teh IDCs are stored
+  void resize(const unsigned int nIntegrationIntervals) { mIDCsGrouped.resize(mNIDCsPerCRU * nIntegrationIntervals); }
 
   /// \return returns the stored value
   /// \param row row of the grouped IDCs
@@ -55,50 +63,43 @@ class IDCGroup
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float& getVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndex(getGroupedRow(urow), getGroupedPad(upad, urow), integrationInterval)]; }
+  float& getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  const float& getVal(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndex(getGroupedRow(urow), getGroupedPad(upad, urow), integrationInterval)]; }
+  const float& getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
 
   /// \return returns the global pad number for given local pad row and pad
-  /// \param lrow local row in a region
-  /// \param pad pad in row
-  unsigned int getGlobalPadNumber(const unsigned int lrow, const unsigned int pad) const { return Mapper::GLOBALPADOFFSET[mRegion] + Mapper::OFFSETCRULOCAL[mRegion][lrow] + pad; }
-
-  /// \return returns the global pad number for given local pad row and pad
-  /// \param lrow local row in a region
-  /// \param pad pad in row
+  /// \param lrow ungrouped local row in a region
+  /// \param pad ungrouped pad in row
   unsigned int static getGlobalPadNumber(const unsigned int lrow, const unsigned int pad, const unsigned int region) { return Mapper::GLOBALPADOFFSET[region] + Mapper::OFFSETCRULOCAL[region][lrow] + pad; }
 
+  /// \return returns number of grouped rows
   unsigned int getNRows() const { return mRows; }
 
-  /// \param row row of the grouped IDCs
+  /// \return returns number of grouped pads
+  /// \param row grouped row
   unsigned int getPadsPerRow(const unsigned int row) const { return mPadsPerRow[row]; }
+
+  /// \return returns number of grouped pads for all rows
   const std::vector<unsigned int>& getPadsPerRow() const { return mPadsPerRow; }
 
+  /// \return returns offsets for rows to calculate data index
   const std::vector<unsigned int>& getRowOffset() const { return mOffsRow; }
 
+  /// \return returns grouped and averaged IDC values
   const auto& getData() const { return mIDCsGrouped; }
   auto& getData() { return mIDCsGrouped; }
 
-  /// extend the size of the grouped and averaged IDC values corresponding to the number of integration intervals.
-  /// without using this function the object can hold only one integration interval
-  /// \param nIntegrationIntervals number of ontegration intervals for which teh IDCs are stored
-  void resize(const unsigned int nIntegrationIntervals) { mIDCsGrouped.resize(mNIDCsPerCRU * nIntegrationIntervals); }
+  /// \return returns number of stored integration intervals
+  unsigned int getNIntegrationIntervals() const { return mIDCsGrouped.size() / mNIDCsPerCRU; }
 
-  /// dump the IDCs to a tree
-  /// \param outname name of the output file
-  void dumpToTree(const char* outname = "IDCGroup.root") const;
-
-  int getNIntegrationIntervals() const { return mIDCsGrouped.size() / mNIDCsPerCRU; }
-
-  /// \return returns the number pads in pad direction which are grouped
+  /// \return returns the number of pads in pad direction which are grouped
   unsigned int getGroupPads() const { return mGroupPads; }
 
-  /// \return returns the number pads in row direction which are grouped
+  /// \return returns the number of pads in row direction which are grouped
   unsigned int getGroupRows() const { return mGroupRows; }
 
   /// \return returns threshold for grouping the last group in row direction
@@ -110,39 +111,54 @@ class IDCGroup
   /// \return returns the region for which the IDCs are stored
   unsigned int getRegion() const { return mRegion; }
 
-  /// \return returns the row of the group from the local row in a region
-  /// \param lrow local ungrouped row in a region
-  static unsigned int getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int rows);
+  /// \returns returns number of IDCS per integration interval
+  unsigned int getNIDCsPerIntegrationInterval() const { return mNIDCsPerCRU; }
 
+  /// \return returns the row of the group from the local ungrouped row in a region
+  /// \param lrow local ungrouped row in a region
+  /// \param groupRows grouping parameter for number of pads in row direction which are grouped
+  /// \param groupedrows number of grouped rows
+  static unsigned int getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int groupedrows);
+
+  /// \return returns the row of the group from the local ungrouped row in a region
+  /// \param lrow local ungrouped row in a region
   unsigned int getGroupedRow(const unsigned int lrow) const { return getGroupedRow(lrow, mGroupRows, mRows); }
 
   /// \return returns the grouped pad index from ungrouped pad and row
   /// \param pad ungrouped pad
   /// \param lrow local ungrouped row in a region
-  static int getGroupedPad(const unsigned int pad, const unsigned int lrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int rows, const std::vector<unsigned int>& padsPerRow);
+  /// \param region region
+  /// \param groupPads grouping parameter for number of pads in pad direction which are grouped
+  /// \param groupRows grouping parameter for number of pads in row direction which are grouped
+  /// \param groupedrows number of grouped rows
+  /// \param padsPerRow vector containing the number of pads per row
+  static unsigned int getGroupedPad(const unsigned int pad, const unsigned int lrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int groupedrows, const std::vector<unsigned int>& padsPerRow);
 
   /// \return returns the grouped pad index from ungrouped pad and row
   /// \param pad ungrouped pad
   /// \param lrow local ungrouped row in a region
-  int getGroupedPad(const unsigned int pad, const unsigned int lrow) const { return getGroupedPad(pad, lrow, mRegion, mGroupPads, mGroupRows, mRows, mPadsPerRow); };
+  unsigned int getGroupedPad(const unsigned int pad, const unsigned int lrow) const { return getGroupedPad(pad, lrow, mRegion, mGroupPads, mGroupRows, mRows, mPadsPerRow); };
 
-  /// \return returns last ungrouped row index for mRegion
-  int getLastRow() const;
+  /// \return returns last ungrouped row
+  unsigned int getLastRow() const;
+
+  /// \return returns last ungrouped pad for given global row
+  /// \param row ungrouped row
+  unsigned int getLastPad(const unsigned int row) const;
+
+  /// dump the IDCs to a tree
+  /// \param outname name of the output file
+  void dumpToTree(const char* outname = "IDCGroup.root") const;
 
   /// dump object to disc
   /// \param outFileName name of the output file
   /// \param outName name of the object in the output file
   void dumpToFile(const char* outFileName = "IDCGroup.root", const char* outName = "IDCGroup") const;
 
-  /// \return returns last ungrouped pad index for given global row
-  int getLastPad(const int row) const;
-
   /// draw grouped IDCs
   /// \param integrationInterval integration interval for which the IDCs will be drawn
   /// \param filename name of the output file. If empty the canvas is drawn.
   void draw(const unsigned int integrationInterval = 0, const std::string filename = "IDCsGrouped.pdf") const;
-
-  unsigned int getNIDCsPerCRU() const { return mNIDCsPerCRU; }
 
  private:
   const unsigned int mGroupPads{4};              ///< group 4 pads
@@ -156,8 +172,10 @@ class IDCGroup
   std::vector<unsigned int> mOffsRow{};          ///< offset to calculate the index in the data from row and pad
   std::vector<float> mIDCsGrouped{};             ///< grouped and averaged IDC values
 
+  /// set number of grouped rows
   void setRows(const unsigned int nRows);
 
+  /// initialize members
   void initIDCGroup();
 
   /// initialize the member containing the grouped IDCs
@@ -166,7 +184,19 @@ class IDCGroup
   /// \return returns index to the data
   /// \param row row of the grouped IDCs
   /// \param pad pad of the grouped IDCs
+  /// \param integrationInterval integration interval
   unsigned int getIndex(const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerCRU * integrationInterval + mOffsRow[row] + pad; }
+
+  /// \return returns index to the data
+  /// \param urow ungrouped row
+  /// \param upad ungrouped pad
+  /// \param integrationInterval integration interval
+  unsigned int getIndexUngrouped(const unsigned int urow, const unsigned int upad, unsigned int integrationInterval) const { return getIndex(getGroupedRow(urow), getGroupedPad(upad, urow), integrationInterval); }
+
+  /// \return returns the global pad number for given local pad row and pad
+  /// \param lrow local ungrouped row in a region
+  /// \param pad ungrouped pad in row
+  unsigned int getGlobalPadNumber(const unsigned int lrow, const unsigned int pad) const { return Mapper::GLOBALPADOFFSET[mRegion] + Mapper::OFFSETCRULOCAL[mRegion][lrow] + pad; }
 
   ClassDefNV(IDCGroup, 1)
 };
