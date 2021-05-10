@@ -117,10 +117,9 @@ class IDCDeltaCompressionHelper
   static float getCompressionFactor(const IDCDelta<float>& idcDeltaUncompressed, const o2::tpc::Side side)
   {
     const float maxAbsIDC = getMaxValue(idcDeltaUncompressed.mIDCDelta[side]);
-    const static auto& paramIDCGroup = ParameterIDCCompression::Instance();
+    const auto& paramIDCGroup = ParameterIDCCompression::Instance();
     const float maxIDC = paramIDCGroup.MaxIDCDeltaValue;
     return (maxAbsIDC > maxIDC && maxIDC > 0) ? (std::numeric_limits<DataT>::max() / maxIDC) : (std::numeric_limits<DataT>::max() / maxAbsIDC);
-    // return std::numeric_limits<DataT>::max() / getMaxValue(idcDeltaUncompressed.mIDCDelta[side]);
   }
 
   /// \returns returns maximum abs value in vector

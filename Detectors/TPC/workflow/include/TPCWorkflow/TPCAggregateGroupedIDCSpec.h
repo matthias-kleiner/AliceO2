@@ -73,25 +73,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mProcessedTFs = 0;
       mIDCs.factorizeIDCs();
 
-      if (mWriteToDB) {
-        mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
-        switch (mCompressionDeltaIDC) {
-          case IDCDeltaCompression::MEDIUM: {
-            auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed();
-            mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC", mMetadata);
-            break;
-          }
-          case IDCDeltaCompression::HIGH: {
-            auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed();
-            mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC", mMetadata);
-            break;
-          }
-          case IDCDeltaCompression::NO:
-          default:
-            mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(), "TPC/Calib/IDC", mMetadata);
-            break;
-        }
-      }
+      sendOutput(pc.outputs());
 
       if (mDebug) {
         LOGP(info, "dumping aggregated IDCS to file");
@@ -121,14 +103,54 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 
   void sendOutput(DataAllocator& output)
   {
-    // send the output per side
-    const auto idcDelta = mIDCs.getIDCDeltaUncompressed();
+    if (mWriteToDB) {
+      // store IDC Zero One in CCDB
+      mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
+    }
+
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
       const o2::tpc::Side side = iSide ? Side::C : Side::A;
       const header::DataHeader::SubSpecificationType subSpec{iSide};
-      // output.snapshot(Output{gDataOriginTPC, "IDCZERO", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
-      // output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
-      // output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDelta(side));
+      output.snapshot(Output{gDataOriginTPC, "IDCZERO", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
+      output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
+    }
+
+    switch (mCompressionDeltaIDC) {
+      case IDCDeltaCompression::MEDIUM: {
+        auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed();
+        if (mWriteToDB) {
+          mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC", mMetadata);
+        }
+        for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+          const o2::tpc::Side side = iSide ? Side::C : Side::A;
+          const header::DataHeader::SubSpecificationType subSpec{iSide};
+          output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.mIDCDelta[side]);
+        }
+        break;
+      }
+      case IDCDeltaCompression::HIGH: {
+        auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed();
+        if (mWriteToDB) {
+          mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC", mMetadata);
+        }
+        for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+          const o2::tpc::Side side = iSide ? Side::C : Side::A;
+          const header::DataHeader::SubSpecificationType subSpec{iSide};
+          output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.mIDCDelta[side]);
+        }
+        break;
+      }
+      case IDCDeltaCompression::NO:
+      default:
+        if (mWriteToDB) {
+          mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(), "TPC/Calib/IDC", mMetadata);
+        }
+        for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+          const o2::tpc::Side side = iSide ? Side::C : Side::A;
+          const header::DataHeader::SubSpecificationType subSpec{iSide};
+          output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDeltaUncompressed(side));
+        }
+        break;
     }
   }
 };
@@ -136,7 +158,6 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const IDCDeltaCompression compression, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
-
   for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
     const header::DataHeader::SubSpecificationType subSpec{iSide};
     outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCZERO", subSpec});
@@ -146,7 +167,6 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
 
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(crus.size());
-
   for (const auto& cru : crus) {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
     inputSpecs.emplace_back(InputSpec{"idcsgroup", gDataOriginTPC, "IDCGROUP", subSpec, Lifetime::Timeframe});
