@@ -234,6 +234,11 @@ class IDCFactorization
   /// \param maxIDCDeltaValue maximum IDC delta value for compressed IDC delta (-1 use standard value from ParameterIDCCompression)
   void dumpIDCsToTree(int integrationIntervals = -1, const float maxIDCDeltaValue = -1.f) const;
 
+  static void setMaxCompressedIDCDelta(const float maxIDCDeltaValue)
+  {
+    o2::conf::ConfigurableParam::setValue<float>("TPCIDCCompressionParam", "MaxIDCDeltaValue", maxIDCDeltaValue);
+  }
+
  private:
   const std::array<unsigned int, Mapper::NREGIONS> mGroupPads{};                            ///< grouping definition in pad direction (How many pads are grouped)
   const std::array<unsigned int, Mapper::NREGIONS> mGroupRows{};                            ///< grouping definition in row direction (How many rows are grouped)
@@ -241,7 +246,7 @@ class IDCFactorization
   const std::array<unsigned int, Mapper::NREGIONS> mGroupLastPadsThreshold{};               ///< if the last group (sector edges) consists in pad direction of less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
   const unsigned int mTimeFrames{};                                                         ///< number of timeframes which are stored
   std::array<unsigned int, Mapper::NREGIONS> mNIDCsPerCRU{1};                               ///< total number of IDCs per region per integration interval
-  std::array<std::vector<std::vector<float>>, Mapper::NSECTORS * Mapper::NREGIONS> mIDCs{}; ///< grouped and IDCs for the whole TPC. sector -> region -> time frame -> IDCs
+  std::array<std::vector<std::vector<float>>, Mapper::NSECTORS * Mapper::NREGIONS> mIDCs{}; ///< grouped and IDCs for the whole TPC. CRU -> time frame -> IDCs
   IDCZeroOne mIDCZeroOne{};                                                                 ///< I_0(r,\phi) = <I(r,\phi,t)>_t and I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   IDCDelta<float> mIDCDelta{};                                                              ///< uncompressed: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   unsigned int mNIDCsPerSector{};                                                           ///< number of grouped IDCs per sector

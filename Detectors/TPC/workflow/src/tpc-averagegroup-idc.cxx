@@ -52,10 +52,10 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during averaging and grouping."}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
-    {"groupPads", VariantType::String, "8,8,8,8,8,8,8,8,8,8", {"number of pads in a row which will be grouped per region"}},
-    {"groupRows", VariantType::String, "4,4,4,4,4,4,4,4,4,4", {"number of pads in row direction which will be grouped per region"}},
-    {"groupLastRowsThreshold", VariantType::String, "2,2,2,2,2,2,2,2,2,2", {"set threshold in row direction for merging the last group to the previous group per region"}},
-    {"groupLastPadsThreshold", VariantType::String, "2,2,2,2,2,2,2,2,2,2", {"set threshold in pad direction for merging the last group to the previous group per region"}}};
+    {"groupPads", VariantType::String, "7,7,7,7,6,6,6,6,5,5", {"number of pads in a row which will be grouped per region"}},
+    {"groupRows", VariantType::String, "5,5,5,5,4,4,4,4,3,3", {"number of pads in row direction which will be grouped per region"}},
+    {"groupLastRowsThreshold", VariantType::String, "3,3,3,3,2,2,2,2,2,2", {"set threshold in row direction for merging the last group to the previous group per region"}},
+    {"groupLastPadsThreshold", VariantType::String, "3,3,3,3,2,2,2,2,1,1", {"set threshold in pad direction for merging the last group to the previous group per region"}}};
 
   std::swap(workflowOptions, options);
 }

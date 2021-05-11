@@ -40,10 +40,6 @@ namespace o2
 namespace tpc
 {
 
-/*
-class for aggregation of grouped IDCs
-*/
-
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
@@ -55,7 +51,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   void init(o2::framework::InitContext& ic) final
   {
     mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    mWriteToDB = mDBapi.isHostReachable() ? true : false;
+    mWriteToDB = false;                                     //mDBapi.isHostReachable() ? true : false;
   }
 
   void run(o2::framework::ProcessingContext& pc) final
