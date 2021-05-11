@@ -211,6 +211,7 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const f
   std::vector<float> idcOneA = mIDCZeroOne.mIDCOne[0];
   std::vector<float> idcOneC = mIDCZeroOne.mIDCOne[1];
   for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
+    LOGP(info, "Dumpin integrationInterval {}", integrationInterval);
     const unsigned int nIDCsSector = Mapper::getPadsInSector() * Mapper::NSECTORS;
     std::vector<int> vRow(nIDCsSector);
     std::vector<int> vPad(nIDCsSector);
@@ -254,12 +255,15 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const f
         }
       }
     }
+    float idcOneATmp = idcOneA[integrationInterval];
+    float idcOneCTmp = idcOneC[integrationInterval];
+
     pcstream << "tree"
              << "integrationInterval=" << integrationInterval
              << "IDC.=" << idcs
              << "IDC0.=" << idcsZero
-             << "IDC1A.=" << idcOneA
-             << "IDC1C.=" << idcOneC
+             << "IDC1A=" << idcOneATmp
+             << "IDC1C=" << idcOneCTmp
              << "IDCDeltaNoComp.=" << idcsDelta
              << "IDCDeltaMediumComp.=" << idcsDeltaMedium
              << "IDCDeltaHighComp.=" << idcsDeltaHigh
@@ -307,13 +311,15 @@ void o2::tpc::IDCFactorization::calcIDCOne()
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
+    unsigned int integrationIntervallast = 0;
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
       for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
-        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region];
+        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region] + integrationIntervallast;
         const auto side = cruTmp.side();
         const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
         mIDCZeroOne.mIDCOne[side][integrationInterval] += mIDCs[cru][timeframe][idcs] / mIDCZeroOne.mIDCZero[side][indexGlob % nIDCsSide];
       }
+      integrationIntervallast += mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
     }
   }
 
@@ -332,9 +338,10 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
+    unsigned int integrationIntervallast = 0;
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
       for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
-        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region];
+        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region] + integrationIntervallast;
         const auto side = cruTmp.side();
         const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
         const unsigned int indexGlobMod = indexGlob % nIDCsSide;
@@ -343,6 +350,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const auto val = (idcZero > 0 && idcOne > 0) ? mIDCs[cru][timeframe][idcs] / (idcZero * idcOne) : 0;
         mIDCDelta.mIDCDelta[side][indexGlobMod + integrationInterval * nIDCsSide] = val - 1;
       }
+      integrationIntervallast += mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
     }
   }
 }
@@ -355,14 +363,13 @@ const float& o2::tpc::IDCFactorization::getIDCVal(const unsigned int sector, con
   unsigned int nintervals = 0;
 
   for (unsigned int tf = 0; tf < mTimeFrames; ++tf) {
-    timeFrame = tf;
     nintervals += mIDCs[region][tf].size() / mNIDCsPerCRU[region];
     if (integrationInterval < nintervals) {
       timeFrame = tf;
       interval = integrationInterval - interval;
       break;
     }
-    interval += nintervals;
+    interval = nintervals;
   }
   return mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
 }

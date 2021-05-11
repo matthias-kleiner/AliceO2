@@ -76,6 +76,11 @@ o2_add_executable(aggregate-idc
                   SOURCES src/tpc-aggregate-grouped-idc.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
+o2_add_executable(fouriertransform-idc
+                  COMPONENT_NAME tpc
+                  SOURCES src/tpc-fourier-transform-idc.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
+
 o2_add_executable(track-reader
                   COMPONENT_NAME tpc
                   SOURCES src/TrackReaderWorkflow.cxx
