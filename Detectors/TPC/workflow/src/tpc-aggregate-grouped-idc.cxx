@@ -44,7 +44,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
-    {"compression", VariantType::Int, 0, {"compression of DeltaIDC: 0 -> No, 1 -> Medium (data compression ratio 2), 2 -> High (data compression ratio ~6)"}},
+    {"compression", VariantType::Int, 1, {"compression of DeltaIDC: 0 -> No, 1 -> Medium (data compression ratio 2), 2 -> High (data compression ratio ~6)"}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCIDCCompressionParam.MaxIDCDeltaValue=1.5;')"}}};
 
   std::swap(workflowOptions, options);

@@ -165,23 +165,29 @@ struct IDCZeroOne { ///< struct containing the IDC0 and IDC1 values
 };
 
 struct FourierCoeff { ///< struct containing the fourier coefficients calculated from IDC0
-  unsigned long getNIntervals(const o2::tpc::Side side) const { return mFourierCoefficients[side].size(); } /// \return returns numbers of stored intervals
-  unsigned long getNCoefficients(const unsigned long interval) const { return mFourierCoefficients[interval].size(); } /// \return returns numbers of stored fourier coefficients
-  auto getFourierCoefficient(const o2::tpc::Side side, const unsigned int interval, const unsigned int coefficient) const { return mFourierCoefficients[side][interval][coefficient]; }
+  /// IDC types
+  enum class CoeffType { REAL = 0, ///< real
+                         IMAG = 1  ///< imag
+  };
+
+  unsigned long getNValues(const o2::tpc::Side side, const CoeffType type = CoeffType::REAL) const { return mFourierCoefficients[side][static_cast<int>(type)].size(); } /// \return returns numbers of stored intervals
+  // unsigned long getNCoefficients(const unsigned long interval) const { return mFourierCoefficients[interval].size(); } /// \return returns numbers of stored fourier coefficients
+  const auto& getFourierCoefficients(const o2::tpc::Side side, const FourierCoeff::CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
-  /// \param interval interval of which the coefficients were calculated
-  /// \param coefficient index of coefficient
-  const std::complex<float>& operator()(const o2::tpc::Side side, unsigned long interval, unsigned int coefficient) const { return mFourierCoefficients[side][interval][coefficient]; }
+  /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
+  /// \param CoeffType real or imag coefficient
+  const float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)][index]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
-  /// \param interval interval of which the coefficients were calculated
-  /// \param coefficient index of coefficient
-  std::complex<float>& operator()(const o2::tpc::Side side, const unsigned long interval, const unsigned int coefficient) { return mFourierCoefficients[side][interval][coefficient]; }
+  /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
+  /// \param CoeffType real or imag coefficient
+  float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) { return mFourierCoefficients[side][static_cast<int>(type)][index]; }
 
-  std::array<std::vector<std::vector<std::complex<float>>>, o2::tpc::SIDES> mFourierCoefficients; ///< fourier coefficients. side -> interval -> coefficient
+  // std::array<std::vector<std::vector<std::complex<float>>>, o2::tpc::SIDES> mFourierCoefficients; ///< fourier coefficients. side -> interval -> coefficient
+  std::array<std::array<std::vector<float>, 2>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> real/imag -> coefficient
 };
 
 } // namespace tpc

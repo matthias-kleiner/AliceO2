@@ -22,15 +22,22 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficients(const o2::tpc::Side s
   for (unsigned long interval = 0; interval < getNIntervals(side); ++interval) {
     // loop over coefficients which will be calculated
     for (unsigned int coeff = 0; coeff < getNCoefficients(); ++coeff) {
+      const unsigned int indexData = getIndex(interval, coeff);
+
       const unsigned int lastIndex = getLastIndex(interval, side);
       const float term0 = o2::constants::math::TwoPI * coeff / lastIndex;
       for (unsigned int index = 0; index < lastIndex; ++index) {
         const float term = term0 * index;
         const float idc = mIDCsOne[side][index + mShift * interval];
-        mFourierCoefficients(side,interval,coeff) += idc * std::complex<float>(std::cos(term), -std::sin(term));
+
+        mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL) += idc * std::cos(term);
+        mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) -= idc * std::sin(term);
       }
       // normalize coefficient to number of used points
-      mFourierCoefficients(side,interval,coeff) /= lastIndex;
+      // mFourierCoefficients(side, interval, coeff) /= lastIndex;
+
+      mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL) /= lastIndex;
+      mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) /= lastIndex;
     }
   }
 }
@@ -48,8 +55,9 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
     for (unsigned int index = 0; index < lastIndex; ++index) {
       const float term0 = o2::constants::math::TwoPI * index / lastIndex;
       for (unsigned int coeff = 0; coeff < getNCoefficients(); ++coeff) {
+        const unsigned int indexData = getIndex(interval, coeff);
         const float term = term0 * coeff;
-        inverse[interval][index] += mFourierCoefficients(side,interval,coeff).real() * std::cos(term) - mFourierCoefficients(side,interval,coeff).imag() * std::sin(term);
+        inverse[interval][index] += mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL) * std::cos(term) - mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) * std::sin(term);
       }
     }
   }
@@ -73,8 +81,9 @@ void o2::tpc::IDCFourierTransform::dumpToTree() const
     const auto inverseFourier = inverseFourierTransform(side);
     for (unsigned int coeff = 0; coeff < getNCoefficients(); ++coeff) {
       for (unsigned int interval = 0; interval < getNIntervals(o2::tpc::Side::A); ++interval) {
-        float real = mFourierCoefficients(side,interval,coeff).real();
-        float imag = mFourierCoefficients(side,interval,coeff).imag();
+        const unsigned int indexData = getIndex(interval, coeff);
+        float real = mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL);
+        float imag = mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG);
 
         const unsigned int lastIndex = getLastIndex(interval, side);
         std::vector<float> idcOne;
@@ -100,8 +109,11 @@ void o2::tpc::IDCFourierTransform::dumpToTree() const
 
 void o2::tpc::IDCFourierTransform::initCoefficients(const o2::tpc::Side side)
 {
-  mFourierCoefficients.mFourierCoefficients[side].resize(std::ceil((getNIDCs(side) - mRangeIntegrationIntervals) / static_cast<float>(mShift)) + 1); // n integration intervals
-  for (auto& interval : mFourierCoefficients.mFourierCoefficients[side]) {
-    interval.resize(mNFourierCoefficients);
-  }
+  const unsigned int factor = std::ceil((getNIDCs(side) - mRangeIntegrationIntervals) / static_cast<float>(mShift)) + 1;
+  mFourierCoefficients.mFourierCoefficients[side][static_cast<int>(FourierCoeff::CoeffType::REAL)].resize(mNFourierCoefficients * factor); // n integration intervals
+  mFourierCoefficients.mFourierCoefficients[side][static_cast<int>(FourierCoeff::CoeffType::IMAG)].resize(mNFourierCoefficients * factor); // n integration intervals
+
+  // for (auto& interval : mFourierCoefficients.mFourierCoefficients[side]) {
+  // interval.resize(mNFourierCoefficients);
+  // }
 }
