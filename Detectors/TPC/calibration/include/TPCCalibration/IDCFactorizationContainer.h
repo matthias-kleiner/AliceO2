@@ -21,6 +21,7 @@
 #include <vector>
 #include <limits>
 #include <math.h>
+#include <complex>
 #include "DataFormatsTPC/Defs.h"
 #include "Framework/Logger.h"
 #include "TPCCalibration/ParameterIDC.h"
@@ -161,6 +162,26 @@ struct IDCZeroOne { ///< struct containing the IDC0 and IDC1 values
 
   std::array<std::vector<float>, o2::tpc::SIDES> mIDCZero{}; ///< I_0(r,\phi) = <I(r,\phi,t)>_t
   std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{};  ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+};
+
+struct FourierCoeff { ///< struct containing the fourier coefficients calculated from IDC0
+  unsigned long getNIntervals(const o2::tpc::Side side) const { return mFourierCoefficients[side].size(); } /// \return returns numbers of stored intervals
+  unsigned long getNCoefficients(const unsigned long interval) const { return mFourierCoefficients[interval].size(); } /// \return returns numbers of stored fourier coefficients
+  auto getFourierCoefficient(const o2::tpc::Side side, const unsigned int interval, const unsigned int coefficient) const { return mFourierCoefficients[side][interval][coefficient]; }
+
+  /// \return returns the stored value
+  /// \param side side of the TPC
+  /// \param interval interval of which the coefficients were calculated
+  /// \param coefficient index of coefficient
+  const std::complex<float>& operator()(const o2::tpc::Side side, unsigned long interval, unsigned int coefficient) const { return mFourierCoefficients[side][interval][coefficient]; }
+
+  /// \return returns the stored value
+  /// \param side side of the TPC
+  /// \param interval interval of which the coefficients were calculated
+  /// \param coefficient index of coefficient
+  std::complex<float>& operator()(const o2::tpc::Side side, const unsigned long interval, const unsigned int coefficient) { return mFourierCoefficients[side][interval][coefficient]; }
+
+  std::array<std::vector<std::vector<std::complex<float>>>, o2::tpc::SIDES> mFourierCoefficients; ///< fourier coefficients. side -> interval -> coefficient
 };
 
 } // namespace tpc

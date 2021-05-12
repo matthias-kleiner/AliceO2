@@ -50,6 +50,7 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   poly->GetYaxis()->SetTitleOffset(0.7f);
   poly->GetZaxis()->SetTitleOffset(1.3f);
   poly->SetStats(0);
+  poly->GetZaxis()->SetTitle(getZAxisTitle(type, compression).data());
 
   TCanvas* can = new TCanvas("can", "can", 2000, 1400);
   can->SetRightMargin(0.14f);
@@ -113,6 +114,38 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   }
 }
 
+std::string o2::tpc::IDCFactorization::getZAxisTitle(const IDCType type, const IDCDeltaCompression compression) const
+{
+  switch (type) {
+    case IDCType::IDC:
+    default:
+      return "#it{IDC}";
+      break;
+    case IDCType::IDCZero:
+      return "#it{IDC_{0}}";
+      break;
+    case IDCType::IDCDelta:
+      switch (compression) {
+        case IDCDeltaCompression::NO:
+        default: {
+          return "#Delta#it{IDC}";
+          break;
+        }
+        case IDCDeltaCompression::MEDIUM: {
+          return "#Delta#it{IDC}_{medium compressed}";
+          break;
+        }
+        case IDCDeltaCompression::HIGH: {
+          return "#Delta#it{IDC}_{high compressed}";
+          break;
+        }
+      }
+    case IDCType::IDCOne:
+      return "#Delta#it{IDC}_{1}";
+      break;
+  }
+}
+
 void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename, const IDCDeltaCompression compression) const
 {
   const auto coords = o2::tpc::painter::getPadCoordinatesSector();
@@ -122,7 +155,7 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
   poly->GetXaxis()->SetTitleOffset(1.2f);
   poly->GetYaxis()->SetTitleOffset(1.3f);
   poly->GetZaxis()->SetTitleOffset(1.2f);
-  poly->GetZaxis()->SetTitle("#it{IDC}");
+  poly->GetZaxis()->SetTitle(getZAxisTitle(type, compression).data());
   poly->GetZaxis()->SetMaxDigits(3); // force exponential axis
   poly->SetStats(0);
 

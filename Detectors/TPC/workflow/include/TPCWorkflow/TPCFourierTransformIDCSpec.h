@@ -27,9 +27,10 @@
 #include "Headers/DataHeader.h"
 #include "DataFormatsTPC/Defs.h"
 // #include "TPCBase/CDBInterface.h"
+#include "CCDB/CcdbApi.h"
 // #include "TPCCalibration/IDCFactorization.h"
 // #include "CCDB/CcdbApi.h"
-// #include "Framework/ConfigParamRegistry.h"
+#include "Framework/ConfigParamRegistry.h"
 #include "TPCCalibration/IDCFourierTransform.h"
 
 using namespace o2::framework;
@@ -49,8 +50,8 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
 
   void init(o2::framework::InitContext& ic) final
   {
-    // mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    // mWriteToDB = mDBapi.isHostReachable() ? true : false;
+    mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
+    mWriteToDB = false;                                     //mDBapi.isHostReachable() ? true : false;
   }
 
   void run(o2::framework::ProcessingContext& pc) final
@@ -59,8 +60,10 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
       const o2::tpc::Side side = iSide ? Side::C : Side::A;
       const DataRef ref = pc.inputs().getByPos(iSide);
       mIDCFourierTransform.setIDCs(pc.inputs().get<std::vector<float>>(ref), side);
-      mIDCFourierTransform.calFourierCoefficients(side);
+      mIDCFourierTransform.calcFourierCoefficients(side);
     }
+
+    mIDCFourierTransform.getFourierCoefficients();
 
     if (mDebug) {
       const DataRef ref = pc.inputs().getByPos(0);
@@ -78,16 +81,34 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
 
  private:
   IDCFourierTransform mIDCFourierTransform{};
-  const bool mDebug{false}; ///< dump IDCs to tree for debugging
+  const bool mDebug{false};                     ///< dump IDCs to tree for debugging
+  o2::ccdb::CcdbApi mDBapi;                     ///< object for storing the IDCs at CCDB
+  std::map<std::string, std::string> mMetadata; ///< meta data of the stored object in CCDB
+  bool mWriteToDB{};                            ///< flag if writing to CCDB will be done
 
   void sendOutput(DataAllocator& output)
   {
+    if (mWriteToDB) {
+      // store IDC Zero One in CCDB
+      mDBapi.storeAsTFileAny(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC", mMetadata);
+    }
+
+    for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+      const o2::tpc::Side side = iSide ? Side::C : Side::A;
+      const header::DataHeader::SubSpecificationType subSpec{iSide};
+      // output.snapshot(Output{gDataOriginTPC, "IDCFOURIERCOEFF", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side));
+    }
   }
 };
 
 DataProcessorSpec getTPCFourierTransformIDCSpec(const unsigned int rangeIntegrationIntervals, const unsigned int shift, const unsigned int nFourierCoefficients, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
+  for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+    const header::DataHeader::SubSpecificationType subSpec{iSide};
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCCOEFFREAL", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCCOEFFIMAG", subSpec});
+  }
 
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(o2::tpc::SIDES);
@@ -101,7 +122,8 @@ DataProcessorSpec getTPCFourierTransformIDCSpec(const unsigned int rangeIntegrat
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCFourierTransformIDCSpec>(rangeIntegrationIntervals, shift, nFourierCoefficients, debug)}}; // end DataProcessorSpec
+    AlgorithmSpec{adaptFromTask<TPCFourierTransformIDCSpec>(rangeIntegrationIntervals, shift, nFourierCoefficients, debug)},
+    Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
 } // namespace tpc
