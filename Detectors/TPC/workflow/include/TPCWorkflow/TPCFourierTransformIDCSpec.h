@@ -51,7 +51,7 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
   void init(o2::framework::InitContext& ic) final
   {
     mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    mWriteToDB = false;                                     //mDBapi.isHostReachable() ? true : false;
+    mWriteToDB = mDBapi.isHostReachable() ? true : false;
   }
 
   void run(o2::framework::ProcessingContext& pc) final
@@ -63,7 +63,7 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
       mIDCFourierTransform.calcFourierCoefficients(side);
     }
 
-    mIDCFourierTransform.getFourierCoefficients();
+    sendOutput(pc.outputs());
 
     if (mDebug) {
       const DataRef ref = pc.inputs().getByPos(0);
@@ -96,7 +96,8 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
       const o2::tpc::Side side = iSide ? Side::C : Side::A;
       const header::DataHeader::SubSpecificationType subSpec{iSide};
-      // output.snapshot(Output{gDataOriginTPC, "IDCFOURIERCOEFF", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side));
+      output.snapshot(Output{gDataOriginTPC, "IDCCOEFFREAL", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::REAL));
+      output.snapshot(Output{gDataOriginTPC, "IDCCOEFFIMAG", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::IMAG));
     }
   }
 };
