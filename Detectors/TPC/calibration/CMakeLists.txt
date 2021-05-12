@@ -25,6 +25,7 @@ o2_add_library(TPCCalibration
                        src/IDCGroup.cxx
                        src/ParameterIDC.cxx
                        src/IDCFactorization.cxx
+                       src/IDCFourierTransform.cxx
                PUBLIC_LINK_LIBRARIES O2::DataFormatsTPC O2::TPCBase
                                      O2::TPCReconstruction ROOT::Minuit
                                      ms_gsl::ms_gsl)

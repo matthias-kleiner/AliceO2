@@ -286,6 +286,8 @@ class IDCFactorization
   /// \param sector sector
   Side getSide(const unsigned int sector) const { return (sector < SECTORSPERSIDE) ? Side::A : Side::C; }
 
+  std::string getZAxisTitle(const IDCType type, const IDCDeltaCompression compression) const;
+
   ClassDefNV(IDCFactorization, 1)
 };
 
