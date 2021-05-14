@@ -53,13 +53,13 @@ void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Dig
 
 unsigned int o2::tpc::IDCSim::getLastTimeBinForSwitch() const
 {
-  const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
+  const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsRemainder);
   return (totaloffs >= mTimeStampsPerIntegrationInterval) ? mIntegrationIntervalsPerTF * mTimeStampsPerIntegrationInterval - mTimeBinsOff : (mIntegrationIntervalsPerTF - mAddInterval) * mTimeStampsPerIntegrationInterval - mTimeBinsOff;
 }
 
 void o2::tpc::IDCSim::setNewOffset()
 {
-  const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsReminder);
+  const int totaloffs = mTimeBinsOff + static_cast<int>(mTimeStampsRemainder);
   mTimeBinsOff = (totaloffs >= mTimeStampsPerIntegrationInterval) ? (totaloffs - static_cast<int>(mTimeStampsPerIntegrationInterval)) : totaloffs;
 }
 
@@ -71,27 +71,24 @@ void o2::tpc::IDCSim::resetIDCs()
   }
 }
 
-void o2::tpc::IDCSim::dumpIDCs(const char* filename)
+void o2::tpc::IDCSim::dumpIDCs(const char* outFileName, const char* outName) const
 {
-  // const std::string name = fmt::format("idcs_obj_{:02}_{:02}.root", mSector, timeframe);
-  TFile fOut(filename, "RECREATE");
-  int cru = mSector * Mapper::NREGIONS;
-  for (const auto& idcs : mIDCs[!mBufferIndex]) {
-    fOut.WriteObject(&idcs, Form("cru_%i", cru));
-    ++cru;
-  }
+  TFile fOut(outFileName, "RECREATE");
+  fOut.WriteObject(this, outName);
   fOut.Close();
 }
 
-void o2::tpc::IDCSim::createDebugTree(const char* nameTree)
+void o2::tpc::IDCSim::createDebugTree(const char* nameTree) const
 {
   const Mapper& mapper = Mapper::instance();
   o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
   pcstream.GetFile()->cd();
 
   int cru = mSector * Mapper::NREGIONS;
+
+  // loop over data from regions
   for (const auto& idcs : mIDCs[!mBufferIndex]) {
-    int sectorTmp = mSector;
+    unsigned int sectorTmp = mSector;
     const o2::tpc::CRU cruTmp(cru);
     unsigned int region = cruTmp.region();
     const unsigned long padsPerCRU = Mapper::PADSPERREGION[region];
@@ -116,18 +113,17 @@ void o2::tpc::IDCSim::createDebugTree(const char* nameTree)
       vGlobalYPos[iPad] = globalPos.Y();
     }
 
-    for (int iTimeBin = 0; iTimeBin < mIntegrationIntervalsPerTF; ++iTimeBin) {
+    for (unsigned int integrationInterval = 0; integrationInterval < mIntegrationIntervalsPerTF; ++integrationInterval) {
       for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
-        idcsPerTimeBin[iPad] = (idcs)[iPad + iTimeBin * Mapper::PADSPERREGION[region]];
+        idcsPerTimeBin[iPad] = (idcs)[iPad + integrationInterval * Mapper::PADSPERREGION[region]];
       }
 
-      int cruiTmp = cru;
       pcstream << "tree"
-               << "cru=" << cruiTmp
+               << "cru=" << cru
                << "sector=" << sectorTmp
                << "region=" << region
-               << "timeBin=" << iTimeBin
-               << "IDCs.=" << idcsPerTimeBin
+               << "integrationInterval=" << integrationInterval
+               << "IDC.=" << idcsPerTimeBin
                << "pad.=" << vPad
                << "row.=" << vRow
                << "lx.=" << vXPos
@@ -137,6 +133,79 @@ void o2::tpc::IDCSim::createDebugTree(const char* nameTree)
                << "\n";
     }
     ++cru;
+  }
+  pcstream.Close();
+}
+
+void o2::tpc::IDCSim::createDebugTreeForAllCRUs(const char* nameTree, const char* filename)
+{
+  const Mapper& mapper = Mapper::instance();
+  o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
+  pcstream.GetFile()->cd();
+
+  TFile fInp(filename, "READ");
+  for (TObject* keyAsObj : *fInp.GetListOfKeys()) {
+    const auto key = dynamic_cast<TKey*>(keyAsObj);
+    LOGP(info, "Key name: {} Type: {}", key->GetName(), key->GetClassName());
+
+    if (std::strcmp(o2::tpc::IDCSim::Class()->GetName(), key->GetClassName()) != 0) {
+      LOGP(info, "skipping object. wrong class.");
+      continue;
+    }
+
+    IDCSim* idcsim = (IDCSim*)fInp.Get(key->GetName());
+    const unsigned int sector = idcsim->getSector();
+    unsigned int cru = sector * Mapper::NREGIONS;
+
+    // loop over data from regions
+    for (const auto& idcs : idcsim->get()) {
+      int sectorTmp = sector;
+      const o2::tpc::CRU cruTmp(cru);
+      unsigned int region = cruTmp.region();
+      const unsigned long padsPerCRU = Mapper::PADSPERREGION[region];
+      std::vector<int> vRow(padsPerCRU);
+      std::vector<int> vPad(padsPerCRU);
+      std::vector<float> vXPos(padsPerCRU);
+      std::vector<float> vYPos(padsPerCRU);
+      std::vector<float> vGlobalXPos(padsPerCRU);
+      std::vector<float> vGlobalYPos(padsPerCRU);
+      std::vector<float> idcsPerTimeBin(padsPerCRU); // idcs for one time bin
+
+      for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
+        const GlobalPadNumber globalNum = Mapper::GLOBALPADOFFSET[region] + iPad;
+        const auto& padPosLocal = mapper.padPos(globalNum);
+        vRow[iPad] = padPosLocal.getRow();
+        vPad[iPad] = padPosLocal.getPad();
+        vXPos[iPad] = mapper.getPadCentre(padPosLocal).X();
+        vYPos[iPad] = mapper.getPadCentre(padPosLocal).Y();
+
+        const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), cruTmp.sector());
+        vGlobalXPos[iPad] = globalPos.X();
+        vGlobalYPos[iPad] = globalPos.Y();
+      }
+
+      for (unsigned int integrationInterval = 0; integrationInterval < idcsim->getNIntegrationIntervalsPerTF(); ++integrationInterval) {
+        for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
+          idcsPerTimeBin[iPad] = (idcs)[iPad + integrationInterval * Mapper::PADSPERREGION[region]];
+        }
+
+        pcstream << "tree"
+                 << "cru=" << cru
+                 << "sector=" << sectorTmp
+                 << "region=" << region
+                 << "integrationInterval=" << integrationInterval
+                 << "IDC.=" << idcsPerTimeBin
+                 << "pad.=" << vPad
+                 << "row.=" << vRow
+                 << "lx.=" << vXPos
+                 << "ly.=" << vYPos
+                 << "gx.=" << vGlobalXPos
+                 << "gy.=" << vGlobalYPos
+                 << "\n";
+      }
+      ++cru;
+    }
+    delete idcsim;
   }
   pcstream.Close();
 }

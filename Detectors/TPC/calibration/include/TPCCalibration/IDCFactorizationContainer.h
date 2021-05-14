@@ -166,19 +166,25 @@ struct IDCZeroOne { ///< struct containing the IDC0 and IDC1 values
 
 struct FourierCoeff { ///< struct containing the fourier coefficients calculated from IDC0
   /// IDC types
-  enum class CoeffType { REAL = 0, ///< real
-                         IMAG = 1  ///< imag
+  enum class CoeffType { REAL = 0, ///< real coefficient
+                         IMAG = 1  ///< imag coefficient
   };
 
-  unsigned long getNValues(const o2::tpc::Side side, const CoeffType type = CoeffType::REAL) const { return mFourierCoefficients[side][static_cast<int>(type)].size(); } /// \return returns numbers of stored intervals
-  // unsigned long getNCoefficients(const unsigned long interval) const { return mFourierCoefficients[interval].size(); } /// \return returns numbers of stored fourier coefficients
+  /// \return returns total number of stored coefficients for given side and real/complex type
+  /// \param side side
+  /// \param type coefficient type CoeffType::REAL or CoeffType::IMAG
+  unsigned long getNValues(const o2::tpc::Side side, const CoeffType type = CoeffType::REAL) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)].size(); }
+
+  /// \return returns all stored coefficients for given side and real/complex type
+  /// \param side side
+  /// \param type coefficient type CoeffType::REAL or CoeffType::IMAG
   const auto& getFourierCoefficients(const o2::tpc::Side side, const FourierCoeff::CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
   /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
   /// \param CoeffType real or imag coefficient
-  const float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)][index]; }
+  float operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)][index]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC

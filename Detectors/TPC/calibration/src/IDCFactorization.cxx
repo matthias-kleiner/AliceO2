@@ -65,7 +65,7 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
     for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
       for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
-        const auto padNum = IDCGroup::getGlobalPadNumber(irow, ipad, region);
+        const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
         const auto coordinate = coords[padNum];
         const float yPos = -0.5f * static_cast<float>(coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
         const float xPos = 0.5f * static_cast<float>(coordinate.xVals[0] + coordinate.xVals[2]);
@@ -87,13 +87,13 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
               }
               case IDCDeltaCompression::MEDIUM: {
                 const static auto idcDeltaMedium = getIDCDeltaMediumCompressed(); // make object static to avoid multiple creations of the object in the loop
-                const float val = idcDeltaMedium.getValue(getSide(sector), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                const float val = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
                 poly->Fill(xPos, yPos, val);
                 break;
               }
               case IDCDeltaCompression::HIGH: {
                 const static auto idcDeltaHigh = getIDCDeltaHighCompressed(); // make object static to avoid multiple creations of the object in the loop
-                const float val = idcDeltaHigh.getValue(getSide(sector), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                const float val = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
                 poly->Fill(xPos, yPos, val);
                 break;
               }
@@ -171,7 +171,7 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
     for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
       for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
         for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
-          const auto padNum = IDCGroup::getGlobalPadNumber(irow, ipad, region);
+          const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
           const float angDeg = 10.f + sector * 20;
           auto coordinate = coords[padNum];
           coordinate.rotate(angDeg);
@@ -195,13 +195,13 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
                 }
                 case IDCDeltaCompression::MEDIUM: {
                   const static auto idcDeltaMedium = getIDCDeltaMediumCompressed(); // make object static to avoid multiple creations of the object in the loop
-                  const float val = idcDeltaMedium.getValue(getSide(sector), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                  const float val = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
                   poly->Fill(xPos, yPos, val);
                   break;
                 }
                 case IDCDeltaCompression::HIGH: {
                   const static auto idcDeltaHigh = getIDCDeltaHighCompressed(); // make object static to avoid multiple creations of the object in the loop
-                  const float val = idcDeltaHigh.getValue(getSide(sector), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                  const float val = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
                   poly->Fill(xPos, yPos, val);
                   break;
                 }
@@ -267,7 +267,7 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const f
       for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
         for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
           for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
-            const auto padNum = IDCGroup::getGlobalPadNumber(irow, ipad, region);
+            const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
             const auto padTmp = (sector < SECTORSPERSIDE) ? ipad : (Mapper::PADSPERROW[region][irow] - ipad); // C-Side is mirrored
             const auto& padPosLocal = mapper.padPos(padNum);
             vRow[index] = padPosLocal.getRow();
@@ -280,8 +280,8 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const f
             idcs[index] = getIDCVal(sector, region, irow, padTmp, integrationInterval);
             idcsZero[index] = getIDCZeroVal(sector, region, irow, padTmp);
             idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, integrationInterval);
-            idcsDeltaMedium[index] = idcDeltaMedium.getValue(getSide(sector), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
-            idcsDeltaHigh[index] = idcDeltaHigh.getValue(getSide(sector), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
+            idcsDeltaMedium[index] = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
+            idcsDeltaHigh[index] = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
             sectorv[index] = sector;
             ++index;
           }
@@ -388,7 +388,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
   }
 }
 
-const float& o2::tpc::IDCFactorization::getIDCVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const
+float o2::tpc::IDCFactorization::getIDCVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const
 {
   // TODO optimize this function
   unsigned int timeFrame = 0;

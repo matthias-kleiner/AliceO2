@@ -33,9 +33,7 @@ using namespace o2::framework;
 using o2::header::gDataOriginTPC;
 using namespace o2::tpc;
 
-namespace o2
-{
-namespace tpc
+namespace o2::tpc
 {
 
 class TPCAverageGroupIDCDevice : public o2::framework::Task
@@ -46,8 +44,9 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   {
     auto& paramIDCGroup = ParameterIDCGroup::Instance();
     for (const auto& cru : mCRUs) {
-      const int reg = cru % Mapper::NREGIONS;
-      mIDCs.emplace(cru, IDCAverageGroup(paramIDCGroup.GroupPads[reg], paramIDCGroup.GroupRows[reg], paramIDCGroup.GroupLastRowsThreshold[reg], paramIDCGroup.GroupLastPadsThreshold[reg], reg));
+      const CRU cruTmp(cru);
+      const unsigned int reg = cruTmp.region();
+      mIDCs.emplace(cru, IDCAverageGroup(paramIDCGroup.GroupPads[reg], paramIDCGroup.GroupRows[reg], paramIDCGroup.GroupLastRowsThreshold[reg], paramIDCGroup.GroupLastPadsThreshold[reg], reg, cruTmp.sector()));
     }
   }
 
@@ -62,12 +61,18 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
       mIDCs[cru].setIDCs(pc.inputs().get<std::vector<float>>(ref));
       mIDCs[cru].processIDCs();
 
-      if (mDebug) {
-        mIDCs[cru].dumpToFile(fmt::format("IDCGroup_{}.root", mLane).data(), fmt::format("CRU_{}_tf_{}", cru, tpcCRUHeader->tfCounter).data());
-      }
-
       // send the output for one CRU for one TF
       sendOutput(pc.outputs(), cru);
+    }
+
+    if (mDebug) {
+      TFile fOut(fmt::format("IDCGroup_{}_tf_{}.root", mLane, o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(pc.inputs().getByPos(0))->tfCounter).data(), "RECREATE");
+      for (int i = 0; i < mCRUs.size(); ++i) {
+        const DataRef ref = pc.inputs().getByPos(i);
+        auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
+        const int cru = tpcCRUHeader->subSpecification >> 7;
+        fOut.WriteObject(&mIDCs[cru], fmt::format("CRU_{}", cru).data());
+      }
     }
   }
 
@@ -113,7 +118,6 @@ DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vect
   }; // end DataProcessorSpec
 }
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif

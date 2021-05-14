@@ -22,46 +22,71 @@
 #include "Framework/Logger.h"
 #include "TPCCalibration/IDCFactorizationContainer.h"
 
-namespace o2
+namespace o2::tpc
 {
-namespace tpc
-{
+
 class IDCFourierTransform
 {
  public:
-  IDCFourierTransform(const unsigned int rangeIntegrationIntervals, const unsigned int shift, const unsigned int nFourierCoefficients) : mRangeIntegrationIntervals{rangeIntegrationIntervals}, mShift{shift}, mNFourierCoefficients{nFourierCoefficients} {};
+  /// contructor
+  /// \param rangeIntegrationIntervals number of IDCs for each interval which will be used to calculate the fourier coefficients
+  /// \param shift number of IDCs of which the range will be shifted
+  /// \param nFourierCoefficients number of fourier coefficients which will be calculated (cant be larger than rangeIntegrationIntervals)
+  IDCFourierTransform(const unsigned int rangeIntegrationIntervals = 10, const unsigned int shift = 1, const unsigned int nFourierCoefficients = 10) : mRangeIntegrationIntervals{rangeIntegrationIntervals}, mShift{shift}, mNFourierCoefficients{nFourierCoefficients} {};
 
-  /// adding default constructor for ROOT I/O
-  IDCFourierTransform() = default;
+  /// \return returns number of IDCs for each interval which will be used to calculate the fourier coefficients
+  unsigned int getRangeIntegrationIntervals() const { return mRangeIntegrationIntervals; }
 
-  unsigned int getRangeIntegrationIntervals() const { return mRangeIntegrationIntervals; }                                              /// \return returns get number of integration intervals which are used for calculation of the fourier coefficients
-  unsigned int getShift() const { return mShift; }                                                                                      /// \return returns shifting parameter for the range
-  unsigned int getNCoefficients() const { return mNFourierCoefficients; }                                                               /// \return returns numbers of stored fourier coeffiecients
-  unsigned long getNIDCs(const o2::tpc::Side side) const { return mIDCsOne[side].size(); }                                              /// \return returns number of 1D-IDCs
-  unsigned long getNIntervals(const o2::tpc::Side side) const { return mFourierCoefficients.getNValues(side) / mNFourierCoefficients; } /// \return returns number of intervals for which the coefficients are obtained
+  /// \return returns shifting parameter for the range
+  unsigned int getShift() const { return mShift; }
 
+  /// \return returns numbers of stored fourier coeffiecients
+  unsigned int getNCoefficients() const { return mNFourierCoefficients; }
+
+  /// \return returns number of 1D-IDCs
+  /// \param side TPC side
+  unsigned long getNIDCs(const o2::tpc::Side side) const { return mIDCsOne[side].size(); }
+
+  /// \return returns number of intervals for which the coefficients are obtained
+  /// \param side TPC side
+  unsigned long getNIntervals(const o2::tpc::Side side) const { return mFourierCoefficients.getNValues(side) / mNFourierCoefficients; }
+
+  /// \return returns foruier coefficient
+  /// \param side TPC side
+  /// \param interval index of interval
+  /// \param coefficient index of coefficient
+  /// \param type whether to get real or imag coefficient
   auto getFourierCoefficient(const o2::tpc::Side side, const unsigned int interval, const unsigned int coefficient, const FourierCoeff::CoeffType type) const { return mFourierCoefficients(side, getIndex(interval, coefficient), type); }
 
+  /// \return returns struct holding all fourier coefficients
   const auto& getFourierCoefficients() const { return mFourierCoefficients; }
 
+  /// \return returns vectopr of all fourier coefficients for given side and type
+  /// \param side TPC side
+  /// \param type whether to get real or imag coefficient
   const auto& getFourierCoefficients(const o2::tpc::Side side, const FourierCoeff::CoeffType type) const { return mFourierCoefficients.getFourierCoefficients(side, type); }
 
-  void setIDCs(std::vector<float>&& idcs, const o2::tpc::Side side)
-  {
-    mIDCsOne[side] = std::move(idcs);
-    initCoefficients(side);
-  }
+  /// \return returns index to fourier coefficient
+  /// \param interval index of interval
+  /// \param coefficient index of coefficient
+  unsigned int getIndex(const unsigned int interval, const unsigned int coefficient) const { return interval * mNFourierCoefficients + coefficient; }
 
-  void setIDCs(const std::vector<float>& idcs, const o2::tpc::Side side)
-  {
-    mIDCsOne[side] = idcs;
-    initCoefficients(side);
-  }
+  /// set input 1D-IDCs which are used to calculate fourier coefficients
+  /// \param idcsOne 1D-IDCs
+  /// \param side TPC side
+  void setIDCs(std::vector<float>&& idcsOne, const o2::tpc::Side side);
 
-  /// calculate fourier coefficient
+  /// set input 1D-IDCs which are used to calculate fourier coefficients
+  /// \param idcsOne 1D-IDCs
+  /// \param side TPC side
+  void setIDCs(const std::vector<float>& idcsOne, const o2::tpc::Side side);
+
+  /// calculate fourier coefficients
+  /// \param side TPC side
   void calcFourierCoefficients(const o2::tpc::Side side);
 
-  /// get IDC0 values from the inverse fourier transform
+  /// get IDC0 values from the inverse fourier transform. Can be used for debugging. std::vector<std::vector<float>>: first vector interval second vector IDC0 values
+  /// \param side TPC side
   std::vector<std::vector<float>> inverseFourierTransform(const o2::tpc::Side side) const;
 
   /// dump object to disc
@@ -71,8 +96,6 @@ class IDCFourierTransform
 
   /// create debug tree
   void dumpToTree() const;
-
-  unsigned int getIndex(const unsigned int interval, const unsigned int coefficient) const { return interval * mNFourierCoefficients + coefficient; }
 
  private:
   const unsigned int mRangeIntegrationIntervals{};           ///< number of IDCs used for the calculation of fourier coefficients
@@ -89,7 +112,6 @@ class IDCFourierTransform
   ClassDefNV(IDCFourierTransform, 1)
 };
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif

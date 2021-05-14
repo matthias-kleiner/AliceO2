@@ -57,6 +57,19 @@ class Mapper
     return mMapPadOffsetPerRow[globalPadPosition.getRow()] + globalPadPosition.getPad();
   }
 
+  /// \return returns the global pad number for given local pad row and pad
+  /// \param lrow ungrouped local row in a region
+  /// \param pad ungrouped pad in row
+  GlobalPadNumber static getGlobalPadNumber(const unsigned int lrow, const unsigned int pad, const unsigned int region) { return GLOBALPADOFFSET[region] + OFFSETCRULOCAL[region][lrow] + pad; }
+
+  /// \param row global pad row
+  /// \param pad pad in row
+  /// \return returns local pad number in region
+  static unsigned int getLocalPadNumber(const unsigned int row, const unsigned int pad) { return OFFSETCRUGLOBAL[row] + pad; }
+
+  /// \param row global pad row
+  static unsigned int getLocalRowFromGlobalRow(const unsigned int row) { return row - ROWOFFSET[REGION[row]]; }
+
   /// return the cru number from sector and global pad number
   /// \param sec sector
   /// \param globalPad global pad number in sector
@@ -492,7 +505,14 @@ class Mapper
   static constexpr unsigned int PADSPERREGION[NREGIONS]{1200, 1200, 1440, 1440, 1440, 1440, 1600, 1600, 1600, 1600};                                               ///< number of pads per CRU
   static constexpr unsigned int GLOBALPADOFFSET[NREGIONS]{0, 1200, 2400, 3840, 5280, 6720, 8160, 9760, 11360, 12960};                                              ///< offset of number of pads for region
   static constexpr unsigned int ROWSPERREGION[NREGIONS]{17, 15, 16, 15, 18, 16, 16, 14, 13, 12};                                                                   ///< number of pad rows for region
+  static constexpr unsigned int ROWOFFSET[NREGIONS]{0, 17, 32, 48, 63, 81, 97, 113, 127, 140};                                                                     ///< offset to calculate local row from global row
   static constexpr float PADAREA[NREGIONS]{1 / 0.312f, 1 / 0.315f, 1 / 0.315f, 1 / 0.327f, 1 / 0.6f, 1 / 0.6f, 1 / 0.7296f, 1 / 0.7056f, 1 / 0.906f, 1 / 0.9105f}; ///< inverse size of the pad area padwidth*padLength
+  static constexpr unsigned REGION[PADROWS] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}; ///< region for global pad row
   const inline static std::vector<unsigned int> ADDITIONALPADSPERROW[NREGIONS]{
     {0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5},    // region 0
     {0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4},          // region 1

@@ -35,9 +35,7 @@ using namespace o2::framework;
 using o2::header::gDataOriginTPC;
 using namespace o2::tpc;
 
-namespace o2
-{
-namespace tpc
+namespace o2::tpc
 {
 
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
@@ -101,7 +99,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   {
     if (mWriteToDB) {
       // store IDC Zero One in CCDB
-      mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC", mMetadata);
+      mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC/IDCZEROONE", mMetadata);
     }
 
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
@@ -115,7 +113,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       case IDCDeltaCompression::MEDIUM: {
         auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed();
         if (mWriteToDB) {
-          mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC", mMetadata);
+          mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata);
         }
         for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
           const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -127,7 +125,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       case IDCDeltaCompression::HIGH: {
         auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed();
         if (mWriteToDB) {
-          mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC", mMetadata);
+          mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata);
         }
         for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
           const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -139,7 +137,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       case IDCDeltaCompression::NO:
       default:
         if (mWriteToDB) {
-          mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(), "TPC/Calib/IDC", mMetadata);
+          mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(), "TPC/Calib/IDC/IDCDELTA", mMetadata);
         }
         for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
           const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -187,7 +185,6 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif
