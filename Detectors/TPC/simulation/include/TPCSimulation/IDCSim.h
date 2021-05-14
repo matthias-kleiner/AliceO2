@@ -23,10 +23,9 @@
 #include "CommonConstants/LHCConstants.h"
 #include "TPCBase/Mapper.h"
 #include <gsl/span>
+#include "Rtypes.h"
 
-namespace o2
-{
-namespace tpc
+namespace o2::tpc
 {
 
 /// \class IDCSim
@@ -52,16 +51,16 @@ class IDCSim
 
   /// for debugging: dumping IDCs to ROOT file
   /// \param filename name of the output file
-  void dumpIDCs(const char* filename);
+  void dumpIDCs(const char* outFileName, const char* outName = "IDCSim") const;
 
   /// for debugging: creating debug tree for integrated IDCs
   /// \param nameTree name of the output file
-  void createDebugTree(const char* nameTree);
+  void createDebugTree(const char* nameTree) const;
 
-  /// \param row global pad row
-  /// \param pad pad in row
-  /// \return returns local pad number in region
-  static unsigned int getPadIndex(const unsigned int row, const unsigned int pad) { return Mapper::OFFSETCRUGLOBAL[row] + pad; }
+  /// for debugging: creating debug tree for integrated IDCs for all objects which are in the same file
+  /// \param nameTree name of the output file
+  /// \param filename name of the input file containing all objects
+  static void createDebugTreeForAllCRUs(const char* nameTree, const char* filename);
 
   /// \return returns the IDCs for all regions
   auto& get() { return mIDCs[!mBufferIndex]; }
@@ -73,6 +72,27 @@ class IDCSim
   /// \return returns the number of orbits for one TF
   static unsigned int getNOrbitsPerTF() { return mOrbitsPerTF; }
 
+  /// \return returns number of orbits used for each integration interval
+  unsigned int getNOrbitsPerIntegrationInterval() const { return mNOrbits; }
+
+  /// \return returns number of time stamps per integration interval (should be 5346)
+  unsigned int getNTimeStampsPerIntegrationInterval() const { return mTimeStampsPerIntegrationInterval; }
+
+  /// \return returns the check if an additional interval is used (if the last integration interval can also be empty)
+  bool additionalInterval() const { return mAddInterval; }
+
+  /// \return returns maximum number of integration intervals used for one TF
+  unsigned int getNIntegrationIntervalsPerTF() const { return mIntegrationIntervalsPerTF; }
+
+  /// \return number time stamps which remain in one TF and will be buffered to the next TF
+  unsigned int getNTimeStampsRemainder() const { return mTimeStampsRemainder; }
+
+  /// \return offset from last time bin
+  int getTimeBinsOff() const { return mTimeBinsOff; }
+
+  /// \return returns maximum number of IDCs per region for all integration intervals
+  unsigned int getMaxIDCs(const unsigned int region) const { return mMaxIDCs[region]; }
+
  private:
   inline static unsigned int mOrbitsPerTF{256};                                                                                               ///< length of one TF in units of orbits
   const unsigned int mSector{};                                                                                                               ///< sector for which the IDCs are integrated
@@ -80,7 +100,7 @@ class IDCSim
   const unsigned int mTimeStampsPerIntegrationInterval{(o2::constants::lhc::LHCMaxBunches * mNOrbits) / o2::tpc::constants::LHCBCPERTIMEBIN}; ///< number of time stamps for each integration interval (5346)
   const bool mAddInterval{(mOrbitsPerTF % mNOrbits) > 0 ? true : false};                                                                      ///< if the division has a reminder 256/12=21.333 then add an additional integration interval
   const unsigned int mIntegrationIntervalsPerTF{mOrbitsPerTF / mNOrbits + mAddInterval};                                                      ///< number of integration intervals per TF. Add 1: 256/12=21.333
-  const unsigned int mTimeStampsReminder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                           ///< number time stamps which remain in one TF and will be buffered to the next TF
+  const unsigned int mTimeStampsRemainder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                          ///< number time stamps which remain in one TF and will be buffered to the next TF
   int mTimeBinsOff{};                                                                                                                         ///< offset from last time bin
   int mBufferIndex{};                                                                                                                         ///< index for the buffer
   const std::array<unsigned int, Mapper::NREGIONS> mMaxIDCs{
@@ -135,10 +155,11 @@ class IDCSim
   /// \param region region in the sector
   /// \param row global pad row
   /// \param pad pad in row
-  unsigned int getIndex(const unsigned int timeStamp, const unsigned int region, const unsigned int row, const unsigned int pad) const { return getOrbit(timeStamp) * Mapper::PADSPERREGION[region] + getPadIndex(row, pad); }
+  unsigned int getIndex(const unsigned int timeStamp, const unsigned int region, const unsigned int row, const unsigned int pad) const { return getOrbit(timeStamp) * Mapper::PADSPERREGION[region] + Mapper::getLocalPadNumber(row, pad); }
+
+  ClassDefNV(IDCSim, 1)
 };
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif

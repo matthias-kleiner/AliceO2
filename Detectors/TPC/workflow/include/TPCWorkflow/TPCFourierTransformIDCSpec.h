@@ -37,9 +37,7 @@ using namespace o2::framework;
 using o2::header::gDataOriginTPC;
 using namespace o2::tpc;
 
-namespace o2
-{
-namespace tpc
+namespace o2::tpc
 {
 
 class TPCFourierTransformIDCSpec : public o2::framework::Task
@@ -51,7 +49,7 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
   void init(o2::framework::InitContext& ic) final
   {
     mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    mWriteToDB = mDBapi.isHostReachable() ? true : false;
+    mWriteToDB = false;// mDBapi.isHostReachable() ? true : false;
   }
 
   void run(o2::framework::ProcessingContext& pc) final
@@ -90,7 +88,7 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
   {
     if (mWriteToDB) {
       // store IDC Zero One in CCDB
-      mDBapi.storeAsTFileAny(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC", mMetadata);
+      mDBapi.storeAsTFileAny(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata);
     }
 
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
@@ -127,7 +125,6 @@ DataProcessorSpec getTPCFourierTransformIDCSpec(const unsigned int rangeIntegrat
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif

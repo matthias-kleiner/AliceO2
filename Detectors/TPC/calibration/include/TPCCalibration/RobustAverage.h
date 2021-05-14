@@ -17,87 +17,64 @@
 
 #include <vector>
 #include <numeric>
-#include "Framework/Logger.h"
 
-namespace o2
+namespace o2::tpc
 {
-namespace tpc
-{
+
 /// class to perform filtering of outliers and robust averaging of a set of values.
 /// This class is more or less a dummy for now... TODO add more sophisticated methods
+///
+/// Usage using existing data:
+/// 1. std::vector<float> values{1., 2., 2.3};
+/// 2. o2::tpc::RobustAverage rob(std::move(values));
+/// 3. float average = rob.getFilteredAverage(3);
+///
+/// Usage using copy of data:
+/// 1. o2::tpc::RobustAverage rob(3);
+/// 2. rob.addValue(1.);
+///    rob.addValue(2.);
+///    rob.addValue(2.3);
+/// 3. float average = rob.getFilteredAverage(3);
+///
 
 class RobustAverage
 {
  public:
-  /// \param maxValues maximum number of values which will be averaged
+  /// \param maxValues maximum number of values which will be averaged. Copy of values will be done.
   RobustAverage(const unsigned int maxValues) { mValues.reserve(maxValues); }
+
+  /// \param values values which will be averaged and filtered. Move operator is used here!
+  RobustAverage(std::vector<float>&& values) : mValues{std::move(values)} {};
 
   /// clear the stored values
   void clear() { mValues.clear(); }
 
   /// \param value value which will be added to the list of stored values for averaging
-  void addValue(const float value)
-  {
-    mValues.emplace_back(value);
-  }
+  void addValue(const float value) { mValues.emplace_back(value); }
 
-  /// returns the average value
-  float getFilteredAverage(const float sigma = 3)
-  {
-    if (mValues.empty()) {
-      return 0;
-    }
+  /// returns the filtered average value
+  /// \param sigma maximum accepted standard deviation: sigma*stdev
+  float getFilteredAverage(const float sigma = 3);
 
-    const float mean = getMean();
-    const float stdev = getStdDev(mean);
-    filterOutliers(mean, stdev, sigma);
-    return getMean();
-  }
+  /// values which will be averaged and filtered
+  void print() const;
 
-  float getMean() const
-  {
-    return std::accumulate(mValues.begin(), mValues.end(), decltype(mValues)::value_type(0)) / mValues.size();
-  }
+ private:
+  std::vector<float> mValues{}; ///< values which will be averaged and filtered
+
+  /// \return returns mean of stored values
+  float getMean() const { return std::accumulate(mValues.begin(), mValues.end(), decltype(mValues)::value_type(0)) / mValues.size(); }
 
   /// performing outlier filtering of the stored values
-  float getStdDev(const float mean) const
-  {
-    std::vector<float> diff(mValues.size());
-    std::transform(mValues.begin(), mValues.end(), diff.begin(), [mean](const float val) { return val - mean; });
-
-    const float sqsum = std::inner_product(diff.begin(), diff.end(), diff.begin(), decltype(mValues)::value_type(0));
-    const float stdev = std::sqrt(sqsum / diff.size());
-    return stdev;
-  }
+  float getStdDev(const float mean) const;
 
   /// performing outlier filtering of the stored values by defining range of included values in terms of standard deviation
   /// \param mean mean of the stored values
   /// \param stdev standard deviation of the values
   /// \param sigma maximum accepted standard deviation: sigma*stdev
-  void filterOutliers(const float mean, const float stdev, const float sigma = 3)
-  {
-    std::sort(mValues.begin(), mValues.end());
-    const float minVal = mean - sigma * stdev;
-    const float maxVal = mean + sigma * stdev;
-    const auto upper = std::upper_bound(mValues.begin(), mValues.end(), maxVal);
-    const auto lower = std::lower_bound(mValues.begin(), mValues.end(), minVal);
-    mValues.erase(upper, mValues.end());
-    mValues.erase(mValues.begin(), lower);
-  }
-
-  void print() const
-  {
-    LOGP(info, "PRINTING STORED VALUES");
-    for (auto& val : mValues) {
-      LOGP(info, "{}", val);
-    }
-  }
-
- private:
-  std::vector<float> mValues{}; ///< values which will be averaged and filtered
+  void filterOutliers(const float mean, const float stdev, const float sigma = 3);
 };
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif

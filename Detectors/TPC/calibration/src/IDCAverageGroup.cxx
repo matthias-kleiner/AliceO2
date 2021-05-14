@@ -17,6 +17,8 @@
 #include "TH2Poly.h"
 #include "TCanvas.h"
 #include "TLatex.h"
+#include "CommonUtils/TreeStreamRedirector.h" // for debugging
+#include "Framework/Logger.h"
 
 void o2::tpc::IDCAverageGroup::processIDCs()
 {
@@ -66,7 +68,7 @@ void o2::tpc::IDCAverageGroup::processIDCs()
 
 void o2::tpc::IDCAverageGroup::dumpToFile(const char* outFileName, const char* outName) const
 {
-  TFile fOut(outFileName, "UPDATE");
+  TFile fOut(outFileName, "RECREATE");
   fOut.WriteObject(this, outName);
   fOut.Close();
 }
@@ -95,7 +97,7 @@ void o2::tpc::IDCAverageGroup::drawUngroupedIDCs(const unsigned int integrationI
   const unsigned int region = mIDCsGrouped.getRegion();
   for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
     for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
-      const auto padNum = IDCGroup::getGlobalPadNumber(irow, ipad, region);
+      const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
       const auto coordinate = coords[padNum];
       const float yPos = -0.5 * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
       const float xPos = 0.5 * (coordinate.xVals[0] + coordinate.xVals[2]);
@@ -115,4 +117,74 @@ void o2::tpc::IDCAverageGroup::drawUngroupedIDCs(const unsigned int integrationI
     delete poly;
     delete can;
   }
+}
+
+void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameTree, const char* filename)
+{
+  const Mapper& mapper = Mapper::instance();
+  o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
+  pcstream.GetFile()->cd();
+
+  TFile fInp(filename, "READ");
+  for (TObject* keyAsObj : *fInp.GetListOfKeys()) {
+    const auto key = dynamic_cast<TKey*>(keyAsObj);
+    LOGP(info, "Key name: {} Type: {}", key->GetName(), key->GetClassName());
+
+    if (std::strcmp(o2::tpc::IDCAverageGroup::Class()->GetName(), key->GetClassName()) != 0) {
+      LOGP(info, "skipping object. wrong class.");
+      continue;
+    }
+
+    IDCAverageGroup* idcavg = (IDCAverageGroup*)fInp.Get(key->GetName());
+    unsigned int sector = idcavg->getSector();
+    unsigned int cru = sector * Mapper::NREGIONS + idcavg->getRegion();
+    const o2::tpc::CRU cruTmp(cru);
+    unsigned int region = cruTmp.region();
+
+    for (unsigned int integrationInterval = 0; integrationInterval < idcavg->getNIntegrationIntervals(); ++integrationInterval) {
+      const unsigned long padsPerCRU = Mapper::PADSPERREGION[region];
+      std::vector<int> vRow(padsPerCRU);
+      std::vector<int> vPad(padsPerCRU);
+      std::vector<float> vXPos(padsPerCRU);
+      std::vector<float> vYPos(padsPerCRU);
+      std::vector<float> vGlobalXPos(padsPerCRU);
+      std::vector<float> vGlobalYPos(padsPerCRU);
+      std::vector<float> idcsPerIntegrationInterval(padsPerCRU);        // idcs for one time bin
+      std::vector<float> groupedidcsPerIntegrationInterval(padsPerCRU); // idcs for one time bin
+
+      for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
+        const GlobalPadNumber globalNum = Mapper::GLOBALPADOFFSET[region] + iPad;
+        const auto& padPosLocal = mapper.padPos(globalNum);
+        vRow[iPad] = padPosLocal.getRow();
+        vPad[iPad] = padPosLocal.getPad();
+        vXPos[iPad] = mapper.getPadCentre(padPosLocal).X();
+        vYPos[iPad] = mapper.getPadCentre(padPosLocal).Y();
+
+        const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), cruTmp.sector());
+        vGlobalXPos[iPad] = globalPos.X();
+        vGlobalYPos[iPad] = globalPos.Y();
+
+        idcsPerIntegrationInterval[iPad] = idcavg->getUngroupedIDCVal(iPad, integrationInterval);
+        groupedidcsPerIntegrationInterval[iPad] = idcavg->getGroupedIDCValGlobal(vRow[iPad], vPad[iPad], integrationInterval);
+      }
+
+      pcstream << "tree"
+               << "cru=" << cru
+               << "sector=" << sector
+               << "region=" << region
+               << "integrationInterval=" << integrationInterval
+               << "IDCUngrouped.=" << idcsPerIntegrationInterval
+               << "IDCGrouped.=" << groupedidcsPerIntegrationInterval
+               << "pad.=" << vPad
+               << "row.=" << vRow
+               << "lx.=" << vXPos
+               << "ly.=" << vYPos
+               << "gx.=" << vGlobalXPos
+               << "gy.=" << vGlobalYPos
+               << "\n";
+    }
+    ++cru;
+    delete idcavg;
+  }
+  pcstream.Close();
 }

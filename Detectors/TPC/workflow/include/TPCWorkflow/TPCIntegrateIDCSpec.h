@@ -39,7 +39,6 @@ namespace o2
 namespace tpc
 {
 
-
 class TPCIntegrateIDCDevice : public o2::framework::Task
 {
  public:
@@ -70,7 +69,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
       if (mDebug) {
         auto const* tpcHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
         const auto tf = tpcHeader->tfCounter;
-        mIDCs[sector].dumpIDCs(fmt::format("idcs_obj_sec{:02}_tf{:02}.root", sector, tf).data());
+        mIDCs[sector].dumpIDCs(fmt::format("idcs_obj_sec{:02}_tf{:02}.root", sector, tf).data(), fmt::format("IDCSim_sec{:02}", sector).data());
       }
 
       // send the output for one sector for one TF

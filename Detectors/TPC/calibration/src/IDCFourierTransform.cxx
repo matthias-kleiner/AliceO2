@@ -17,7 +17,6 @@
 void o2::tpc::IDCFourierTransform::calcFourierCoefficients(const o2::tpc::Side side)
 {
   // see: https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Definitiona
-
   // loop over all the intervals. For each interval the coefficients are calculated
   for (unsigned long interval = 0; interval < getNIntervals(side); ++interval) {
     // loop over coefficients which will be calculated
@@ -34,8 +33,6 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficients(const o2::tpc::Side s
         mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) -= idc * std::sin(term);
       }
       // normalize coefficient to number of used points
-      // mFourierCoefficients(side, interval, coeff) /= lastIndex;
-
       mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL) /= lastIndex;
       mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) /= lastIndex;
     }
@@ -112,8 +109,22 @@ void o2::tpc::IDCFourierTransform::initCoefficients(const o2::tpc::Side side)
   const unsigned int factor = std::ceil((getNIDCs(side) - mRangeIntegrationIntervals) / static_cast<float>(mShift)) + 1;
   mFourierCoefficients.mFourierCoefficients[side][static_cast<int>(FourierCoeff::CoeffType::REAL)].resize(mNFourierCoefficients * factor); // n integration intervals
   mFourierCoefficients.mFourierCoefficients[side][static_cast<int>(FourierCoeff::CoeffType::IMAG)].resize(mNFourierCoefficients * factor); // n integration intervals
+}
 
-  // for (auto& interval : mFourierCoefficients.mFourierCoefficients[side]) {
-  // interval.resize(mNFourierCoefficients);
-  // }
+/// set input 1D-IDCs which are used to calculate fourier coefficients
+/// \param idcsOne 1D-IDCs
+/// \param side TPC side
+void o2::tpc::IDCFourierTransform::setIDCs(std::vector<float>&& idcsOne, const o2::tpc::Side side)
+{
+  mIDCsOne[side] = std::move(idcsOne);
+  initCoefficients(side);
+}
+
+/// set input 1D-IDCs which are used to calculate fourier coefficients
+/// \param idcsOne 1D-IDCs
+/// \param side TPC side
+void o2::tpc::IDCFourierTransform::setIDCs(const std::vector<float>& idcsOne, const o2::tpc::Side side)
+{
+  mIDCsOne[side] = idcsOne;
+  initCoefficients(side);
 }

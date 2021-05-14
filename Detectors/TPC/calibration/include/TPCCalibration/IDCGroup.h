@@ -20,9 +20,7 @@
 #include "Rtypes.h"
 #include "TPCBase/Mapper.h"
 
-namespace o2
-{
-namespace tpc
+namespace o2::tpc
 {
 
 /// Class to hold grouped IDC values for one CRU for one TF
@@ -51,7 +49,7 @@ class IDCGroup
   /// \param row row of the grouped IDCs
   /// \param pad pad number of the grouped IDCs
   /// \param integrationInterval integration interval
-  const float& operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
+  float operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
 
   /// \return returns the stored value
   /// \param row row of the grouped IDCs
@@ -60,21 +58,22 @@ class IDCGroup
   float& operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
-  /// \param urow row of the ungrouped IDCs
+  /// \param urow local row in region of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
   float& getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
-  /// \param urow row of the ungrouped IDCs
+  /// \param urow local row in region of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  const float& getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
+  float getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
 
-  /// \return returns the global pad number for given local pad row and pad
-  /// \param lrow ungrouped local row in a region
-  /// \param pad ungrouped pad in row
-  unsigned int static getGlobalPadNumber(const unsigned int lrow, const unsigned int pad, const unsigned int region) { return Mapper::GLOBALPADOFFSET[region] + Mapper::OFFSETCRULOCAL[region][lrow] + pad; }
+  /// \return returns the stored value for local ungrouped pad row and ungrouped pad
+  /// \param grow global row of the ungrouped IDCs
+  /// \param upad pad number of the ungrouped IDCs
+  /// \param integrationInterval integration interval
+  float getValUngroupedGlobal(unsigned int grow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(Mapper::getLocalRowFromGlobalRow(grow), upad, integrationInterval)]; }
 
   /// \return returns number of grouped rows
   unsigned int getNRows() const { return mRows; }
@@ -196,12 +195,11 @@ class IDCGroup
   /// \return returns the global pad number for given local pad row and pad
   /// \param lrow local ungrouped row in a region
   /// \param pad ungrouped pad in row
-  unsigned int getGlobalPadNumber(const unsigned int lrow, const unsigned int pad) const { return Mapper::GLOBALPADOFFSET[mRegion] + Mapper::OFFSETCRULOCAL[mRegion][lrow] + pad; }
+  unsigned int getGlobalPadNumber(const unsigned int lrow, const unsigned int pad) const { return Mapper::getGlobalPadNumber(lrow, pad, mRegion); }
 
   ClassDefNV(IDCGroup, 1)
 };
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif
