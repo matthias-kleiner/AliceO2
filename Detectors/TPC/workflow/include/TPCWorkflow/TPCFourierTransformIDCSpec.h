@@ -49,7 +49,7 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
   void init(o2::framework::InitContext& ic) final
   {
     mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    mWriteToDB = false;// mDBapi.isHostReachable() ? true : false;
+    mWriteToDB = false;                                     // mDBapi.isHostReachable() ? true : false;
   }
 
   void run(o2::framework::ProcessingContext& pc) final

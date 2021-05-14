@@ -103,7 +103,7 @@ class IDCFactorization
   /// \param region region
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
-  float getIDCZeroVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad) const{ return mIDCZeroOne.getValueIDCZero(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, 0)); }
+  float getIDCZeroVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad) const { return mIDCZeroOne.getValueIDCZero(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, 0)); }
 
   /// \return returns the stored DeltaIDC value for local ungrouped pad row and ungrouped pad
   /// \param sector sector
@@ -111,7 +111,7 @@ class IDCFactorization
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float getIDCDeltaVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const{ return mIDCDelta.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, integrationInterval)); }
+  float getIDCDeltaVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCDelta.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, integrationInterval)); }
 
   /// \return returns the index to the grouped data with ungrouped inputs
   /// \param sector sector
@@ -119,7 +119,7 @@ class IDCFactorization
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  unsigned int getIndexUngrouped(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const{ return getIndexGrouped(sector % o2::tpc::SECTORSPERSIDE, region, getGroupedRow(region, urow), getGroupedPad(region, urow, upad), integrationInterval); }
+  unsigned int getIndexUngrouped(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return getIndexGrouped(sector % o2::tpc::SECTORSPERSIDE, region, getGroupedRow(region, urow), getGroupedPad(region, urow, upad), integrationInterval); }
 
   /// \returns grouping definition in pad direction (How many pads are grouped)
   unsigned int getGroupPads(const unsigned int region) const { return mGroupPads[region]; }
@@ -183,7 +183,7 @@ class IDCFactorization
   static void setNThreads(const int nThreads) { sNThreads = nThreads; }
 
   /// \param maxIDCDeltaValue maximum IDC delta value for compressed IDC delta
-  static void setMaxCompressedIDCDelta(const float maxIDCDeltaValue){ o2::conf::ConfigurableParam::setValue<float>("TPCIDCCompressionParam", "MaxIDCDeltaValue", maxIDCDeltaValue); }
+  static void setMaxCompressedIDCDelta(const float maxIDCDeltaValue) { o2::conf::ConfigurableParam::setValue<float>("TPCIDCCompressionParam", "MaxIDCDeltaValue", maxIDCDeltaValue); }
 
   /// draw IDCs for one sector for one integration interval
   /// \param sector sector which will be drawn
