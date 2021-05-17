@@ -27,7 +27,6 @@ float o2::tpc::RobustAverage::getStdDev(const float mean) const
 {
   std::vector<float> diff(mValues.size());
   std::transform(mValues.begin(), mValues.end(), diff.begin(), [mean](const float val) { return val - mean; });
-
   const float sqsum = std::inner_product(diff.begin(), diff.end(), diff.begin(), decltype(mValues)::value_type(0));
   const float stdev = std::sqrt(sqsum / diff.size());
   return stdev;

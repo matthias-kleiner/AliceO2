@@ -19,6 +19,7 @@
 #include "TPCCalibration/IDCGroup.h"
 #include "TPCBase/Mapper.h"
 #include "Rtypes.h"
+#include "CommonUtils/TreeStreamRedirector.h" // for debugging
 
 #if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
 #include <omp.h>
@@ -138,6 +139,10 @@ class IDCAverageGroup
   /// set the number of threads used for some of the calculations
   static void setNThreads(const int nThreads) { sNThreads = nThreads; }
 
+  /// for debugging: creating debug tree
+  /// \param nameTree name of the output file
+  void createDebugTree(const char* nameTree) const;
+
   /// for debugging: creating debug tree for integrated IDCs for all objects which are in the same file
   /// \param nameTree name of the output file
   /// \param filename name of the input file containing all objects
@@ -152,6 +157,8 @@ class IDCAverageGroup
   unsigned int getUngroupedIndex(const unsigned int urow, const unsigned int upad, const unsigned int integrationInterval) const { return integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRULOCAL[mIDCsGrouped.getRegion()][urow] + upad; }
 
   unsigned int getUngroupedIndexGlobal(const unsigned int grow, const unsigned int upad, const unsigned int integrationInterval) const { return integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRUGLOBAL[grow] + upad; }
+
+  static void createDebugTree(const IDCAverageGroup& idcavg, o2::utils::TreeStreamRedirector& pcstream);
 
   ClassDefNV(IDCAverageGroup, 1)
 };

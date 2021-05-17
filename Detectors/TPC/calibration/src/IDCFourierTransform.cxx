@@ -10,15 +10,15 @@
 
 #include "TPCCalibration/IDCFourierTransform.h"
 #include "CommonUtils/TreeStreamRedirector.h"
-#include "TFile.h"
 #include "CommonConstants/MathConstants.h"
+#include "TFile.h"
 #include <cmath>
 
 void o2::tpc::IDCFourierTransform::calcFourierCoefficients(const o2::tpc::Side side)
 {
   // see: https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Definitiona
   // loop over all the intervals. For each interval the coefficients are calculated
-  for (unsigned long interval = 0; interval < getNIntervals(side); ++interval) {
+  for (unsigned int interval = 0; interval < getNIntervals(side); ++interval) {
     // loop over coefficients which will be calculated
     for (unsigned int coeff = 0; coeff < getNCoefficients(); ++coeff) {
       const unsigned int indexData = getIndex(interval, coeff);
@@ -45,7 +45,7 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
   std::vector<std::vector<float>> inverse(getNIntervals(side));
 
   // loop over all the intervals. For each interval the coefficients are calculated
-  for (unsigned long interval = 0; interval < getNIntervals(side); ++interval) {
+  for (unsigned int interval = 0; interval < getNIntervals(side); ++interval) {
     // loop over coefficients which will be calculated
     const unsigned int lastIndex = getLastIndex(interval, side);
     inverse[interval].resize(lastIndex);

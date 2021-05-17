@@ -17,47 +17,43 @@
 #include "TH2Poly.h"
 #include "TCanvas.h"
 #include "TLatex.h"
-#include "CommonUtils/TreeStreamRedirector.h" // for debugging
 #include "Framework/Logger.h"
 
 void o2::tpc::IDCAverageGroup::processIDCs()
 {
 #pragma omp parallel for num_threads(sNThreads)
-  for (int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
-    const int lastRow = mIDCsGrouped.getLastRow();
-    int rowGrouped = 0;
-    for (int iRow = 0; iRow <= lastRow; iRow += mIDCsGrouped.getGroupRows()) {
+  for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
+    const unsigned int lastRow = mIDCsGrouped.getLastRow();
+    unsigned int rowGrouped = 0;
+    for (unsigned int iRow = 0; iRow <= lastRow; iRow += mIDCsGrouped.getGroupRows()) {
       // the sectors is divide in to two parts around ylocal=0 to get the same simmetric grouping around ylocal=0
       for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
         const unsigned int region = mIDCsGrouped.getRegion();
-        const int nPads = 0.5f * Mapper::PADSPERROW[region][iRow];
-        const int lastPad = mIDCsGrouped.getLastPad(iRow);
-        const int endPads = lastPad + nPads;
+        const unsigned int nPads = Mapper::PADSPERROW[region][iRow] / 2;
+        const unsigned int endPads = mIDCsGrouped.getLastPad(iRow) + nPads;
 
-        const int halfPadsInRow = 0.5 * mIDCsGrouped.getPadsPerRow(rowGrouped);
-        int padGrouped = !iYLocalSide ? halfPadsInRow - 1 : halfPadsInRow;
-        for (int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
-          int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
+        const unsigned int halfPadsInRow = mIDCsGrouped.getPadsPerRow(rowGrouped) / 2;
+        unsigned int padGrouped = iYLocalSide ? halfPadsInRow : halfPadsInRow - 1;
+        for (unsigned int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
+          const unsigned int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
 
           // TODO Mapper::ADDITIONALPADSPERROW[region].back() factor is to large, but doesnt really matter
           const unsigned int maxGoup = (mIDCsGrouped.getGroupRows() + mIDCsGrouped.getGroupLastRowsThreshold()) * (mIDCsGrouped.getGroupPads() + mIDCsGrouped.getGroupLastPadsThreshold() + Mapper::ADDITIONALPADSPERROW[region].back());
           RobustAverage robustAverage(maxGoup);
 
-          for (int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
-            const int iRowTmp = iRow + iRowMerge;
+          for (unsigned int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
+            const unsigned int iRowTmp = iRow + iRowMerge;
             const auto offs = Mapper::ADDITIONALPADSPERROW[region][iRowTmp] - Mapper::ADDITIONALPADSPERROW[region][iRow];
             const auto padStart = (ipad == 0) ? 0 : offs;
-            const int endPadsTmp = (ipad == endPads) ? (Mapper::PADSPERROW[region][iRowTmp] - ipad) : mIDCsGrouped.getGroupPads() + offs;
-            for (int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
-              const int iPadTmp = ipad + ipadMerge;
-              const int iPadSide = iYLocalSide == 0 ? Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1 : iPadTmp;
-              const int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
-
+            const unsigned int endPadsTmp = (ipad == endPads) ? (Mapper::PADSPERROW[region][iRowTmp] - ipad) : mIDCsGrouped.getGroupPads() + offs;
+            for (unsigned int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
+              const unsigned int iPadTmp = ipad + ipadMerge;
+              const unsigned int iPadSide = iYLocalSide ? iPadTmp : Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1;
+              const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
               robustAverage.addValue(mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region]);
             }
           }
           mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = robustAverage.getFilteredAverage();
-
           iYLocalSide ? ++padGrouped : --padGrouped;
         }
       }
@@ -119,9 +115,18 @@ void o2::tpc::IDCAverageGroup::drawUngroupedIDCs(const unsigned int integrationI
   }
 }
 
+/// for debugging: creating debug tree for integrated IDCs
+/// \param nameTree name of the output file
+void o2::tpc::IDCAverageGroup::createDebugTree(const char* nameTree) const
+{
+  o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
+  pcstream.GetFile()->cd();
+  createDebugTree(*this, pcstream);
+  pcstream.Close();
+}
+
 void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameTree, const char* filename)
 {
-  const Mapper& mapper = Mapper::instance();
   o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
   pcstream.GetFile()->cd();
 
@@ -136,55 +141,64 @@ void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameTree, c
     }
 
     IDCAverageGroup* idcavg = (IDCAverageGroup*)fInp.Get(key->GetName());
-    unsigned int sector = idcavg->getSector();
-    unsigned int cru = sector * Mapper::NREGIONS + idcavg->getRegion();
-    const o2::tpc::CRU cruTmp(cru);
-    unsigned int region = cruTmp.region();
-
-    for (unsigned int integrationInterval = 0; integrationInterval < idcavg->getNIntegrationIntervals(); ++integrationInterval) {
-      const unsigned long padsPerCRU = Mapper::PADSPERREGION[region];
-      std::vector<int> vRow(padsPerCRU);
-      std::vector<int> vPad(padsPerCRU);
-      std::vector<float> vXPos(padsPerCRU);
-      std::vector<float> vYPos(padsPerCRU);
-      std::vector<float> vGlobalXPos(padsPerCRU);
-      std::vector<float> vGlobalYPos(padsPerCRU);
-      std::vector<float> idcsPerIntegrationInterval(padsPerCRU);        // idcs for one time bin
-      std::vector<float> groupedidcsPerIntegrationInterval(padsPerCRU); // idcs for one time bin
-
-      for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
-        const GlobalPadNumber globalNum = Mapper::GLOBALPADOFFSET[region] + iPad;
-        const auto& padPosLocal = mapper.padPos(globalNum);
-        vRow[iPad] = padPosLocal.getRow();
-        vPad[iPad] = padPosLocal.getPad();
-        vXPos[iPad] = mapper.getPadCentre(padPosLocal).X();
-        vYPos[iPad] = mapper.getPadCentre(padPosLocal).Y();
-
-        const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), cruTmp.sector());
-        vGlobalXPos[iPad] = globalPos.X();
-        vGlobalYPos[iPad] = globalPos.Y();
-
-        idcsPerIntegrationInterval[iPad] = idcavg->getUngroupedIDCVal(iPad, integrationInterval);
-        groupedidcsPerIntegrationInterval[iPad] = idcavg->getGroupedIDCValGlobal(vRow[iPad], vPad[iPad], integrationInterval);
-      }
-
-      pcstream << "tree"
-               << "cru=" << cru
-               << "sector=" << sector
-               << "region=" << region
-               << "integrationInterval=" << integrationInterval
-               << "IDCUngrouped.=" << idcsPerIntegrationInterval
-               << "IDCGrouped.=" << groupedidcsPerIntegrationInterval
-               << "pad.=" << vPad
-               << "row.=" << vRow
-               << "lx.=" << vXPos
-               << "ly.=" << vYPos
-               << "gx.=" << vGlobalXPos
-               << "gy.=" << vGlobalYPos
-               << "\n";
-    }
-    ++cru;
+    createDebugTree(*idcavg, pcstream);
     delete idcavg;
   }
   pcstream.Close();
+}
+
+void o2::tpc::IDCAverageGroup::createDebugTree(const IDCAverageGroup& idcavg, o2::utils::TreeStreamRedirector& pcstream)
+{
+  const Mapper& mapper = Mapper::instance();
+
+  unsigned int sector = idcavg.getSector();
+  unsigned int cru = sector * Mapper::NREGIONS + idcavg.getRegion();
+  const o2::tpc::CRU cruTmp(cru);
+  unsigned int region = cruTmp.region();
+
+  for (unsigned int integrationInterval = 0; integrationInterval < idcavg.getNIntegrationIntervals(); ++integrationInterval) {
+    const unsigned long padsPerCRU = Mapper::PADSPERREGION[region];
+    std::vector<unsigned int> vRow(padsPerCRU);
+    std::vector<unsigned int> vPad(padsPerCRU);
+    std::vector<float> vXPos(padsPerCRU);
+    std::vector<float> vYPos(padsPerCRU);
+    std::vector<float> vGlobalXPos(padsPerCRU);
+    std::vector<float> vGlobalYPos(padsPerCRU);
+    std::vector<float> idcsPerIntegrationInterval(padsPerCRU);        // idcs for one time bin
+    std::vector<float> groupedidcsPerIntegrationInterval(padsPerCRU); // idcs for one time bin
+    std::vector<float> invPadArea(padsPerCRU);
+
+    for (unsigned int iPad = 0; iPad < padsPerCRU; ++iPad) {
+      const GlobalPadNumber globalNum = Mapper::GLOBALPADOFFSET[region] + iPad;
+      const auto& padPosLocal = mapper.padPos(globalNum);
+      vRow[iPad] = padPosLocal.getRow();
+      vPad[iPad] = padPosLocal.getPad();
+      vXPos[iPad] = mapper.getPadCentre(padPosLocal).X();
+      vYPos[iPad] = mapper.getPadCentre(padPosLocal).Y();
+      invPadArea[iPad] = Mapper::PADAREA[region];
+
+      const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), cruTmp.sector());
+      vGlobalXPos[iPad] = globalPos.X();
+      vGlobalYPos[iPad] = globalPos.Y();
+
+      idcsPerIntegrationInterval[iPad] = idcavg.getUngroupedIDCVal(iPad, integrationInterval);
+      groupedidcsPerIntegrationInterval[iPad] = idcavg.getGroupedIDCValGlobal(vRow[iPad], vPad[iPad], integrationInterval);
+    }
+
+    pcstream << "tree"
+             << "cru=" << cru
+             << "sector=" << sector
+             << "region=" << region
+             << "integrationInterval=" << integrationInterval
+             << "IDCUngrouped.=" << idcsPerIntegrationInterval
+             << "IDCGrouped.=" << groupedidcsPerIntegrationInterval
+             << "invPadArea.=" << invPadArea
+             << "pad.=" << vPad
+             << "row.=" << vRow
+             << "lx.=" << vXPos
+             << "ly.=" << vYPos
+             << "gx.=" << vGlobalXPos
+             << "gy.=" << vGlobalYPos
+             << "\n";
+  }
 }

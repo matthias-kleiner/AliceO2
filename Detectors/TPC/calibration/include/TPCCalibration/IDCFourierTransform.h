@@ -11,12 +11,12 @@
 /// \file IDCFourierTransform.h
 /// \brief class for calculating the fourier coefficients from 1D-IDCs
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
+/// \date May 11, 2021
 
 #ifndef ALICEO2_IDCFOURIERTRANSFORM_H_
 #define ALICEO2_IDCFOURIERTRANSFORM_H_
 
 #include <vector>
-
 #include "Rtypes.h"
 #include "DataFormatsTPC/Defs.h"
 #include "Framework/Logger.h"
@@ -24,6 +24,8 @@
 
 namespace o2::tpc
 {
+
+/// class for fourier transform of 1D-IDCs
 
 class IDCFourierTransform
 {
@@ -61,7 +63,7 @@ class IDCFourierTransform
   /// \return returns struct holding all fourier coefficients
   const auto& getFourierCoefficients() const { return mFourierCoefficients; }
 
-  /// \return returns vectopr of all fourier coefficients for given side and type
+  /// \return returns vector of all fourier coefficients for given side and type
   /// \param side TPC side
   /// \param type whether to get real or imag coefficient
   const auto& getFourierCoefficients(const o2::tpc::Side side, const FourierCoeff::CoeffType type) const { return mFourierCoefficients.getFourierCoefficients(side, type); }

@@ -24,6 +24,7 @@
 #include "TPCBase/Mapper.h"
 #include <gsl/span>
 #include "Rtypes.h"
+#include "CommonUtils/TreeStreamRedirector.h" // for debugging
 
 namespace o2::tpc
 {
@@ -59,8 +60,8 @@ class IDCSim
 
   /// for debugging: creating debug tree for integrated IDCs for all objects which are in the same file
   /// \param nameTree name of the output file
-  /// \param filename name of the input file containing all objects
-  static void createDebugTreeForAllCRUs(const char* nameTree, const char* filename);
+  /// \param filename name of the input file containing the objects
+  static void createDebugTreeForAllSectors(const char* nameTree, const char* filename);
 
   /// \return returns the IDCs for all regions
   auto& get() { return mIDCs[!mBufferIndex]; }
@@ -89,6 +90,11 @@ class IDCSim
 
   /// \return offset from last time bin
   int getTimeBinsOff() const { return mTimeBinsOff; }
+
+  /// draw ungrouped IDCs
+  /// \param integrationInterval integration interval for which the IDCs will be drawn
+  /// \param filename name of the output file. If empty the canvas is drawn.
+  void drawIDCs(const unsigned int integrationInterval = 0, const std::string filename = "IDCs.pdf") const;
 
   /// \return returns maximum number of IDCs per region for all integration intervals
   unsigned int getMaxIDCs(const unsigned int region) const { return mMaxIDCs[region]; }
@@ -156,6 +162,8 @@ class IDCSim
   /// \param row global pad row
   /// \param pad pad in row
   unsigned int getIndex(const unsigned int timeStamp, const unsigned int region, const unsigned int row, const unsigned int pad) const { return getOrbit(timeStamp) * Mapper::PADSPERREGION[region] + Mapper::getLocalPadNumber(row, pad); }
+
+  static void createDebugTree(const IDCSim& idcsim, o2::utils::TreeStreamRedirector& pcstream);
 
   ClassDefNV(IDCSim, 1)
 };

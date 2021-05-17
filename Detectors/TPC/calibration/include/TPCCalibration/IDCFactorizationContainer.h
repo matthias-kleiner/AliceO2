@@ -85,6 +85,7 @@ struct IDCDelta<float> {
   std::array<std::vector<float>, o2::tpc::SIDES> mIDCDelta{}; ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
 };
 
+/// helper class to compress Delta IDC values
 template <typename DataT>
 class IDCDeltaCompressionHelper
 {
@@ -120,6 +121,7 @@ class IDCDeltaCompressionHelper
     const float maxAbsIDC = getMaxValue(idcDeltaUncompressed.mIDCDelta[side]);
     const auto& paramIDCGroup = ParameterIDCCompression::Instance();
     const float maxIDC = paramIDCGroup.MaxIDCDeltaValue;
+    // TODO catch division by zero (maxAbsIDC=0)?
     return (maxAbsIDC > maxIDC && maxIDC > 0) ? (std::numeric_limits<DataT>::max() / maxIDC) : (std::numeric_limits<DataT>::max() / maxAbsIDC);
   }
 
@@ -130,7 +132,8 @@ class IDCDeltaCompressionHelper
   };
 };
 
-struct IDCZeroOne { ///< struct containing the IDC0 and IDC1 values
+///<struct containing the IDC0 and IDC1 values
+struct IDCZeroOne {
 
   /// set IDC zero for given index
   /// \param idcZero Delta IDC value which will be set
@@ -184,15 +187,14 @@ struct FourierCoeff { ///< struct containing the fourier coefficients calculated
   /// \param side side of the TPC
   /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
   /// \param CoeffType real or imag coefficient
-  float operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)][index]; }
+  float operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)][index]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
   /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
   /// \param CoeffType real or imag coefficient
-  float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) { return mFourierCoefficients[side][static_cast<int>(type)][index]; }
+  float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) { return mFourierCoefficients[side][static_cast<unsigned int>(type)][index]; }
 
-  // std::array<std::vector<std::vector<std::complex<float>>>, o2::tpc::SIDES> mFourierCoefficients; ///< fourier coefficients. side -> interval -> coefficient
   std::array<std::array<std::vector<float>, 2>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> real/imag -> coefficient
 };
 

@@ -61,7 +61,7 @@ class IDCGroup
   /// \param urow local row in region of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float& getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
+  float& setValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
   /// \param urow local row in region of the ungrouped IDCs

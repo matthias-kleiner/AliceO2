@@ -22,8 +22,8 @@
 o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames)
   : mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mTimeFrames{timeFrames}
 {
-  for (unsigned int cru = 0; cru < Mapper::NSECTORS * Mapper::NREGIONS; ++cru) {
-    mIDCs[cru].resize(mTimeFrames);
+  for (auto& idc : mIDCs) {
+    idc.resize(mTimeFrames);
   }
 
   for (unsigned int reg = 0; reg < Mapper::NREGIONS; ++reg) {
@@ -127,18 +127,15 @@ std::string o2::tpc::IDCFactorization::getZAxisTitle(const IDCType type, const I
     case IDCType::IDCDelta:
       switch (compression) {
         case IDCDeltaCompression::NO:
-        default: {
+        default:
           return "#Delta#it{IDC}";
           break;
-        }
-        case IDCDeltaCompression::MEDIUM: {
+        case IDCDeltaCompression::MEDIUM:
           return "#Delta#it{IDC}_{medium compressed}";
           break;
-        }
-        case IDCDeltaCompression::HIGH: {
+        case IDCDeltaCompression::HIGH:
           return "#Delta#it{IDC}_{high compressed}";
           break;
-        }
       }
     case IDCType::IDCOne:
       return "#Delta#it{IDC}_{1}";
