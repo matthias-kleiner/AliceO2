@@ -167,7 +167,8 @@ struct IDCZeroOne {
   std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{};  ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
 };
 
-struct FourierCoeff { ///< struct containing the fourier coefficients calculated from IDC0
+/// struct containing the fourier coefficients calculated from IDC0
+struct FourierCoeff {
   /// IDC types
   enum class CoeffType { REAL = 0, ///< real coefficient
                          IMAG = 1  ///< imag coefficient
@@ -185,7 +186,7 @@ struct FourierCoeff { ///< struct containing the fourier coefficients calculated
 
   /// \return returns the stored value
   /// \param side side of the TPC
-  /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
+  /// \param index index of the data. For calculation see IDCFourierTransform::getIndex()
   /// \param CoeffType real or imag coefficient
   float operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)][index]; }
 
@@ -195,7 +196,22 @@ struct FourierCoeff { ///< struct containing the fourier coefficients calculated
   /// \param CoeffType real or imag coefficient
   float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) { return mFourierCoefficients[side][static_cast<unsigned int>(type)][index]; }
 
+  unsigned long getNTotalCoefficients(const o2::tpc::Side side, const CoeffType type) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)].size(); }
+
   std::array<std::array<std::vector<float>, 2>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> real/imag -> coefficient
+};
+
+/// struct for storing the number of fourier coefficients per interval to access the fourier ceofficients
+struct FourierCoeffParameters {
+
+  /// constructor
+  /// nCoefficientsPerInterval number of fourier coefficientes per interval
+  FourierCoeffParameters(const unsigned int nCoefficientsPerInterval = 50) : mNCoefficientsPerInterval{static_cast<unsigned char>(nCoefficientsPerInterval)} {};
+
+  /// \return returns number of fourier coefficients per interval
+  unsigned int getNCoefficientsPerInterval() const { return static_cast<unsigned int>(mNCoefficientsPerInterval); }
+
+  const unsigned char mNCoefficientsPerInterval{}; ///< number of real/imag fourier coefficients per integration interval
 };
 
 } // namespace tpc

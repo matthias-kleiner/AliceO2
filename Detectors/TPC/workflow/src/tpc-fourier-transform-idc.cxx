@@ -40,9 +40,9 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
   std::vector<ConfigParamSpec> options{
     {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
-    {"range", VariantType::Int, 10, {"Number of integration intervals used for the calculation of one fourier coefficient."}},
-    {"shiftrange", VariantType::Int, 1, {"Number of integration intervals of which the range will be shifted after the calculation of one fourier coefficient."}},
-    {"fourierCoeff", VariantType::Int, 4, {"Number of fourier coefficients which will be calculated."}},
+    {"range", VariantType::Int, 200, {"Number of integration intervals (IDC values) used for the calculation of one fourier coefficient."}},
+    {"shiftrange", VariantType::Int, 10, {"Number of integration intervals of which the range will be shifted after the calculation of one fourier coefficient."}},
+    {"fourierCoeff", VariantType::Int, 10, {"Number of fourier coefficients which will be calculated for each interval."}},
     {"debug", VariantType::Bool, false, {"create debug files"}}};
 
   std::swap(workflowOptions, options);

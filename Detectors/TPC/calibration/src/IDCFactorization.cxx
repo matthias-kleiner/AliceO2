@@ -224,13 +224,9 @@ void o2::tpc::IDCFactorization::dumpToFile(const char* outFileName, const char* 
   fOut.Close();
 }
 
-void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const float maxIDCDeltaValue) const
+void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
 {
-  if (maxIDCDeltaValue != -1) {
-    o2::conf::ConfigurableParam::setValue<float>("TPCIDCCompressionParam", "MaxIDCDeltaValue", maxIDCDeltaValue);
-  }
-
-  const static Mapper& mapper = Mapper::instance();
+  const Mapper& mapper = Mapper::instance();
   o2::utils::TreeStreamRedirector pcstream("IDCTree.root", "RECREATE");
   pcstream.GetFile()->cd();
 
@@ -280,6 +276,7 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const f
             idcsDeltaMedium[index] = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
             idcsDeltaHigh[index] = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
             sectorv[index] = sector;
+
             ++index;
           }
         }
@@ -287,9 +284,14 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals, const f
     }
     float idcOneATmp = idcOneA[integrationInterval];
     float idcOneCTmp = idcOneC[integrationInterval];
+    unsigned int timeFrame = 0;
+    unsigned int interval = 0;
+    getTF(0, integrationInterval, timeFrame, interval);
 
     pcstream << "tree"
              << "integrationInterval=" << integrationInterval
+             << "localinterval=" << interval
+             << "timeframe=" << timeFrame
              << "IDC.=" << idcs
              << "IDC0.=" << idcsZero
              << "IDC1A=" << idcOneATmp
@@ -390,8 +392,16 @@ float o2::tpc::IDCFactorization::getIDCVal(const unsigned int sector, const unsi
   // TODO optimize this function
   unsigned int timeFrame = 0;
   unsigned int interval = 0;
-  unsigned int nintervals = 0;
+  getTF(region, integrationInterval, timeFrame, interval);
 
+  return mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
+}
+
+void o2::tpc::IDCFactorization::getTF(const unsigned int region, unsigned int integrationInterval, unsigned int& timeFrame, unsigned int& interval) const
+{
+  // unsigned int timeFrame = 0;
+  // unsigned int interval = 0;
+  unsigned int nintervals = 0;
   for (unsigned int tf = 0; tf < mTimeFrames; ++tf) {
     nintervals += mIDCs[region][tf].size() / mNIDCsPerCRU[region];
     if (integrationInterval < nintervals) {
@@ -401,7 +411,6 @@ float o2::tpc::IDCFactorization::getIDCVal(const unsigned int sector, const unsi
     }
     interval = nintervals;
   }
-  return mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
 }
 
 void o2::tpc::IDCFactorization::factorizeIDCs()

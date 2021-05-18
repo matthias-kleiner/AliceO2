@@ -48,8 +48,15 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 
   void init(o2::framework::InitContext& ic) final
   {
-    mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    mWriteToDB = false;                                     //mDBapi.isHostReachable() ? true : false;
+    // mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
+    mDBapi.init("http://localhost:8080"); // or http://localhost:8080 for a local installation
+    mWriteToDB = mDBapi.isHostReachable() ? true : false;
+
+    if (mWriteToDB) {
+      // write struct containing grouping parameters to access grouped IDCs to CCDB
+      const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getPadThreshold(), mIDCs.getRowThreshold());
+      mDBapi.storeAsTFileAny(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata);
+    }
   }
 
   void run(o2::framework::ProcessingContext& pc) final
@@ -175,8 +182,7 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   std::copy(std::begin(paramIDCGroup.GroupRows), std::end(paramIDCGroup.GroupRows), std::begin(groupRows));
   std::copy(std::begin(paramIDCGroup.GroupLastRowsThreshold), std::end(paramIDCGroup.GroupLastRowsThreshold), std::begin(groupLastRowsThreshold));
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
-
-  const auto id = fmt::format("tpc-aggregate-IDC");
+  const auto id = fmt::format("tpc-aggregate-idc");
   return DataProcessorSpec{
     id.data(),
     inputSpecs,

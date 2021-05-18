@@ -40,6 +40,8 @@
 #pragma link C++ class o2::tpc::IDCDeltaCompressionHelper<char> +;
 #pragma link C++ struct o2::tpc::IDCZeroOne +;
 #pragma link C++ struct o2::tpc::FourierCoeff +;
+#pragma link C++ struct o2::tpc::FourierCoeffParameters +;
+#pragma link C++ struct o2::tpc::ParameterIDCGroupCCDB +;
 #pragma link C++ class o2::tpc::RobustAverage +;
 #pragma link C++ class o2::tpc::IDCFourierTransform +;
 

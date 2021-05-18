@@ -26,10 +26,7 @@
 #include "CommonUtils/MemFileHelper.h"
 #include "Headers/DataHeader.h"
 #include "DataFormatsTPC/Defs.h"
-// #include "TPCBase/CDBInterface.h"
 #include "CCDB/CcdbApi.h"
-// #include "TPCCalibration/IDCFactorization.h"
-// #include "CCDB/CcdbApi.h"
 #include "Framework/ConfigParamRegistry.h"
 #include "TPCCalibration/IDCFourierTransform.h"
 
@@ -48,8 +45,15 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
 
   void init(o2::framework::InitContext& ic) final
   {
-    mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
-    mWriteToDB = false;// mDBapi.isHostReachable() ? true : false;
+    // mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
+    mDBapi.init("http://localhost:8080"); // or http://localhost:8080 for a local installation
+    mWriteToDB = mDBapi.isHostReachable() ? true : false;
+
+    if (mWriteToDB) {
+      // write struct containing parameters to access stored fourier coefficients
+      FourierCoeffParameters parCoeff(mIDCFourierTransform.getNCoefficients());
+      mDBapi.storeAsTFileAny(&parCoeff, "TPC/Calib/IDC/FOURIER/PARAMETER", mMetadata);
+    }
   }
 
   void run(o2::framework::ProcessingContext& pc) final
@@ -87,12 +91,12 @@ class TPCFourierTransformIDCSpec : public o2::framework::Task
   void sendOutput(DataAllocator& output)
   {
     if (mWriteToDB) {
-      // store IDC Zero One in CCDB
-      mDBapi.storeAsTFileAny(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata);
+      // store fourier coefficients
+      mDBapi.storeAsTFileAny(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER/COEFFICIENTS", mMetadata);
     }
 
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-      const o2::tpc::Side side = iSide ? Side::C : Side::A;
+      const Side side = static_cast<Side>(iSide);
       const header::DataHeader::SubSpecificationType subSpec{iSide};
       output.snapshot(Output{gDataOriginTPC, "IDCCOEFFREAL", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::REAL));
       output.snapshot(Output{gDataOriginTPC, "IDCCOEFFIMAG", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::IMAG));
@@ -116,7 +120,7 @@ DataProcessorSpec getTPCFourierTransformIDCSpec(const unsigned int rangeIntegrat
     inputSpecs.emplace_back(InputSpec{"idcone", gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe});
   }
 
-  const auto id = fmt::format("tpc-fourier-IDC");
+  const auto id = fmt::format("tpc-fourier-idc");
   return DataProcessorSpec{
     id.data(),
     inputSpecs,

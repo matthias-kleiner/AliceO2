@@ -160,8 +160,8 @@ class IDCGroup
   void draw(const unsigned int integrationInterval = 0, const std::string filename = "IDCsGrouped.pdf") const;
 
  private:
-  const unsigned int mGroupPads{4};              ///< group 4 pads
-  const unsigned int mGroupRows{4};              ///< group 4 pads -> 4x4
+  const unsigned int mGroupPads{4};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
+  const unsigned int mGroupRows{4};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
   const unsigned int mGroupLastRowsThreshold{2}; ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
   const unsigned int mGroupLastPadsThreshold{2}; ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
   const unsigned int mRegion{};                  ///< region of input IDCs

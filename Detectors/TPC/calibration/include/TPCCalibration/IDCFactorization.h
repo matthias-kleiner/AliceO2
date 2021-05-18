@@ -118,17 +118,29 @@ class IDCFactorization
   /// \param region TPC region
   unsigned int getGroupPads(const unsigned int region) const { return mGroupPads[region]; }
 
+  /// \returns grouping definition in pad direction (How many pads are grouped)
+  const auto& getGroupPads() const { return mGroupPads; }
+
   /// \returns grouping definition in row direction (How many rows are grouped)
   /// \param region TPC region
   unsigned int getGroupRows(const unsigned int region) const { return mGroupRows[region]; }
+
+  /// \returns grouping definition in row direction (How many rows are grouped)
+  const auto& getGroupRows() const { return mGroupRows; }
 
   /// \returns grouping threshold for last group in pad direction
   /// \param region TPC region
   unsigned int getPadThreshold(const unsigned int region) const { return mGroupLastPadsThreshold[region]; }
 
+  /// \returns grouping threshold for last group in pad direction
+  const auto& getPadThreshold() const { return mGroupLastPadsThreshold; }
+
   /// \returns grouping threshold for last group in row direction
   /// \param region TPC region
   unsigned int getRowThreshold(const unsigned int region) const { return mGroupLastRowsThreshold[region]; }
+
+  /// \returns grouping threshold for last group in row direction
+  const auto& getRowThreshold() const { return mGroupLastRowsThreshold; }
 
   /// \return returns number of timeframes for which the IDCs are stored
   unsigned int getNTimeframes() const { return mTimeFrames; }
@@ -228,8 +240,7 @@ class IDCFactorization
   void dumpToFile(const char* outFileName = "IDCFactorized.root", const char* outName = "IDCFactorized") const;
 
   /// \param integrationIntervals number of integration intervals which will be dumped to the tree (-1: all integration intervalls)
-  /// \param maxIDCDeltaValue maximum IDC delta value for compressed IDC delta (-1 use standard value from ParameterIDCCompression)
-  void dumpIDCsToTree(int integrationIntervals = -1, const float maxIDCDeltaValue = -1.f) const;
+  void dumpIDCsToTree(int integrationIntervals = -1) const;
 
  private:
   const std::array<unsigned int, Mapper::NREGIONS> mGroupPads{};              ///< grouping definition in pad direction (How many pads are grouped)
@@ -276,6 +287,8 @@ class IDCFactorization
 
   /// get z axis title for given IDC type and compression type
   std::string getZAxisTitle(const IDCType type, const IDCDeltaCompression compression) const;
+
+  void getTF(const unsigned int region, unsigned int integrationInterval, unsigned int& timeFrame, unsigned int& interval) const;
 
   ClassDefNV(IDCFactorization, 1)
 };
