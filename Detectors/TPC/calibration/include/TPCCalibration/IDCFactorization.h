@@ -46,8 +46,9 @@ class IDCFactorization
   /// \param groupRows number of pads in row direction which will be grouped for all regions
   /// \param groupLastRowsThreshold minimum number of pads in row direction for the last group in row direction for all regions
   /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction for all regions
-  /// \param timeFrames number of timeframes which will be stored
-  IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames = 0);
+  /// \param timeFrames number of time frames which will be stored
+  /// \param timeframesDeltaIDC number of time frames stored for each DeltaIDC object
+  IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames = 1, const unsigned int timeframesDeltaIDC = 1);
 
   /// default constructor for ROOT I/O
   IDCFactorization() = default;
@@ -103,8 +104,9 @@ class IDCFactorization
   /// \param region region
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
-  /// \param integrationInterval integration interval
-  float getIDCDeltaVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCDelta.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, integrationInterval)); }
+  /// \param chunk chunk of the Delta IDC (can be obtained with getLocalIntegrationInterval())
+  /// \param localintegrationInterval local integration interval for chunk (can be obtained with getLocalIntegrationInterval())
+  float getIDCDeltaVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int chunk, unsigned int localintegrationInterval) const { return mIDCDelta[chunk].getValue(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, localintegrationInterval)); }
 
   /// \return returns the index to the grouped data with ungrouped inputs
   /// \param sector sector
@@ -113,6 +115,13 @@ class IDCFactorization
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
   unsigned int getIndexUngrouped(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return getIndexGrouped(sector % o2::tpc::SECTORSPERSIDE, region, getGroupedRow(region, urow), getGroupedPad(region, urow, upad), integrationInterval); }
+
+  /// \return returns index of integration interval in the chunk from global integration interval
+  /// \param region TPC region
+  /// \param integrationInterval integration interval
+  /// \param chunk which will be set in the function
+  /// \param localintegrationInterval local integration interval for chunk which will be set in the function
+  void getLocalIntegrationInterval(const unsigned int region, const unsigned int integrationInterval, unsigned int& chunk, unsigned int& localintegrationInterval) const;
 
   /// \returns grouping definition in pad direction (How many pads are grouped)
   /// \param region TPC region
@@ -152,7 +161,11 @@ class IDCFactorization
   /// \return returns number of grouped IDCs per sector
   unsigned int getIDCsPerSector() const { return mNIDCsPerSector; }
 
-  /// \return returns the number of stored integration intervals
+  /// \return returns the number of stored integration intervals for given Delta IDC chunk
+  /// \param chunk chunk of Delta IDC
+  unsigned long getNIntegrationIntervals(const unsigned int chunk) const;
+
+  /// \return returns the total number of stored integration intervals
   unsigned long getNIntegrationIntervals() const;
 
   /// \return returns stored IDC0 I_0(r,\phi) = <I(r,\phi,t)>_t
@@ -165,16 +178,23 @@ class IDCFactorization
 
   /// \return returns stored IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   /// \param side TPC side
-  const std::vector<float>& getIDCDeltaUncompressed(const o2::tpc::Side side) const { return mIDCDelta.mIDCDelta[side]; }
+  /// \param chunk chunk of Delta IDC
+  const std::vector<float>& getIDCDeltaUncompressed(const o2::tpc::Side side, const unsigned int chunk) const { return mIDCDelta[chunk].mIDCDelta[side]; }
 
   /// \return returns stored IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  const auto& getIDCDeltaUncompressed() const { return mIDCDelta; }
+  /// \param chunk chunk of Delta IDC
+  const auto& getIDCDeltaUncompressed(const unsigned int chunk) const { return mIDCDelta[chunk]; }
 
   /// \return creates and returns medium compressed IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  auto getIDCDeltaMediumCompressed() const { return IDCDeltaCompressionHelper<short>::getCompressedIDCs(mIDCDelta); }
+  /// \param chunk chunk of Delta IDC
+  auto getIDCDeltaMediumCompressed(const unsigned int chunk) const { return IDCDeltaCompressionHelper<short>::getCompressedIDCs(mIDCDelta[chunk]); }
 
   /// \return creates and returns high compressed IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  auto getIDCDeltaHighCompressed() const { return IDCDeltaCompressionHelper<char>::getCompressedIDCs(mIDCDelta); }
+  /// \param chunk chunk of Delta IDC
+  auto getIDCDeltaHighCompressed(const unsigned int chunk) const { return IDCDeltaCompressionHelper<char>::getCompressedIDCs(mIDCDelta[chunk]); }
+
+  /// \return returns number of chunks for Delta IDCs
+  unsigned int getNChunks() const { return mIDCDelta.size(); }
 
   /// \return returns struct containing IDC0 and IDC1
   const auto& getIDCZeroOne() const { return mIDCZeroOne; }
@@ -248,10 +268,11 @@ class IDCFactorization
   const std::array<unsigned int, Mapper::NREGIONS> mGroupLastRowsThreshold{}; ///< if the last group (region edges) consists in row direction of less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
   const std::array<unsigned int, Mapper::NREGIONS> mGroupLastPadsThreshold{}; ///< if the last group (sector edges) consists in pad direction of less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
   const unsigned int mTimeFrames{};                                           ///< number of timeframes which are stored
+  const unsigned int mTimeFramesDeltaIDC{};                                   ///< number of timeframes of which Delta IDCs are stored
   std::array<unsigned int, Mapper::NREGIONS> mNIDCsPerCRU{1};                 ///< total number of IDCs per region per integration interval
   std::array<std::vector<std::vector<float>>, CRU::MaxCRU> mIDCs{};           ///< grouped and integrated IDCs for the whole TPC. CRU -> time frame -> IDCs
   IDCZeroOne mIDCZeroOne{};                                                   ///< I_0(r,\phi) = <I(r,\phi,t)>_t and I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-  IDCDelta<float> mIDCDelta{};                                                ///< uncompressed: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+  std::vector<IDCDelta<float>> mIDCDelta{};                                   ///< uncompressed: chunk -> Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   unsigned int mNIDCsPerSector{};                                             ///< number of grouped IDCs per sector
   std::array<unsigned int, Mapper::NREGIONS> mRows{};                         ///< number of grouped rows per region
   std::array<unsigned int, Mapper::NREGIONS> mRegionOffs{};                   ///< offset for the region per region
@@ -288,7 +309,14 @@ class IDCFactorization
   /// get z axis title for given IDC type and compression type
   std::string getZAxisTitle(const IDCType type, const IDCDeltaCompression compression) const;
 
+  /// get time frame and index of integrationInterval in the TF
   void getTF(const unsigned int region, unsigned int integrationInterval, unsigned int& timeFrame, unsigned int& interval) const;
+
+  /// \returns chunk from timeframe
+  unsigned int getChunk(const unsigned int timeframe) const;
+
+  /// \return returns number of TFs for given chunk
+  unsigned int getNTFsPerChunk(const unsigned int chunk) const;
 
   ClassDefNV(IDCFactorization, 1)
 };

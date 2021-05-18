@@ -19,8 +19,8 @@
 #include "TLatex.h"
 #include <functional>
 
-o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames)
-  : mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mTimeFrames{timeFrames}
+o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames, const unsigned int timeframesDeltaIDC)
+  : mGroupPads{groupPads}, mGroupRows{groupRows}, mGroupLastRowsThreshold{groupLastRowsThreshold}, mGroupLastPadsThreshold{groupLastPadsThreshold}, mTimeFrames{timeFrames}, mTimeFramesDeltaIDC{timeframesDeltaIDC}, mIDCDelta{timeFrames / timeframesDeltaIDC + (timeFrames % timeframesDeltaIDC != 0)}
 {
   for (auto& idc : mIDCs) {
     idc.resize(mTimeFrames);
@@ -62,6 +62,11 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   lat.SetTextSize(2);
 
   poly->Draw("colz");
+
+  unsigned int chunk = 0;
+  unsigned int localintegrationInterval = 0;
+  getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
+
   for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
     for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
       for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
@@ -82,18 +87,18 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
             switch (compression) {
               case IDCDeltaCompression::NO:
               default: {
-                poly->Fill(xPos, yPos, getIDCDeltaVal(sector, region, irow, ipad, integrationInterval));
+                poly->Fill(xPos, yPos, getIDCDeltaVal(sector, region, irow, ipad, chunk, localintegrationInterval));
                 break;
               }
               case IDCDeltaCompression::MEDIUM: {
-                const static auto idcDeltaMedium = getIDCDeltaMediumCompressed(); // make object static to avoid multiple creations of the object in the loop
-                const float val = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                const static auto idcDeltaMedium = getIDCDeltaMediumCompressed(chunk); // make object static to avoid multiple creations of the object in the loop
+                const float val = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, localintegrationInterval));
                 poly->Fill(xPos, yPos, val);
                 break;
               }
               case IDCDeltaCompression::HIGH: {
-                const static auto idcDeltaHigh = getIDCDeltaHighCompressed(); // make object static to avoid multiple creations of the object in the loop
-                const float val = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                const static auto idcDeltaHigh = getIDCDeltaHighCompressed(chunk); // make object static to avoid multiple creations of the object in the loop
+                const float val = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, localintegrationInterval));
                 poly->Fill(xPos, yPos, val);
                 break;
               }
@@ -162,6 +167,10 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
   can->SetLeftMargin(0.1f);
 
   poly->Draw("colz");
+  unsigned int chunk = 0;
+  unsigned int localintegrationInterval = 0;
+  getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
+
   unsigned int sectorStart = (side == Side::A) ? 0 : o2::tpc::SECTORSPERSIDE;
   unsigned int sectorEnd = (side == Side::A) ? o2::tpc::SECTORSPERSIDE : Mapper::NSECTORS;
   for (unsigned int sector = sectorStart; sector < sectorEnd; ++sector) {
@@ -187,18 +196,18 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
               switch (compression) {
                 case IDCDeltaCompression::NO:
                 default: {
-                  poly->Fill(xPos, yPos, getIDCDeltaVal(sector, region, irow, ipad, integrationInterval));
+                  poly->Fill(xPos, yPos, getIDCDeltaVal(sector, region, irow, ipad, chunk, localintegrationInterval));
                   break;
                 }
                 case IDCDeltaCompression::MEDIUM: {
-                  const static auto idcDeltaMedium = getIDCDeltaMediumCompressed(); // make object static to avoid multiple creations of the object in the loop
-                  const float val = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                  const static auto idcDeltaMedium = getIDCDeltaMediumCompressed(chunk); // make object static to avoid multiple creations of the object in the loop
+                  const float val = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, localintegrationInterval));
                   poly->Fill(xPos, yPos, val);
                   break;
                 }
                 case IDCDeltaCompression::HIGH: {
-                  const static auto idcDeltaHigh = getIDCDeltaHighCompressed(); // make object static to avoid multiple creations of the object in the loop
-                  const float val = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, integrationInterval));
+                  const static auto idcDeltaHigh = getIDCDeltaHighCompressed(chunk); // make object static to avoid multiple creations of the object in the loop
+                  const float val = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, ipad, localintegrationInterval));
                   poly->Fill(xPos, yPos, val);
                   break;
                 }
@@ -252,8 +261,12 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
     std::vector<float> idcsDeltaHigh(nIDCsSector);
     std::vector<unsigned int> sectorv(nIDCsSector);
 
-    const auto idcDeltaMedium = getIDCDeltaMediumCompressed();
-    const auto idcDeltaHigh = getIDCDeltaHighCompressed();
+    unsigned int chunk = 0;
+    unsigned int localintegrationInterval = 0;
+    getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
+
+    const auto idcDeltaMedium = getIDCDeltaMediumCompressed(chunk);
+    const auto idcDeltaHigh = getIDCDeltaHighCompressed(chunk);
 
     unsigned int index = 0;
     for (unsigned int sector = 0; sector < Mapper::NSECTORS; ++sector) {
@@ -272,9 +285,9 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
             vGlobalYPos[index] = globalPos.Y();
             idcs[index] = getIDCVal(sector, region, irow, padTmp, integrationInterval);
             idcsZero[index] = getIDCZeroVal(sector, region, irow, padTmp);
-            idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, integrationInterval);
-            idcsDeltaMedium[index] = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
-            idcsDeltaHigh[index] = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, integrationInterval));
+            idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, chunk, localintegrationInterval);
+            idcsDeltaMedium[index] = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
+            idcsDeltaHigh[index] = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
             sectorv[index] = sector;
 
             ++index;
@@ -290,7 +303,9 @@ void o2::tpc::IDCFactorization::dumpIDCsToTree(int integrationIntervals) const
 
     pcstream << "tree"
              << "integrationInterval=" << integrationInterval
-             << "localinterval=" << interval
+             << "localintervalinTF=" << interval
+             << "indexinchunk=" << localintegrationInterval
+             << "chunk=" << chunk
              << "timeframe=" << timeFrame
              << "IDC.=" << idcs
              << "IDC0.=" << idcsZero
@@ -362,54 +377,77 @@ void o2::tpc::IDCFactorization::calcIDCOne()
 void o2::tpc::IDCFactorization::calcIDCDelta()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
-  const unsigned int idcsSide = nIDCsSide * getNIntegrationIntervals();
-  mIDCDelta.mIDCDelta[Side::A].resize(idcsSide);
-  mIDCDelta.mIDCDelta[Side::C].resize(idcsSide);
+  for (unsigned int i = 0; i < getNChunks(); ++i) {
+
+    LOGP(info, "chunk {}", i);
+    int aaa = getNIntegrationIntervals(i);
+    const auto idcsSide = nIDCsSide * aaa;
+
+    LOGP(info, "getNIntegrationIntervals(i) {}", aaa);
+
+    mIDCDelta[i].mIDCDelta[Side::A].resize(idcsSide);
+    mIDCDelta[i].mIDCDelta[Side::C].resize(idcsSide);
+  }
 
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
     unsigned int integrationIntervallast = 0;
+    unsigned int integrationIntervallastLocal = 0;
+    unsigned int lastChunk = 0;
+
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
+      const unsigned int chunk = getChunk(timeframe);
+      LOGP(info, "timeframe {}", timeframe);
+      LOGP(info, "chunk {}", chunk);
+
+      if (lastChunk != chunk) {
+        integrationIntervallastLocal = 0;
+      }
+
       for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
-        const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region] + integrationIntervallast;
+        const unsigned int intervallocal = idcs / mNIDCsPerCRU[region];
+        const unsigned int integrationIntervalGlobal = intervallocal + integrationIntervallast;
+        const unsigned int integrationIntervalLocal = intervallocal + integrationIntervallastLocal;
         const auto side = cruTmp.side();
         const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
         const unsigned int indexGlobMod = indexGlob % nIDCsSide;
         const auto idcZero = mIDCZeroOne.mIDCZero[side][indexGlobMod];
-        const auto idcOne = mIDCZeroOne.mIDCOne[side][integrationInterval];
-        const auto val = (idcZero > 0 && idcOne > 0) ? mIDCs[cru][timeframe][idcs] / (idcZero * idcOne) : 0;
-        mIDCDelta.mIDCDelta[side][indexGlobMod + integrationInterval * nIDCsSide] = val - 1;
+        const auto idcOne = mIDCZeroOne.mIDCOne[side][integrationIntervalGlobal];
+        const auto mult = idcZero * idcOne;
+        const auto val = (mult > 0) ? mIDCs[cru][timeframe][idcs] / mult : 0;
+        mIDCDelta[chunk].mIDCDelta[side][indexGlobMod + integrationIntervalLocal * nIDCsSide] = val - 1;
       }
-      integrationIntervallast += mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
+
+      const unsigned int intervals = mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
+      integrationIntervallast += intervals;
+      integrationIntervallastLocal += intervals;
+      lastChunk = chunk;
     }
   }
 }
 
 float o2::tpc::IDCFactorization::getIDCVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const
 {
-  // TODO optimize this function
   unsigned int timeFrame = 0;
   unsigned int interval = 0;
   getTF(region, integrationInterval, timeFrame, interval);
-
   return mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
 }
 
 void o2::tpc::IDCFactorization::getTF(const unsigned int region, unsigned int integrationInterval, unsigned int& timeFrame, unsigned int& interval) const
 {
-  // unsigned int timeFrame = 0;
-  // unsigned int interval = 0;
   unsigned int nintervals = 0;
+  unsigned int intervalTmp = 0;
   for (unsigned int tf = 0; tf < mTimeFrames; ++tf) {
     nintervals += mIDCs[region][tf].size() / mNIDCsPerCRU[region];
     if (integrationInterval < nintervals) {
       timeFrame = tf;
-      interval = integrationInterval - interval;
-      break;
+      interval = integrationInterval - intervalTmp;
+      return;
     }
-    interval = nintervals;
+    intervalTmp = nintervals;
   }
 }
 
@@ -421,6 +459,19 @@ void o2::tpc::IDCFactorization::factorizeIDCs()
   calcIDCDelta();
 }
 
+unsigned long o2::tpc::IDCFactorization::getNIntegrationIntervals(const unsigned int chunk) const
+{
+  std::size_t sum = 0;
+  const auto firstTF = chunk * getNTFsPerChunk(0);
+  LOGP(info, "getNTFsPerChunk(chunk) {}", getNTFsPerChunk(chunk));
+  for (unsigned int i = firstTF; i < firstTF + getNTFsPerChunk(chunk); ++i) {
+    LOGP(info, "tf {}", i);
+
+    sum += mIDCs[0][i].size();
+  }
+  return sum / mNIDCsPerCRU[0];
+}
+
 unsigned long o2::tpc::IDCFactorization::getNIntegrationIntervals() const
 {
   std::size_t sum = 0;
@@ -428,4 +479,35 @@ unsigned long o2::tpc::IDCFactorization::getNIntegrationIntervals() const
     sum += idcsTF.size();
   }
   return sum / mNIDCsPerCRU[0];
+}
+
+void o2::tpc::IDCFactorization::getLocalIntegrationInterval(const unsigned int region, const unsigned int integrationInterval, unsigned int& chunk, unsigned int& localintegrationInterval) const
+{
+  unsigned int nintervals = 0;
+  unsigned int nitervalsChunk = 0;
+  unsigned int globalTF = 0;
+  for (unsigned int ichunk = 0; ichunk < getNChunks(); ++ichunk) {
+    const auto nTFsPerChunk = getNTFsPerChunk(ichunk);
+    for (unsigned int tf = 0; tf < nTFsPerChunk; ++tf) {
+      nintervals += mIDCs[region][globalTF].size() / mNIDCsPerCRU[region];
+      if (integrationInterval < nintervals) {
+        chunk = getChunk(globalTF);
+        localintegrationInterval = integrationInterval - nitervalsChunk;
+        return;
+      }
+      ++globalTF;
+    }
+    nitervalsChunk = nintervals;
+  }
+}
+
+unsigned int o2::tpc::IDCFactorization::getChunk(const unsigned int timeframe) const
+{
+  return timeframe / mTimeFramesDeltaIDC;
+}
+
+unsigned int o2::tpc::IDCFactorization::getNTFsPerChunk(const unsigned int chunk) const
+{
+  const unsigned int remain = mTimeFrames % mTimeFramesDeltaIDC;
+  return ((chunk == getNChunks() - 1) && remain) ? remain : mTimeFramesDeltaIDC;
 }

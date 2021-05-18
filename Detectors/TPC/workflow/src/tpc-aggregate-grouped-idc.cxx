@@ -41,6 +41,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   std::vector<ConfigParamSpec> options{
     {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
     {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated."}},
+    {"timeframesDeltaIDC", VariantType::Int, 2, {"Number of TFs used for storing DeltaIDC in CCDB."}},
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
@@ -64,6 +65,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
   const auto nCRUs = tpcCRUs.size();
   const auto timeframes = static_cast<unsigned long>(config.options().get<int>("timeframes"));
+  const auto timeframesDeltaIDC = static_cast<unsigned long>(config.options().get<int>("timeframesDeltaIDC"));
   const auto debug = config.options().get<bool>("debug");
   const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
   IDCFactorization::setNThreads(nthreads);
@@ -87,7 +89,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto first = tpcCRUs.begin();
   const auto last = std::min(tpcCRUs.end(), first + nCRUs);
   const std::vector<uint32_t> rangeCRUs(first, last);
-  workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, compression, debug));
+  workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, timeframesDeltaIDC, compression, debug));
 
   return workflow;
 }

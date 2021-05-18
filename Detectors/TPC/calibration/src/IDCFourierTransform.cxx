@@ -27,7 +27,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficients(const o2::tpc::Side s
       const float term0 = o2::constants::math::TwoPI * coeff / lastIndex;
       for (unsigned int index = 0; index < lastIndex; ++index) {
         const float term = term0 * index;
-        const float idc = mIDCsOne[side][index + mShift * interval];
+        const float idc = mIDCsOne[mBufferIndex][side][index + mShift * interval];
 
         mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL) += idc * std::cos(term);
         mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) -= idc * std::sin(term);
@@ -37,6 +37,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficients(const o2::tpc::Side s
       mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::IMAG) /= lastIndex;
     }
   }
+  mBufferIndex = !mBufferIndex; // switch buffer index
 }
 
 std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTransform(const o2::tpc::Side side) const
@@ -86,7 +87,7 @@ void o2::tpc::IDCFourierTransform::dumpToTree() const
         std::vector<float> idcOne;
         idcOne.reserve(lastIndex);
         for (unsigned int index = 0; index < lastIndex; ++index) {
-          idcOne.emplace_back(mIDCsOne[side][index + mShift * interval]);
+          idcOne.emplace_back(mIDCsOne[!mBufferIndex][side][index + mShift * interval]);
         }
 
         std::vector<float> idcOneInverse = inverseFourier[interval];
@@ -116,7 +117,7 @@ void o2::tpc::IDCFourierTransform::initCoefficients(const o2::tpc::Side side)
 /// \param side TPC side
 void o2::tpc::IDCFourierTransform::setIDCs(std::vector<float>&& idcsOne, const o2::tpc::Side side)
 {
-  mIDCsOne[side] = std::move(idcsOne);
+  mIDCsOne[mBufferIndex][side] = std::move(idcsOne);
   initCoefficients(side);
 }
 
@@ -125,6 +126,6 @@ void o2::tpc::IDCFourierTransform::setIDCs(std::vector<float>&& idcsOne, const o
 /// \param side TPC side
 void o2::tpc::IDCFourierTransform::setIDCs(const std::vector<float>& idcsOne, const o2::tpc::Side side)
 {
-  mIDCsOne[side] = idcsOne;
+  mIDCsOne[mBufferIndex][side] = idcsOne;
   initCoefficients(side);
 }

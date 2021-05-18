@@ -41,10 +41,10 @@ namespace o2::tpc
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, std::array<unsigned int, Mapper::NREGIONS> groupPads,
+  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned int, Mapper::NREGIONS> groupPads,
                              std::array<unsigned int, Mapper::NREGIONS> groupRows, std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold,
                              std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const IDCDeltaCompression compression, const bool debug = false)
-    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
+    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -116,47 +116,49 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
     }
 
-    switch (mCompressionDeltaIDC) {
-      case IDCDeltaCompression::MEDIUM: {
-        auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed();
-        if (mWriteToDB) {
-          mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata);
+    for (int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
+      switch (mCompressionDeltaIDC) {
+        case IDCDeltaCompression::MEDIUM: {
+          auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed(iChunk);
+          if (mWriteToDB) {
+            mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata);
+          }
+          for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+            const o2::tpc::Side side = iSide ? Side::C : Side::A;
+            const header::DataHeader::SubSpecificationType subSpec{iSide};
+            output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.mIDCDelta[side]);
+          }
+          break;
         }
-        for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-          const o2::tpc::Side side = iSide ? Side::C : Side::A;
-          const header::DataHeader::SubSpecificationType subSpec{iSide};
-          output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.mIDCDelta[side]);
+        case IDCDeltaCompression::HIGH: {
+          auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed(iChunk);
+          if (mWriteToDB) {
+            mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata);
+          }
+          for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+            const o2::tpc::Side side = iSide ? Side::C : Side::A;
+            const header::DataHeader::SubSpecificationType subSpec{iSide};
+            output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.mIDCDelta[side]);
+          }
+          break;
         }
-        break;
+        case IDCDeltaCompression::NO:
+        default:
+          if (mWriteToDB) {
+            mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(iChunk), "TPC/Calib/IDC/IDCDELTA", mMetadata);
+          }
+          for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+            const o2::tpc::Side side = iSide ? Side::C : Side::A;
+            const header::DataHeader::SubSpecificationType subSpec{iSide};
+            output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDeltaUncompressed(side,iChunk));
+          }
+          break;
       }
-      case IDCDeltaCompression::HIGH: {
-        auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed();
-        if (mWriteToDB) {
-          mDBapi.storeAsTFileAny(&idcDeltaHighCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata);
-        }
-        for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-          const o2::tpc::Side side = iSide ? Side::C : Side::A;
-          const header::DataHeader::SubSpecificationType subSpec{iSide};
-          output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.mIDCDelta[side]);
-        }
-        break;
-      }
-      case IDCDeltaCompression::NO:
-      default:
-        if (mWriteToDB) {
-          mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(), "TPC/Calib/IDC/IDCDELTA", mMetadata);
-        }
-        for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-          const o2::tpc::Side side = iSide ? Side::C : Side::A;
-          const header::DataHeader::SubSpecificationType subSpec{iSide};
-          output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDeltaUncompressed(side));
-        }
-        break;
     }
   }
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const IDCDeltaCompression compression, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const int timeframesDeltaIDC, const IDCDeltaCompression compression, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
@@ -187,7 +189,7 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, compression, debug)},
+    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, compression, debug)},
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 

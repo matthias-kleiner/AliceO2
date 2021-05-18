@@ -47,7 +47,7 @@ class IDCFourierTransform
 
   /// \return returns number of 1D-IDCs
   /// \param side TPC side
-  unsigned long getNIDCs(const o2::tpc::Side side) const { return mIDCsOne[side].size(); }
+  unsigned long getNIDCs(const o2::tpc::Side side) const { return mIDCsOne[!mBufferIndex][side].size(); }
 
   /// \return returns number of intervals for which the coefficients are obtained
   /// \param side TPC side
@@ -100,11 +100,12 @@ class IDCFourierTransform
   void dumpToTree() const;
 
  private:
-  const unsigned int mRangeIntegrationIntervals{};           ///< number of IDCs used for the calculation of fourier coefficients
-  const unsigned int mShift{};                               ///< shifting parameter for the range. Should be >=1
-  std::array<std::vector<float>, o2::tpc::SIDES> mIDCsOne{}; ///< all 1D-IDCs which are used to calculate the fourier coefficients
-  const unsigned int mNFourierCoefficients{};                ///< number of fourier coefficients which will be calculated
-  FourierCoeff mFourierCoefficients;                         ///< fourier coefficients. side -> interval -> coefficient
+  const unsigned int mRangeIntegrationIntervals{};                          ///< number of IDCs used for the calculation of fourier coefficients
+  const unsigned int mShift{};                                              ///< shifting parameter for the range. Should be >=1
+  std::array<std::array<std::vector<float>, o2::tpc::SIDES>, 2> mIDCsOne{}; ///< all 1D-IDCs which are used to calculate the fourier coefficients. A buffer of the last IDCs is used to calculate the fourier coefficients for the first TFs
+  int mBufferIndex{};                                                       ///< index for the buffer
+  const unsigned int mNFourierCoefficients{};                               ///< number of fourier coefficients which will be calculated
+  FourierCoeff mFourierCoefficients;                                        ///< fourier coefficients. side -> interval -> coefficient
 
   /// initialize mFourierCoefficients member
   void initCoefficients(const o2::tpc::Side side);
