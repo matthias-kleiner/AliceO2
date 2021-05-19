@@ -385,8 +385,8 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
 
     LOGP(info, "getNIntegrationIntervals(i) {}", aaa);
 
-    mIDCDelta[i].mIDCDelta[Side::A].resize(idcsSide);
-    mIDCDelta[i].mIDCDelta[Side::C].resize(idcsSide);
+    mIDCDelta[i].getIDCDelta(Side::A).resize(idcsSide);
+    mIDCDelta[i].getIDCDelta(Side::C).resize(idcsSide);
   }
 
 #pragma omp parallel for num_threads(sNThreads)
@@ -417,7 +417,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const auto idcOne = mIDCZeroOne.mIDCOne[side][integrationIntervalGlobal];
         const auto mult = idcZero * idcOne;
         const auto val = (mult > 0) ? mIDCs[cru][timeframe][idcs] / mult : 0;
-        mIDCDelta[chunk].mIDCDelta[side][indexGlobMod + integrationIntervalLocal * nIDCsSide] = val - 1;
+        mIDCDelta[chunk].getIDCDelta(side)[indexGlobMod + integrationIntervalLocal * nIDCsSide] = val - 1;
       }
 
       const unsigned int intervals = mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];

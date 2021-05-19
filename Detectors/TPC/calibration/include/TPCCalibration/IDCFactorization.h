@@ -179,7 +179,7 @@ class IDCFactorization
   /// \return returns stored IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   /// \param side TPC side
   /// \param chunk chunk of Delta IDC
-  const std::vector<float>& getIDCDeltaUncompressed(const o2::tpc::Side side, const unsigned int chunk) const { return mIDCDelta[chunk].mIDCDelta[side]; }
+  const std::vector<float>& getIDCDeltaUncompressed(const o2::tpc::Side side, const unsigned int chunk) const { return mIDCDelta[chunk].getIDCDelta(side); }
 
   /// \return returns stored IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   /// \param chunk chunk of Delta IDC

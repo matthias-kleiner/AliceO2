@@ -33,18 +33,30 @@ namespace tpc
 
 /// struct containing the IDC delta values
 template <typename DataT>
+struct IDCDeltaContainer {
+  std::array<std::vector<DataT>, o2::tpc::SIDES> mIDCDelta{}; ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+};
+
+/// storage for the factor used to compress IDCDelta.
+/// This factor is separated from the IDCDelta struct to able to store those values independently in the CCDB
+struct IDCDeltaCompressionFactors {
+  std::array<float, o2::tpc::SIDES> mFactors{1.f, 1.f}; ///< compression factors for each TPC side
+};
+
+/// struct to access and set Delta IDCs
+template <typename DataT>
 struct IDCDelta {
 
   /// set idcDelta for given index
   /// \param idcDelta Delta IDC value which will be set
   /// \param side side of the TPC
   /// \param index index in the storage
-  void setValue(const float idcDelta, const o2::tpc::Side side, const unsigned int index) { mIDCDelta[side][index] = compressValue(idcDelta, side); }
+  void setValue(const float idcDelta, const o2::tpc::Side side, const unsigned int index) { mIDCDelta.mIDCDelta[side][index] = compressValue(idcDelta, side); }
 
   /// set idcDelta ath the end of storage
   /// \param idcDelta Delta IDC value which will be set
   /// \param side side of the TPC
-  void emplace_back(const float idcDelta, const o2::tpc::Side side) { mIDCDelta[side].emplace_back(compressValue(idcDelta, side)); }
+  void emplace_back(const float idcDelta, const o2::tpc::Side side) { mIDCDelta.mIDCDelta[side].emplace_back(compressValue(idcDelta, side)); }
 
   /// \return returns converted IDC value from float to new data type
   /// \param idcDelta Delta IDC value which will be set
@@ -52,21 +64,42 @@ struct IDCDelta {
   DataT compressValue(const float idcDelta, const o2::tpc::Side side) const
   {
     const static auto& paramIDCGroup = ParameterIDCCompression::Instance();
-    return (std::abs(idcDelta) >= paramIDCGroup.MaxIDCDeltaValue) ? static_cast<DataT>(std::copysign(paramIDCGroup.MaxIDCDeltaValue * mFactors[side] + 0.5f, idcDelta)) : static_cast<DataT>(idcDelta * mFactors[side] + std::copysign(0.5f, idcDelta));
+    return (std::abs(idcDelta) >= paramIDCGroup.MaxIDCDeltaValue) ? static_cast<DataT>(std::copysign(paramIDCGroup.MaxIDCDeltaValue * mCompressionFactor.mFactors[side] + 0.5f, idcDelta)) : static_cast<DataT>(idcDelta * mCompressionFactor.mFactors[side] + std::copysign(0.5f, idcDelta));
   }
 
   /// \return returns stored Delta IDC value
   /// \param side side of the TPC
   /// \param index index in the storage
-  float getValue(const o2::tpc::Side side, const unsigned int index) const { return (static_cast<float>(mIDCDelta[side][index]) / mFactors[side]); }
+  float getValue(const o2::tpc::Side side, const unsigned int index) const { return (static_cast<float>(mIDCDelta.mIDCDelta[side][index]) / mCompressionFactor.mFactors[side]); }
 
   /// set compression factor
   /// \param side side of the TPC
   /// \param factor factor which will be used for the compression
-  void setFactor(const o2::tpc::Side side, const float factor) { mFactors[side] = factor; }
+  void setFactor(const o2::tpc::Side side, const float factor) { mCompressionFactor.mFactors[side] = factor; }
 
-  std::array<std::vector<DataT>, o2::tpc::SIDES> mIDCDelta{}; ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  std::array<float, o2::tpc::SIDES> mFactors{1.f, 1.f};       ///< compression factors for each TPC side
+  /// \return returns vector of Delta IDCs for given side
+  /// \param side side of the TPC
+  const auto& getIDCDelta(const o2::tpc::Side side) const { return mIDCDelta.mIDCDelta[side]; }
+
+  /// \return returns vector of Delta IDCs for given side
+  /// \param side side of the TPC
+  auto& getIDCDelta(const o2::tpc::Side side) { return mIDCDelta.mIDCDelta[side]; }
+
+  /// \return returns IDCDeltaContainer container
+  const auto& getIDCDelta() const { return mIDCDelta; }
+
+  /// \return returns IDCDeltaContainer container
+  auto& getIDCDelta() { return mIDCDelta; }
+
+  /// \return returns compression factors to uncompress Delta IDC
+  const auto& getCompressionFactors() const { return mCompressionFactor; }
+
+  /// \return returns compression factors to uncompress Delta IDC
+  /// \param side side of the TPC
+  auto getCompressionFactor(const o2::tpc::Side side) const { return mCompressionFactor.mFactors[side]; }
+
+  IDCDeltaContainer<DataT> mIDCDelta{};            ///< storage for Delta IDCs
+  IDCDeltaCompressionFactors mCompressionFactor{}; ///< compression factor for Delta IDCs
 };
 
 template <>
@@ -75,14 +108,22 @@ struct IDCDelta<float> {
   /// \param idcDelta Delta IDC value which will be set
   /// \param side side of the TPC
   /// \param index index in the storage
-  void setValue(const float idcDelta, const o2::tpc::Side side, const unsigned int index) { mIDCDelta[side][index] = idcDelta; }
+  void setValue(const float idcDelta, const o2::tpc::Side side, const unsigned int index) { mIDCDelta.mIDCDelta[side][index] = idcDelta; }
 
   /// \return returns stored Delta IDC value
   /// \param side side of the TPC
   /// \param index index in the storage
-  float getValue(const o2::tpc::Side side, const unsigned int index) const { return mIDCDelta[side][index]; }
+  float getValue(const o2::tpc::Side side, const unsigned int index) const { return mIDCDelta.mIDCDelta[side][index]; }
 
-  std::array<std::vector<float>, o2::tpc::SIDES> mIDCDelta{}; ///< \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+  /// \return returns vector of Delta IDCs for given side
+  /// \param side side of the TPC
+  const auto& getIDCDelta(const o2::tpc::Side side) const { return mIDCDelta.mIDCDelta[side]; }
+
+  /// \return returns vector of Delta IDCs for given side
+  /// \param side side of the TPC
+  auto& getIDCDelta(const o2::tpc::Side side) { return mIDCDelta.mIDCDelta[side]; }
+
+  IDCDeltaContainer<float> mIDCDelta{}; ///< storage for Delta IDCs
 };
 
 /// helper class to compress Delta IDC values
@@ -107,10 +148,10 @@ class IDCDeltaCompressionHelper
   static void compress(const IDCDelta<float>& idcDeltaUncompressed, IDCDelta<DataT>& idcCompressed, const o2::tpc::Side side)
   {
     const float factor = getCompressionFactor(idcDeltaUncompressed, side);
-    idcCompressed.mIDCDelta[side].reserve(idcDeltaUncompressed.mIDCDelta[side].size());
+    idcCompressed.getIDCDelta(side).reserve(idcDeltaUncompressed.getIDCDelta(side).size());
     idcCompressed.setFactor(side, factor);
 
-    for (auto& idc : idcDeltaUncompressed.mIDCDelta[side]) {
+    for (auto& idc : idcDeltaUncompressed.getIDCDelta(side)) {
       idcCompressed.emplace_back(idc, side);
     }
   }
@@ -118,7 +159,7 @@ class IDCDeltaCompressionHelper
   /// \return returns the factor which is used during the compression
   static float getCompressionFactor(const IDCDelta<float>& idcDeltaUncompressed, const o2::tpc::Side side)
   {
-    const float maxAbsIDC = getMaxValue(idcDeltaUncompressed.mIDCDelta[side]);
+    const float maxAbsIDC = getMaxValue(idcDeltaUncompressed.getIDCDelta(side));
     const auto& paramIDCGroup = ParameterIDCCompression::Instance();
     const float maxIDC = paramIDCGroup.MaxIDCDeltaValue;
     // TODO catch division by zero (maxAbsIDC=0)?

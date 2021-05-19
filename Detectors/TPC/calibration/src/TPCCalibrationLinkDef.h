@@ -36,6 +36,10 @@
 #pragma link C++ struct o2::tpc::IDCDelta<float> +;
 #pragma link C++ struct o2::tpc::IDCDelta<short> +;
 #pragma link C++ struct o2::tpc::IDCDelta<char> +;
+#pragma link C++ struct o2::tpc::IDCDeltaCompressionFactors +;
+#pragma link C++ struct o2::tpc::IDCDeltaContainer<float> +;
+#pragma link C++ struct o2::tpc::IDCDeltaContainer<short> +;
+#pragma link C++ struct o2::tpc::IDCDeltaContainer<char> +;
 #pragma link C++ class o2::tpc::IDCDeltaCompressionHelper<short> +;
 #pragma link C++ class o2::tpc::IDCDeltaCompressionHelper<char> +;
 #pragma link C++ struct o2::tpc::IDCZeroOne +;
