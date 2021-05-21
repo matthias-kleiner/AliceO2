@@ -46,7 +46,6 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
   const int defaultlanes = std::max(1u, std::thread::hardware_concurrency() / 2);
 
   std::vector<ConfigParamSpec> options{
-    {"inputFormat", VariantType::String, "Sim", {"setting the input format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
@@ -65,9 +64,6 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 WorkflowSpec defineDataProcessing(ConfigContext const& config)
 {
   using namespace o2::tpc;
-
-  const auto inputFormatStr = config.options().get<std::string>("inputFormat");
-  const TPCIntegrateIDCDevice::IDCFormat inputFormat = inputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::IDCFormat::Real : TPCIntegrateIDCDevice::IDCFormat::Sim;
 
   const auto tpcCRUs = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("crus"));
   const auto nCRUs = tpcCRUs.size();
@@ -149,7 +145,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     }
     const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
     const std::vector<uint32_t> rangeCRUs(first, last);
-    workflow.emplace_back(getTPCAverageGroupIDCSpec(ilane, rangeCRUs, inputFormat, debug));
+    workflow.emplace_back(getTPCAverageGroupIDCSpec(ilane, rangeCRUs, debug));
   }
 
   return workflow;

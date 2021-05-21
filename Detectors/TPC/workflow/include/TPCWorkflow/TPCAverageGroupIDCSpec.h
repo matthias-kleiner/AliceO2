@@ -39,8 +39,8 @@ namespace o2::tpc
 class TPCAverageGroupIDCDevice : public o2::framework::Task
 {
  public:
-  TPCAverageGroupIDCDevice(const int lane, const std::vector<uint32_t>& crus, const TPCIntegrateIDCDevice::IDCFormat inputFormat, const bool debug = false)
-    : mLane{lane}, mCRUs{crus}, mInputFormat{inputFormat}, mDebug{debug}
+  TPCAverageGroupIDCDevice(const int lane, const std::vector<uint32_t>& crus, const bool debug = false)
+    : mLane{lane}, mCRUs{crus}, mDebug{debug}
   {
     auto& paramIDCGroup = ParameterIDCGroup::Instance();
     for (const auto& cru : mCRUs) {
@@ -85,7 +85,6 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
  private:
   const int mLane{0};                                        ///< lane number of processor
   const std::vector<uint32_t> mCRUs{};                       ///< CRUs to process in this instance
-  const TPCIntegrateIDCDevice::IDCFormat mInputFormat{};     ///< type of the input format. Sim=simulation, Real=realistic format
   const bool mDebug{};                                       ///< dump IDCs to tree for debugging
   std::unordered_map<unsigned int, IDCAverageGroup> mIDCs{}; ///< object for averaging and grouping the IDCs
 
@@ -96,7 +95,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vector<uint32_t>& crus = {}, const TPCIntegrateIDCDevice::IDCFormat inputFormat = {}, const bool debug = false)
+DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vector<uint32_t>& crus = {}, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   std::vector<InputSpec> inputSpecs;
@@ -105,7 +104,7 @@ DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vect
 
   for (const auto& cru : crus) {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
-    inputSpecs.emplace_back(InputSpec{"idcs", gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(inputFormat), subSpec, Lifetime::Timeframe});
+    inputSpecs.emplace_back(InputSpec{"idcs", gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(TPCIntegrateIDCDevice::IDCFormat::Sim), subSpec, Lifetime::Timeframe});
     outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCGROUP", subSpec});
   }
 
@@ -114,7 +113,7 @@ DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vect
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAverageGroupIDCDevice>(ilane, crus, inputFormat, debug)},
+    AlgorithmSpec{adaptFromTask<TPCAverageGroupIDCDevice>(ilane, crus, debug)},
   }; // end DataProcessorSpec
 }
 

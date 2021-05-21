@@ -173,8 +173,8 @@ class IDCDeltaCompressionHelper
   };
 };
 
-///<struct containing the IDC0 and IDC1 values
-struct IDCZeroOne {
+///<struct containing the IDC1 values
+struct IDCZero {
 
   /// set IDC zero for given index
   /// \param idcZero Delta IDC value which will be set
@@ -193,6 +193,11 @@ struct IDCZeroOne {
   /// \param index index in the storage
   float getValueIDCZero(const o2::tpc::Side side, const unsigned int index) const { return mIDCZero[side][index]; }
 
+  std::array<std::vector<float>, o2::tpc::SIDES> mIDCZero{}; ///< I_0(r,\phi) = <I(r,\phi,t)>_t
+};
+
+///<struct containing the IDC0 and IDC1 values
+struct IDCOne {
   /// set IDC one for given index
   /// \param idcOne Delta IDC value which will be set
   /// \param side side of the TPC
@@ -204,16 +209,28 @@ struct IDCZeroOne {
   /// \param index index in the storage
   float getValueIDCOne(const o2::tpc::Side side, const unsigned int index) const { return mIDCOne[side][index]; }
 
-  std::array<std::vector<float>, o2::tpc::SIDES> mIDCZero{}; ///< I_0(r,\phi) = <I(r,\phi,t)>_t
-  std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{};  ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+  /// \return returns total number of 1D-IDCs for given side
+  /// \param side side of the TPC
+  unsigned int getNIDCs(const o2::tpc::Side side) const { return mIDCOne[side].size(); }
+
+  /// \return returns if the container is empty
+  /// \param side side of the TPC
+  bool empty(const o2::tpc::Side side) const { return mIDCOne[side].empty(); }
+
+  std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{}; ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
 };
 
-/// struct containing the fourier coefficients calculated from IDC0
+/// struct containing the fourier coefficients calculated from IDC0 for n timeframes
 struct FourierCoeff {
   /// IDC types
   enum class CoeffType { REAL = 0, ///< real coefficient
                          IMAG = 1  ///< imag coefficient
   };
+
+  /// constructor
+  /// \param nFourierCoefficients number of real/imag fourier coefficients which will be stored
+  FourierCoeff(const unsigned int nFourierCoefficients = 1)
+    : mFourierCoefficients{{{std::vector<float>(nFourierCoefficients), std::vector<float>(nFourierCoefficients)}, {std::vector<float>(nFourierCoefficients), std::vector<float>(nFourierCoefficients)}}} {};
 
   /// \return returns total number of stored coefficients for given side and real/complex type
   /// \param side side

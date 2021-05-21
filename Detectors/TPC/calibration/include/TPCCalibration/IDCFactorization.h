@@ -97,7 +97,7 @@ class IDCFactorization
   /// \param region region
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
-  float getIDCZeroVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad) const { return mIDCZeroOne.getValueIDCZero(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, 0)); }
+  float getIDCZeroVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad) const { return mIDCZero.getValueIDCZero(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, 0)); }
 
   /// \return returns the stored DeltaIDC value for local ungrouped pad row and ungrouped pad
   /// \param sector sector
@@ -170,11 +170,11 @@ class IDCFactorization
 
   /// \return returns stored IDC0 I_0(r,\phi) = <I(r,\phi,t)>_t
   /// \param side TPC side
-  const std::vector<float>& getIDCZero(const o2::tpc::Side side) const { return mIDCZeroOne.mIDCZero[side]; }
+  const std::vector<float>& getIDCZero(const o2::tpc::Side side) const { return mIDCZero.mIDCZero[side]; }
 
   /// \return returns stored IDC1 I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   /// \param side TPC side
-  const std::vector<float>& getIDCOne(const o2::tpc::Side side) const { return mIDCZeroOne.mIDCOne[side]; }
+  const std::vector<float>& getIDCOne(const o2::tpc::Side side) const { return mIDCOne.mIDCOne[side]; }
 
   /// \return returns stored IDCDelta \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   /// \param side TPC side
@@ -196,8 +196,14 @@ class IDCFactorization
   /// \return returns number of chunks for Delta IDCs
   unsigned int getNChunks() const { return mIDCDelta.size(); }
 
-  /// \return returns struct containing IDC0 and IDC1
-  const auto& getIDCZeroOne() const { return mIDCZeroOne; }
+  /// \return returns struct containing IDC0
+  const auto& getIDCZero() const { return mIDCZero; }
+
+  /// \return returns struct containing IDC1
+  const auto& getIDCOne() const& { return mIDCOne; }
+
+  /// \return returns struct containing IDC1 using move semantics
+  auto getIDCOne() && { return std::move(mIDCOne); }
 
   /// \return returns grouped IDCs
   const auto& getIDCs() const { return mIDCs; }
@@ -260,7 +266,10 @@ class IDCFactorization
   void dumpToFile(const char* outFileName = "IDCFactorized.root", const char* outName = "IDCFactorized") const;
 
   /// \param integrationIntervals number of integration intervals which will be dumped to the tree (-1: all integration intervalls)
-  void dumpIDCsToTree(int integrationIntervals = -1) const;
+  void dumpToTree(int integrationIntervals = -1) const;
+
+  /// \returns vector containing the number of integration intervals for each stored TF
+  std::vector<unsigned int> getIntegrationIntervalsPerTF(const unsigned int region = 0) const;
 
  private:
   const std::array<unsigned int, Mapper::NREGIONS> mGroupPads{};              ///< grouping definition in pad direction (How many pads are grouped)
@@ -271,7 +280,8 @@ class IDCFactorization
   const unsigned int mTimeFramesDeltaIDC{};                                   ///< number of timeframes of which Delta IDCs are stored
   std::array<unsigned int, Mapper::NREGIONS> mNIDCsPerCRU{1};                 ///< total number of IDCs per region per integration interval
   std::array<std::vector<std::vector<float>>, CRU::MaxCRU> mIDCs{};           ///< grouped and integrated IDCs for the whole TPC. CRU -> time frame -> IDCs
-  IDCZeroOne mIDCZeroOne{};                                                   ///< I_0(r,\phi) = <I(r,\phi,t)>_t and I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+  IDCZero mIDCZero{};                                                         ///< I_0(r,\phi) = <I(r,\phi,t)>_t
+  IDCOne mIDCOne{};                                                           ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   std::vector<IDCDelta<float>> mIDCDelta{};                                   ///< uncompressed: chunk -> Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   unsigned int mNIDCsPerSector{};                                             ///< number of grouped IDCs per sector
   std::array<unsigned int, Mapper::NREGIONS> mRows{};                         ///< number of grouped rows per region

@@ -30,6 +30,7 @@
 #include "CCDB/CcdbApi.h"
 #include "Framework/ConfigParamRegistry.h"
 #include "TPCCalibration/ParameterIDC.h"
+#include "TPCCalibration/IDCFourierTransform.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -43,8 +44,8 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
  public:
   TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned int, Mapper::NREGIONS> groupPads,
                              std::array<unsigned int, Mapper::NREGIONS> groupRows, std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold,
-                             std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const IDCDeltaCompression compression, const bool debug = false)
-    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
+                             std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int rangeIDC, const unsigned int fourierCoefficients, const IDCDeltaCompression compression, const bool debug = false)
+    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mIDCFourierTransform{rangeIDC, fourierCoefficients, timeframes}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -55,7 +56,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     if (mWriteToDB) {
       // write struct containing grouping parameters to access grouped IDCs to CCDB
       const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getPadThreshold(), mIDCs.getRowThreshold());
-      mDBapi.storeAsTFileAny(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata);
+      mDBapi.storeAsTFileAny<o2::tpc::ParameterIDCGroupCCDB>(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata);
     }
   }
 
@@ -74,14 +75,27 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mProcessedTFs = 0;
       mIDCs.factorizeIDCs();
 
-      sendOutput(pc.outputs());
-
       if (mDebug) {
+        // dump this first to also store 1D-IDCs! otherwise they will be moved out and are not available
         LOGP(info, "dumping aggregated IDCS to file");
         const DataRef ref = pc.inputs().getByPos(0);
         auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
         const auto tf = tpcCRUHeader->tfCounter;
-        mIDCs.dumpToFile(Form("IDCFactorized_%i.root", tf));
+        mIDCs.dumpToFile(fmt::format("IDCFactorized_{:02}.root", tf).data());
+      }
+
+      mIDCFourierTransform.setIDCs(std::move(mIDCs).getIDCOne(), mIDCs.getIntegrationIntervalsPerTF()); // using move semantics here
+      mIDCFourierTransform.calcFourierCoefficients();
+
+      LOGP(info, "sendOutput calcFourierCoefficients");
+      sendOutput(pc.outputs());
+
+      if (mDebug) {
+        LOGP(info, "dumping fourier transform  to file");
+        const DataRef ref = pc.inputs().getByPos(0);
+        auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
+        const auto tf = tpcCRUHeader->tfCounter;
+        mIDCFourierTransform.dumpToFile(fmt::format("Fourier_{:02}.root", tf).data());
       }
     }
   }
@@ -96,6 +110,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   const std::vector<uint32_t> mCRUs{};              ///< CRUs to process in this instance
   int mProcessedTFs{0};                             ///< number of processed time frames to keep track of when the writing to CCDB will be done
   IDCFactorization mIDCs{};                         ///< object aggregating the IDCs and performing the factorization of the IDCs
+  IDCFourierTransform mIDCFourierTransform{};       ///< object for performing the fourier transform of 1D-IDCs
   const IDCDeltaCompression mCompressionDeltaIDC{}; ///< compression type of IDC delta
   const bool mDebug{false};                         ///< dump IDCs to tree for debugging
   o2::ccdb::CcdbApi mDBapi;                         ///< object for storing the IDCs at CCDB
@@ -106,14 +121,20 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   {
     if (mWriteToDB) {
       // store IDC Zero One in CCDB
-      mDBapi.storeAsTFileAny(&mIDCs.getIDCZeroOne(), "TPC/Calib/IDC/IDCZEROONE", mMetadata);
+      // const long timeStampStart = 33;
+      // const long timeStampStart = 33;
+      mDBapi.storeAsTFileAny<o2::tpc::IDCZero>(&mIDCs.getIDCZero(), "TPC/Calib/IDC/IDC0", mMetadata);
+      mDBapi.storeAsTFileAny<o2::tpc::IDCOne>(&mIDCFourierTransform.getIDCOne(), "TPC/Calib/IDC/IDC1", mMetadata);
+      mDBapi.storeAsTFileAny<o2::tpc::FourierCoeff>(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata);
     }
 
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
       const o2::tpc::Side side = iSide ? Side::C : Side::A;
       const header::DataHeader::SubSpecificationType subSpec{iSide};
-      output.snapshot(Output{gDataOriginTPC, "IDCZERO", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
-      output.snapshot(Output{gDataOriginTPC, "IDCONE", subSpec, Lifetime::Timeframe}, mIDCs.getIDCOne(side));
+      output.snapshot(Output{gDataOriginTPC, "IDC0", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
+      output.snapshot(Output{gDataOriginTPC, "IDC1", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getIDCOne(side));
+      output.snapshot(Output{gDataOriginTPC, "FOURIERREAL", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::REAL));
+      output.snapshot(Output{gDataOriginTPC, "FOURIERIMAG", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::IMAG));
     }
 
     switch (mCompressionDeltaIDC) {
@@ -122,15 +143,15 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
           auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed(iChunk);
           if (mWriteToDB) {
             if (iChunk == 0) {
-              mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata);
+              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata);
             }
-            mDBapi.storeAsTFileAny(&idcDeltaMediumCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<short>>(&idcDeltaMediumCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
             const header::DataHeader::SubSpecificationType subSpec{iSide};
             output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.getIDCDelta(side));
-            output.snapshot(Output{gDataOriginTPC, "IDCDELTACOMP", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.getCompressionFactor(side));
+            // output.snapshot(Output{gDataOriginTPC, "IDCDELTACOMP", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.getCompressionFactor(side));
           }
         }
         break;
@@ -140,15 +161,15 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
           auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed(iChunk);
           if (mWriteToDB) {
             if (iChunk == 0) {
-              mDBapi.storeAsTFileAny(&idcDeltaHighCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata);
+              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaHighCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata);
             }
-            mDBapi.storeAsTFileAny(&idcDeltaHighCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<char>>(&idcDeltaHighCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
             const header::DataHeader::SubSpecificationType subSpec{iSide};
             output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.getIDCDelta(side));
-            output.snapshot(Output{gDataOriginTPC, "IDCDELTACOMP", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.getCompressionFactor(side));
+            // output.snapshot(Output{gDataOriginTPC, "IDCDELTACOMP", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.getCompressionFactor(side));
           }
         }
         break;
@@ -157,7 +178,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       default:
         for (int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
           if (mWriteToDB) {
-            mDBapi.storeAsTFileAny(&mIDCs.getIDCDeltaUncompressed(iChunk), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<float>>(&mIDCs.getIDCDeltaUncompressed(iChunk).mIDCDelta, "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -170,18 +191,16 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const int timeframes, const int timeframesDeltaIDC, const IDCDeltaCompression compression, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const unsigned int rangeIDC, const unsigned int fourierCoefficients, const IDCDeltaCompression compression, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
     const header::DataHeader::SubSpecificationType subSpec{iSide};
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCZERO", subSpec});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCONE", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDC0", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDC1", subSpec});
     outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCDELTA", subSpec});
-    if (compression == IDCDeltaCompression::MEDIUM || compression == IDCDeltaCompression::HIGH) {
-      // TODO send compression values per side and with dataheader!?
-      outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCDELTACOMP", subSpec});
-    }
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "FOURIERREAL", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "FOURIERIMAG", subSpec});
   }
 
   std::vector<InputSpec> inputSpecs;
@@ -200,12 +219,12 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   std::copy(std::begin(paramIDCGroup.GroupRows), std::end(paramIDCGroup.GroupRows), std::begin(groupRows));
   std::copy(std::begin(paramIDCGroup.GroupLastRowsThreshold), std::end(paramIDCGroup.GroupLastRowsThreshold), std::begin(groupLastRowsThreshold));
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
-  const auto id = fmt::format("tpc-aggregate-idc");
+  // const auto id = "tpc-aggregate-idc";
   return DataProcessorSpec{
-    id.data(),
+    "tpc-aggregate-idc",
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, compression, debug)},
+    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, rangeIDC, fourierCoefficients, compression, debug)},
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
 }
 

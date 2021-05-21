@@ -86,7 +86,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   /// \param idcFormat type of the IDC format
   static header::DataDescription getDataDescription(const IDCFormat idcFormat)
   {
-    return (idcFormat == IDCFormat::Sim) ? header::DataDescription{"IDCSIM"} : header::DataDescription{"IDC"};
+    return (idcFormat == IDCFormat::Sim) ? header::DataDescription{"IDCVECTOR"} : header::DataDescription{"IDC"};
   }
 
  private:

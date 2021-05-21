@@ -17,6 +17,8 @@
 #define ALICEO2_IDCFOURIERTRANSFORM_H_
 
 #include <vector>
+// #include <fftw3.h>
+
 #include "Rtypes.h"
 #include "DataFormatsTPC/Defs.h"
 #include "Framework/Logger.h"
@@ -31,27 +33,23 @@ class IDCFourierTransform
 {
  public:
   /// contructor
-  /// \param rangeIntegrationIntervals number of IDCs for each interval which will be used to calculate the fourier coefficients
-  /// \param shift number of IDCs of which the range will be shifted
-  /// \param nFourierCoefficients number of fourier coefficients which will be calculated (cant be larger than rangeIntegrationIntervals)
-  IDCFourierTransform(const unsigned int rangeIntegrationIntervals = 10, const unsigned int shift = 1, const unsigned int nFourierCoefficients = 10) : mRangeIntegrationIntervals{rangeIntegrationIntervals}, mShift{shift}, mNFourierCoefficients{nFourierCoefficients} {};
+  /// \param rangeIDC number of IDCs for each interval which will be used to calculate the fourier coefficients
+  /// \param nFourierCoefficients number of fourier coefficients which will be calculated (cant be larger than rangeIDC)
+  /// \param timeFrames number of time frames which will be stored
+  IDCFourierTransform(const unsigned int rangeIDC = 10, const unsigned int nFourierCoefficients = 10, const unsigned int timeFrames = 1) : mRangeIDC{rangeIDC}, mNFourierCoefficients{nFourierCoefficients}, mTimeFrames{timeFrames} {};
 
   /// \return returns number of IDCs for each interval which will be used to calculate the fourier coefficients
-  unsigned int getRangeIntegrationIntervals() const { return mRangeIntegrationIntervals; }
-
-  /// \return returns shifting parameter for the range
-  unsigned int getShift() const { return mShift; }
+  unsigned int getrangeIDC() const { return mRangeIDC; }
 
   /// \return returns numbers of stored fourier coeffiecients
   unsigned int getNCoefficients() const { return mNFourierCoefficients; }
 
   /// \return returns number of 1D-IDCs
   /// \param side TPC side
-  unsigned long getNIDCs(const o2::tpc::Side side) const { return mIDCsOne[!mBufferIndex][side].size(); }
+  unsigned long getNIDCs(const o2::tpc::Side side) const { return mIDCOne[!mBufferIndex].mIDCOne[side].size(); }
 
   /// \return returns number of intervals for which the coefficients are obtained
-  /// \param side TPC side
-  unsigned long getNIntervals(const o2::tpc::Side side) const { return mFourierCoefficients.getNValues(side) / mNFourierCoefficients; }
+  unsigned int getNIntervals() const { return mTimeFrames; }
 
   /// \return returns foruier coefficient
   /// \param side TPC side
@@ -73,19 +71,33 @@ class IDCFourierTransform
   /// \param coefficient index of coefficient
   unsigned int getIndex(const unsigned int interval, const unsigned int coefficient) const { return interval * mNFourierCoefficients + coefficient; }
 
-  /// set input 1D-IDCs which are used to calculate fourier coefficients
-  /// \param idcsOne 1D-IDCs
+  /// \return returns vector of stored IDC1 I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   /// \param side TPC side
-  void setIDCs(std::vector<float>&& idcsOne, const o2::tpc::Side side);
+  const std::vector<float>& getIDCOne(const o2::tpc::Side side) const { return mIDCOne[!mBufferIndex].mIDCOne[side]; }
+
+  /// \return returns struct of stored IDC1 I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+  const auto& getIDCOne() const { return mIDCOne[!mBufferIndex]; }
 
   /// set input 1D-IDCs which are used to calculate fourier coefficients
   /// \param idcsOne 1D-IDCs
-  /// \param side TPC side
-  void setIDCs(const std::vector<float>& idcsOne, const o2::tpc::Side side);
+  /// \param integrationIntervalsPerTF vector containg for each TF the number of IDCs
+  void setIDCs(IDCOne&& idcsOne, std::vector<unsigned int>&& integrationIntervalsPerTF)
+  {
+    mIDCOne[mBufferIndex] = std::move(idcsOne);
+    mIntegrationIntervalsPerTF[mBufferIndex] = std::move(integrationIntervalsPerTF);
+  }
+
+  /// set input 1D-IDCs which are used to calculate fourier coefficients
+  /// \param idcsOne 1D-IDCs
+  /// \param integrationIntervalsPerTF vector containg for each TF the number of IDCs
+  void setIDCs(const IDCOne& idcsOne, const std::vector<unsigned int>& integrationIntervalsPerTF)
+  {
+    mIDCOne[mBufferIndex] = idcsOne;
+    mIntegrationIntervalsPerTF[mBufferIndex] = integrationIntervalsPerTF;
+  }
 
   /// calculate fourier coefficients
-  /// \param side TPC side
-  void calcFourierCoefficients(const o2::tpc::Side side);
+  void calcFourierCoefficients();
 
   /// get IDC0 values from the inverse fourier transform. Can be used for debugging. std::vector<std::vector<float>>: first vector interval second vector IDC0 values
   /// \param side TPC side
@@ -97,20 +109,28 @@ class IDCFourierTransform
   void dumpToFile(const char* outFileName = "Fourier.root", const char* outName = "FourierCoefficients") const;
 
   /// create debug tree
-  void dumpToTree() const;
+  void dumpToTree(const char* outFileName = "FourierTree.root") const;
 
  private:
-  const unsigned int mRangeIntegrationIntervals{};                          ///< number of IDCs used for the calculation of fourier coefficients
-  const unsigned int mShift{};                                              ///< shifting parameter for the range. Should be >=1
-  std::array<std::array<std::vector<float>, o2::tpc::SIDES>, 2> mIDCsOne{}; ///< all 1D-IDCs which are used to calculate the fourier coefficients. A buffer of the last IDCs is used to calculate the fourier coefficients for the first TFs
-  int mBufferIndex{};                                                       ///< index for the buffer
-  const unsigned int mNFourierCoefficients{};                               ///< number of fourier coefficients which will be calculated
-  FourierCoeff mFourierCoefficients;                                        ///< fourier coefficients. side -> interval -> coefficient
+  const unsigned int mRangeIDC{};                                         ///< number of IDCs used for the calculation of fourier coefficients
+  const unsigned int mNFourierCoefficients{};                             ///< number of fourier coefficients which will be calculated
+  const unsigned int mTimeFrames{};                                       ///< number of timeframes which for which teh fourier coefficients are stored
+  std::array<IDCOne, 2> mIDCOne{};                                        ///< all 1D-IDCs which are used to calculate the fourier coefficients. A buffer for the last aggregation interval is used to calculate the fourier coefficients for the first TFs
+  std::array<std::vector<unsigned int>, 2> mIntegrationIntervalsPerTF{};  ///< number of integration intervals per TF used to set the correct range of IDCs. A buffer is needed for the last aggregation interval.
+  bool mBufferIndex{false};                                               ///< index for the buffer
+  FourierCoeff mFourierCoefficients{mTimeFrames * mNFourierCoefficients}; ///< fourier coefficients. side -> interval -> coefficient
 
-  /// initialize mFourierCoefficients member
-  void initCoefficients(const o2::tpc::Side side);
+  /// calculate fourier coefficients
+  /// \param side TPC side
+  void calcFourierCoefficients(const o2::tpc::Side side);
 
-  unsigned int getLastIndex(unsigned long interval, const o2::tpc::Side side) const { return (interval == getNIntervals(side) - 1) ? getNIDCs(side) - mShift * interval : mRangeIntegrationIntervals; }
+  /// returns number of IDCs which are used to calculate the fourier coefficients. This value can be smaller than the specified mRangeIDC if the buffer from last aggregation interval is empty
+  /// \param currentIndexEndInterval index of integration
+  /// \param buffer buffer to IDCs
+  int getRangeIDC(const int currentIndexEndInterval, const o2::tpc::Side side, const bool buffer) const { return mIDCOne[!buffer].empty(side) ? ((currentIndexEndInterval + 1 - static_cast<int>(mRangeIDC) < 0) ? currentIndexEndInterval + 1 : mRangeIDC) : mRangeIDC; }
+
+  /// returns 1D-IDC
+  float getIDCOne(const int index, const o2::tpc::Side side, const bool buffer) const { return (index < 0) ? mIDCOne[!buffer].getValueIDCOne(side, mIDCOne[!buffer].getNIDCs(side) + index) : mIDCOne[buffer].getValueIDCOne(side, index); }
 
   ClassDefNV(IDCFourierTransform, 1)
 };

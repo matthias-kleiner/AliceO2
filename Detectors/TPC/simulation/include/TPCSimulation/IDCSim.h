@@ -64,7 +64,6 @@ class IDCSim
   static void createDebugTreeForAllSectors(const char* nameTree, const char* filename);
 
   /// \return returns the IDCs for all regions
-  auto& get() { return mIDCs[!mBufferIndex]; }
   const auto& get() const { return mIDCs[!mBufferIndex]; }
 
   /// \return returns the sector for which the IDCs are integrated
@@ -108,7 +107,7 @@ class IDCSim
   const unsigned int mIntegrationIntervalsPerTF{mOrbitsPerTF / mNOrbits + mAddInterval};                                                      ///< number of integration intervals per TF. Add 1: 256/12=21.333
   const unsigned int mTimeStampsRemainder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                          ///< number time stamps which remain in one TF and will be buffered to the next TF
   int mTimeBinsOff{};                                                                                                                         ///< offset from last time bin
-  int mBufferIndex{};                                                                                                                         ///< index for the buffer
+  bool mBufferIndex{false};                                                                                                                   ///< index for the buffer
   const std::array<unsigned int, Mapper::NREGIONS> mMaxIDCs{
     Mapper::PADSPERREGION[0] * mIntegrationIntervalsPerTF, // region 0
     Mapper::PADSPERREGION[1] * mIntegrationIntervalsPerTF, // region 1
