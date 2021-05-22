@@ -22,7 +22,6 @@
 #include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
 #include "TPCWorkflow/TPCAverageGroupIDCSpec.h"
-#include "TPCWorkflow/PublisherSpec.h"
 #include "TPCBase/CRU.h"
 #include "TPCBase/Mapper.h"
 #include "Framework/Variant.h"

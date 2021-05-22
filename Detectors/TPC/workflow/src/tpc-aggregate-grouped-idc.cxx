@@ -21,7 +21,6 @@
 #include <vector>
 #include <string>
 #include "TPCWorkflow/TPCAggregateGroupedIDCSpec.h"
-#include "TPCWorkflow/PublisherSpec.h"
 #include "TPCCalibration/IDCFactorization.h"
 
 using namespace o2::framework;

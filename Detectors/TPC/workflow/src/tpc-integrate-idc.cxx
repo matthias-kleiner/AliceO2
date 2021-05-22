@@ -20,7 +20,6 @@
 #include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
-#include "TPCWorkflow/PublisherSpec.h"
 #include "DetectorsCommonDataFormats/NameConf.h"
 #include "DetectorsRaw/HBFUtils.h"
 #include "TPCSimulation/IDCSim.h"

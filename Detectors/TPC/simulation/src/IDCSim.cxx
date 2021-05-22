@@ -17,6 +17,7 @@
 #include "TH2Poly.h"
 #include "TCanvas.h"
 #include "TLatex.h"
+#include "TKey.h"
 
 void o2::tpc::IDCSim::integrateDigitsForOneTF(const gsl::span<const o2::tpc::Digit>& digits)
 {
