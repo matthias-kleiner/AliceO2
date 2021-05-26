@@ -73,12 +73,22 @@ class IDCFourierTransform
   /// \param coefficient index of coefficient
   unsigned int getIndex(const unsigned int interval, const unsigned int coefficient) const { return interval * mNFourierCoefficients + coefficient; }
 
+  /// returns 1D-IDC
+  /// \param index of the 0D-IDC value. This cam also be negative forgetting the values from the last aggregation interval
+  float getIDCOne(const int index, const o2::tpc::Side side) const { return (index < 0) ? mIDCOne[mBufferIndex].getValueIDCOne(side, mIDCOne[mBufferIndex].getNIDCs(side) + index) - 1 : mIDCOne[!mBufferIndex].getValueIDCOne(side, index) - 1; }
+
   /// \return returns vector of stored IDC1 I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   /// \param side TPC side
   const std::vector<float>& getIDCOne(const o2::tpc::Side side) const { return mIDCOne[!mBufferIndex].mIDCOne[side]; }
 
   /// \return returns struct of stored IDC1 I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   const auto& getIDCOne() const { return mIDCOne[!mBufferIndex]; }
+
+  /// \return returns indices to data used for accessing correct IDCs for given TF
+  std::vector<int> getLastIntervals() const;
+
+  /// \return returns index of first integration interval used for accessing correct IDCs for given TF
+  int getStartIndex(const int endIndex) const { return (endIndex - static_cast<int>(mRangeIDC)) + 1; }
 
   /// set input 1D-IDCs which are used to calculate fourier coefficients
   /// \param idcsOne 1D-IDCs
@@ -145,17 +155,8 @@ class IDCFourierTransform
   /// \param side TPC side
   void calcFourierCoefficientsFFTW3(const o2::tpc::Side side, const std::vector<int>& endIndex);
 
-  /// returns 1D-IDC
-  float getIDCOne(const int index, const o2::tpc::Side side) const { return (index < 0) ? mIDCOne[mBufferIndex].getValueIDCOne(side, mIDCOne[mBufferIndex].getNIDCs(side) + index) - 1 : mIDCOne[!mBufferIndex].getValueIDCOne(side, index) - 1; }
-
   /// check if IDCs from current or last aggregation interval is empty
   bool isEmpty() const { return mIDCOne[0].empty(o2::tpc::Side::A) || mIDCOne[0].empty(o2::tpc::Side::C) || mIDCOne[1].empty(o2::tpc::Side::A) || mIDCOne[1].empty(o2::tpc::Side::C) ? true : false; }
-
-  /// \return returns indices to data used for accessing correct IDCs for given TF
-  std::vector<int> getLastIntervals() const;
-
-  /// \return returns index of first integration interval used for accessing correct IDCs for given TF
-  int getStartIndex(const int endIndex) const { return (endIndex - static_cast<int>(mRangeIDC)) + 1; }
 
   ClassDefNV(IDCFourierTransform, 1)
 };

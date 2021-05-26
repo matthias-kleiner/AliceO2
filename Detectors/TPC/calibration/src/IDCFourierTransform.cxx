@@ -103,8 +103,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::S
     for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
       unsigned int counter = 0;
       for (int index = getStartIndex(endIndex[interval]); index <= endIndex[interval]; ++index) {
-        val1DIDCs[counter] = getIDCOne(index, side);
-        ++counter;
+        val1DIDCs[counter++] = getIDCOne(index, side);
       }
 
       fftwf_execute_dft_r2c(fftwPlan, val1DIDCs, coefficients);
@@ -127,11 +126,7 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
   std::vector<std::vector<float>> inverse(getNIntervals());
 
   // loop over all the intervals. For each interval the coefficients are calculated
-  int currentIndexEndInterval = -1;
   for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
-    currentIndexEndInterval += mIntegrationIntervalsPerTF[!mBufferIndex][interval];
-
-    // loop over coefficients which will be calculated
     inverse[interval].resize(mRangeIDC);
     for (unsigned int index = 0; index < mRangeIDC; ++index) {
       const float term0 = o2::constants::math::TwoPI * index / mRangeIDC;
@@ -159,12 +154,7 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
   std::vector<std::vector<float>> inverse(getNIntervals());
 
   // loop over all the intervals. For each interval the coefficients are calculated
-  int currentIndexEndInterval = -1;
   for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
-    currentIndexEndInterval += mIntegrationIntervalsPerTF[!mBufferIndex][interval];
-    // const int rangeIDC = getRangeIDC(currentIndexEndInterval, side, !mBufferIndex);
-
-    // loop over coefficients which will be calculated
     inverse[interval].resize(mRangeIDC);
     std::vector<std::array<float, 2>> val1DIDCs;
     val1DIDCs.reserve(mRangeIDC);
@@ -189,14 +179,13 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
 {
   o2::utils::TreeStreamRedirector pcstream(outFileName, "RECREATE");
   pcstream.GetFile()->cd();
-
+  const std::vector<int> endIndex = getLastIntervals();
   for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
     const o2::tpc::Side side = iSide == 0 ? Side::A : Side::C;
     const auto inverseFourier = inverseFourierTransform(side);
     const auto inverseFourierFFTW3 = inverseFourierTransformFFTW3(side);
 
     for (unsigned int coeff = 0; coeff < getNCoefficients(); ++coeff) {
-      int currentIndexEndInterval = -1;
       for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
         const unsigned int indexData = getIndex(interval, coeff);
         float real = mFourierCoefficients(side, indexData, FourierCoeff::CoeffType::REAL);
@@ -204,14 +193,10 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
         std::vector<float> idcOneInverse = inverseFourier[interval];
         std::vector<float> idcOneInverseFFTW3 = inverseFourierFFTW3[interval];
 
-        // const unsigned int lastIndex = getLastIndex(interval, side);
-        currentIndexEndInterval += mIntegrationIntervalsPerTF[!mBufferIndex][interval];
-        const int rangeIDC = mRangeIDC;
-
         // get 1D-IDC values used for calculation of the fourier coefficients
         std::vector<float> idcOne;
-        idcOne.reserve(rangeIDC);
-        for (int index = (currentIndexEndInterval - rangeIDC) + 1; index <= currentIndexEndInterval; ++index) {
+        idcOne.reserve(mRangeIDC);
+        for (int index = getStartIndex(endIndex[interval]); index <= endIndex[interval]; ++index) {
           idcOne.emplace_back(getIDCOne(index, side));
         }
 
