@@ -19,6 +19,10 @@
 #include "TLatex.h"
 #include "Framework/Logger.h"
 
+#if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
+#include <omp.h>
+#endif
+
 void o2::tpc::IDCAverageGroup::processIDCs()
 {
 #pragma omp parallel for num_threads(sNThreads)

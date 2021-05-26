@@ -21,10 +21,6 @@
 #include "Rtypes.h"
 #include "CommonUtils/TreeStreamRedirector.h" // for debugging
 
-#if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
-#include <omp.h>
-#endif
-
 namespace o2::tpc
 {
 
