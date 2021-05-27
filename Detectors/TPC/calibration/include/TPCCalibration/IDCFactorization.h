@@ -208,6 +208,9 @@ class IDCFactorization
   /// \return returns grouped IDCs
   const auto& getIDCs() const { return mIDCs; }
 
+  // get number of TFs in which the DeltaIDCs are split/stored
+  unsigned int getTimeFramesDeltaIDC() const { return mTimeFramesDeltaIDC; }
+
   /// \return returns the number of threads used for some of the calculations
   static int getNThreads() { return sNThreads; }
 
@@ -270,6 +273,9 @@ class IDCFactorization
 
   /// \returns vector containing the number of integration intervals for each stored TF
   std::vector<unsigned int> getIntegrationIntervalsPerTF(const unsigned int region = 0) const;
+
+  /// resetting aggregated IDCs
+  void reset();
 
  private:
   const std::array<unsigned int, Mapper::NREGIONS> mGroupPads{};              ///< grouping definition in pad direction (How many pads are grouped)

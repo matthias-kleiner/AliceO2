@@ -18,6 +18,7 @@
 
 #include <vector>
 #include <fmt/format.h>
+#include <limits>
 
 #include "Framework/Task.h"
 #include "Framework/ControlService.h"
@@ -52,16 +53,24 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     // mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
     mDBapi.init("http://localhost:8080"); // or http://localhost:8080 for a local installation
     mWriteToDB = mDBapi.isHostReachable() ? true : false;
-
-    if (mWriteToDB) {
-      // write struct containing grouping parameters to access grouped IDCs to CCDB
-      const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getPadThreshold(), mIDCs.getRowThreshold());
-      mDBapi.storeAsTFileAny<o2::tpc::ParameterIDCGroupCCDB>(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata);
-    }
+    mUpdateGroupingPar = ic.options().get<bool>("updateGroupingPar");
   }
 
   void run(o2::framework::ProcessingContext& pc) final
   {
+    // set the TF for first aggregated TF
+    if (mProcessedTFs == 0) {
+      mTFRange[0] = getCurrentTF(pc);
+
+      if (mWriteToDB && mUpdateGroupingPar) {
+        // write struct containing grouping parameters to access grouped IDCs to CCDB
+        const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getPadThreshold(), mIDCs.getRowThreshold());
+        // validity for grouping parameters is from first TF to some really large TF (until it is updated)
+        mDBapi.storeAsTFileAny<o2::tpc::ParameterIDCGroupCCDB>(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata, getFirstTF(), std::numeric_limits<uint32_t>::max());
+        mUpdateGroupingPar = false;
+      }
+    }
+
     const int nCRUs = mCRUs.size();
     for (int i = 0; i < nCRUs; ++i) {
       const DataRef ref = pc.inputs().getByPos(i);
@@ -72,37 +81,35 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     ++mProcessedTFs;
 
     if (mProcessedTFs == mIDCs.getNTimeframes()) {
+      // set the TF for last aggregated TF
+      mTFRange[1] = getCurrentTF(pc);
       mProcessedTFs = 0;
+
+      // calculate DeltaIDC, 0D-IDC, 1D-IDC
       mIDCs.factorizeIDCs();
 
       if (mDebug) {
         // dump this first to also store 1D-IDCs! otherwise they will be moved out and are not available
         LOGP(info, "dumping aggregated IDCS to file");
-        const DataRef ref = pc.inputs().getByPos(0);
-        auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
-        const auto tf = tpcCRUHeader->tfCounter;
-        mIDCs.dumpToFile(fmt::format("IDCFactorized_{:02}.root", tf).data());
+        mIDCs.dumpToFile(fmt::format("IDCFactorized_{:02}.root", getCurrentTF(pc)).data());
       }
 
-      mIDCFourierTransform.setIDCs(std::move(mIDCs).getIDCOne(), mIDCs.getIntegrationIntervalsPerTF()); // using move semantics here
+      // perform fourier transform of 0D-IDCs
+      mIDCFourierTransform.setIDCs(std::move(mIDCs).getIDCOne(), mIDCs.getIntegrationIntervalsPerTF());
       mIDCFourierTransform.calcFourierCoefficients();
 
-      LOGP(info, "sendOutput calcFourierCoefficients getFFT: {}", mIDCFourierTransform.getFFT() );
+      // storing to CCDB
       sendOutput(pc.outputs());
 
       if (mDebug) {
         LOGP(info, "dumping fourier transform  to file");
-        const DataRef ref = pc.inputs().getByPos(0);
-        auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
-        const auto tf = tpcCRUHeader->tfCounter;
-        mIDCFourierTransform.dumpToFile(fmt::format("Fourier_{:02}.root", tf).data());
+        mIDCFourierTransform.dumpToFile(fmt::format("Fourier_{:02}.root", getCurrentTF(pc)).data());
       }
     }
   }
 
   void endOfStream(o2::framework::EndOfStreamContext& ec) final
   {
-    LOGP(info, "endOfStream");
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
 
@@ -116,16 +123,30 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   o2::ccdb::CcdbApi mDBapi;                         ///< object for storing the IDCs at CCDB
   std::map<std::string, std::string> mMetadata;     ///< meta data of the stored object in CCDB
   bool mWriteToDB{};                                ///< flag if writing to CCDB will be done
+  std::array<uint32_t, 2> mTFRange{};               ///< storing of first and last TF used when setting the validity of the objects when w riting to CCDB
+  bool mUpdateGroupingPar{true};                    ///< flag to set if grouping parameters should be updated or not
+
+  uint32_t getCurrentTF(o2::framework::ProcessingContext& pc) const
+  {
+    const DataRef ref = pc.inputs().getByPos(0);
+    auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
+    return tpcCRUHeader->tfCounter;
+  }
+
+  uint32_t getFirstTF() const { return mTFRange[0]; }
+  uint32_t getLastTF() const { return mTFRange[1]; }
+  unsigned int getFirstTFDeltaIDC(const unsigned int iChunk) const { return getFirstTF() + iChunk * mIDCs.getTimeFramesDeltaIDC(); }
+  unsigned int getLastTFDeltaIDC(const unsigned int iChunk) const { return (iChunk == mIDCs.getNChunks() - 1) ? (mIDCs.getNTimeframes() - 1 + getFirstTF()) : (getFirstTFDeltaIDC(iChunk) + mIDCs.getTimeFramesDeltaIDC() - 1); }
 
   void sendOutput(DataAllocator& output)
   {
     if (mWriteToDB) {
       // store IDC Zero One in CCDB
-      // const long timeStampStart = 33;
-      // const long timeStampStart = 33;
-      mDBapi.storeAsTFileAny<o2::tpc::IDCZero>(&mIDCs.getIDCZero(), "TPC/Calib/IDC/IDC0", mMetadata);
-      mDBapi.storeAsTFileAny<o2::tpc::IDCOne>(&mIDCFourierTransform.getIDCOne(), "TPC/Calib/IDC/IDC1", mMetadata);
-      mDBapi.storeAsTFileAny<o2::tpc::FourierCoeff>(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata);
+      const long timeStampStart = getFirstTF();
+      const long timeStampEnd = getLastTF();
+      mDBapi.storeAsTFileAny<o2::tpc::IDCZero>(&mIDCs.getIDCZero(), "TPC/Calib/IDC/IDC0", mMetadata, timeStampStart, timeStampEnd);
+      mDBapi.storeAsTFileAny<o2::tpc::IDCOne>(&mIDCFourierTransform.getIDCOne(), "TPC/Calib/IDC/IDC1", mMetadata, timeStampStart, timeStampEnd);
+      mDBapi.storeAsTFileAny<o2::tpc::FourierCoeff>(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata, timeStampStart, timeStampEnd);
     }
 
     for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
@@ -139,13 +160,13 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 
     switch (mCompressionDeltaIDC) {
       case IDCDeltaCompression::MEDIUM: {
-        for (int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
+        for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
           auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed(iChunk);
           if (mWriteToDB) {
             if (iChunk == 0) {
-              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata);
+              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata, getFirstTF(), getLastTF());
             }
-            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<short>>(&idcDeltaMediumCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<short>>(&idcDeltaMediumCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -157,13 +178,13 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
         break;
       }
       case IDCDeltaCompression::HIGH: {
-        for (int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
+        for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
           auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed(iChunk);
           if (mWriteToDB) {
             if (iChunk == 0) {
-              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaHighCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata);
+              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaHighCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata, getFirstTF(), getLastTF());
             }
-            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<char>>(&idcDeltaHighCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<char>>(&idcDeltaHighCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -176,9 +197,9 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       }
       case IDCDeltaCompression::NO:
       default:
-        for (int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
+        for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
           if (mWriteToDB) {
-            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<float>>(&mIDCs.getIDCDeltaUncompressed(iChunk).mIDCDelta, "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<float>>(&mIDCs.getIDCDeltaUncompressed(iChunk).mIDCDelta, "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -188,6 +209,8 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
         }
         break;
     }
+    // reseting aggregated IDCs. This is done for safety, but if all data is received in the next aggregation interval it isnt necessary... remove it?
+    mIDCs.reset();
   }
 };
 
@@ -224,7 +247,8 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
     inputSpecs,
     outputSpecs,
     AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, rangeIDC, compression, debug)},
-    Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}}}}; // end DataProcessorSpec
+    Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}},
+            {"updateGroupingPar", VariantType::Bool, false, {"Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
 }
 
 } // namespace o2::tpc

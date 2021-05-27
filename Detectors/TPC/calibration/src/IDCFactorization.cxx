@@ -508,3 +508,12 @@ std::vector<unsigned int> o2::tpc::IDCFactorization::getIntegrationIntervalsPerT
   }
   return integrationIntervalsPerTF;
 }
+
+void o2::tpc::IDCFactorization::reset()
+{
+  for (auto& tf : mIDCs) {
+    for (auto& idcs : tf) {
+      idcs.clear();
+    }
+  }
+}
