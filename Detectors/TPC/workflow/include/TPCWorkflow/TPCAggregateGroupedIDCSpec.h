@@ -43,9 +43,9 @@ namespace o2::tpc
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned int, Mapper::NREGIONS> groupPads,
-                             std::array<unsigned int, Mapper::NREGIONS> groupRows, std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold,
-                             std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int rangeIDC, const IDCDeltaCompression compression, const bool debug = false)
+  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned char, Mapper::NREGIONS> groupPads,
+                             std::array<unsigned char, Mapper::NREGIONS> groupRows, std::array<unsigned char, Mapper::NREGIONS> groupLastRowsThreshold,
+                             std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int rangeIDC, const IDCDeltaCompression compression, const bool debug = false)
     : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mIDCFourierTransform{rangeIDC, timeframes}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
@@ -64,7 +64,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 
       if (mWriteToDB && mUpdateGroupingPar) {
         // write struct containing grouping parameters to access grouped IDCs to CCDB
-        const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getPadThreshold(), mIDCs.getRowThreshold());
+        const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getRowThreshold(), mIDCs.getPadThreshold());
         // validity for grouping parameters is from first TF to some really large TF (until it is updated)
         mDBapi.storeAsTFileAny<o2::tpc::ParameterIDCGroupCCDB>(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata, getFirstTF(), std::numeric_limits<uint32_t>::max());
         mUpdateGroupingPar = false;
@@ -149,24 +149,24 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mDBapi.storeAsTFileAny<o2::tpc::FourierCoeff>(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata, timeStampStart, timeStampEnd);
     }
 
-    for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-      const o2::tpc::Side side = iSide ? Side::C : Side::A;
-      const header::DataHeader::SubSpecificationType subSpec{iSide};
-      output.snapshot(Output{gDataOriginTPC, "IDC0", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
-      output.snapshot(Output{gDataOriginTPC, "IDC1", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getIDCOne(side));
-      output.snapshot(Output{gDataOriginTPC, "FOURIERREAL", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::REAL));
-      output.snapshot(Output{gDataOriginTPC, "FOURIERIMAG", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::IMAG));
-    }
+    // for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+      // const o2::tpc::Side side = iSide ? Side::C : Side::A;
+      // const header::DataHeader::SubSpecificationType subSpec{iSide};
+      // output.snapshot(Output{gDataOriginTPC, "IDC0", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
+      // output.snapshot(Output{gDataOriginTPC, "IDC1", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getIDCOne(side));
+      // output.snapshot(Output{gDataOriginTPC, "FOURIERREAL", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::REAL));
+      // output.snapshot(Output{gDataOriginTPC, "FOURIERIMAG", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::IMAG));
+    // }
 
     switch (mCompressionDeltaIDC) {
       case IDCDeltaCompression::MEDIUM: {
         for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
           auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed(iChunk);
           if (mWriteToDB) {
-            if (iChunk == 0) {
-              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata, getFirstTF(), getLastTF());
-            }
-            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<short>>(&idcDeltaMediumCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
+            // if (iChunk == 0) {
+              // mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata, getFirstTF(), getLastTF());
+            // }
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDelta<short>>(&idcDeltaMediumCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
           }
           for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
             const o2::tpc::Side side = iSide ? Side::C : Side::A;
@@ -234,14 +234,15 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   }
 
   const auto& paramIDCGroup = ParameterIDCGroup::Instance();
-  std::array<unsigned int, Mapper::NREGIONS> groupPads{};
-  std::array<unsigned int, Mapper::NREGIONS> groupRows{};
-  std::array<unsigned int, Mapper::NREGIONS> groupLastRowsThreshold{};
-  std::array<unsigned int, Mapper::NREGIONS> groupLastPadsThreshold{};
+  std::array<unsigned char, Mapper::NREGIONS> groupPads{};
+  std::array<unsigned char, Mapper::NREGIONS> groupRows{};
+  std::array<unsigned char, Mapper::NREGIONS> groupLastRowsThreshold{};
+  std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold{};
   std::copy(std::begin(paramIDCGroup.GroupPads), std::end(paramIDCGroup.GroupPads), std::begin(groupPads));
   std::copy(std::begin(paramIDCGroup.GroupRows), std::end(paramIDCGroup.GroupRows), std::begin(groupRows));
   std::copy(std::begin(paramIDCGroup.GroupLastRowsThreshold), std::end(paramIDCGroup.GroupLastRowsThreshold), std::begin(groupLastRowsThreshold));
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
+
   return DataProcessorSpec{
     "tpc-aggregate-idc",
     inputSpecs,

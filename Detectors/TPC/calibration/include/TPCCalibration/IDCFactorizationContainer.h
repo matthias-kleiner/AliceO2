@@ -31,6 +31,13 @@ namespace o2
 namespace tpc
 {
 
+  /// IDC types
+  enum class IDCType { IDC = 0,     ///< integrated and grouped IDCs
+                       IDCZero = 1, ///< IDC0: I_0(r,\phi) = <I(r,\phi,t)>_t
+                       IDCOne = 2,  ///< IDC1: I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+                       IDCDelta = 3 ///< IDCDelta: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+  };
+
 /// struct containing the IDC delta values
 template <typename DataT>
 struct IDCDeltaContainer {
@@ -46,6 +53,10 @@ struct IDCDeltaCompressionFactors {
 /// struct to access and set Delta IDCs
 template <typename DataT>
 struct IDCDelta {
+
+  IDCDelta() = default;
+
+  IDCDelta(const IDCDeltaContainer<DataT>* idcDelta, const IDCDeltaCompressionFactors* compressionFactor) : mIDCDelta{*idcDelta}, mCompressionFactor{*compressionFactor} {};
 
   /// set idcDelta for given index
   /// \param idcDelta Delta IDC value which will be set
@@ -69,7 +80,7 @@ struct IDCDelta {
 
   /// \return returns stored Delta IDC value
   /// \param side side of the TPC
-  /// \param index index in the storage
+  /// \param index index in the storage (see: getIndexUngrouped)
   float getValue(const o2::tpc::Side side, const unsigned int index) const { return (static_cast<float>(mIDCDelta.mIDCDelta[side][index]) / mCompressionFactor.mFactors[side]); }
 
   /// set compression factor

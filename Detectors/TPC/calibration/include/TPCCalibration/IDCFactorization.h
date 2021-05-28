@@ -22,6 +22,7 @@
 #include "TPCBase/Mapper.h"
 #include "TPCCalibration/IDCGroup.h"
 #include "TPCCalibration/IDCFactorizationContainer.h"
+#include "TPCCalibration/IDCGroupHelperSector.h"
 #include "DataFormatsTPC/Defs.h"
 #include "Framework/Logger.h"
 
@@ -38,7 +39,7 @@ enum class IDCDeltaCompression { NO = 0,     ///< no compression using floats
                                  HIGH = 2    ///< high compression using char (data compression ratio ~5.5 when stored in CCDB)
 };
 
-class IDCFactorization
+class IDCFactorization : public IDCGroupHelperSector
 {
  public:
   /// constructor
@@ -48,17 +49,10 @@ class IDCFactorization
   /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction for all regions
   /// \param timeFrames number of time frames which will be stored
   /// \param timeframesDeltaIDC number of time frames stored for each DeltaIDC object
-  IDCFactorization(const std::array<unsigned int, Mapper::NREGIONS>& groupPads, const std::array<unsigned int, Mapper::NREGIONS>& groupRows, const std::array<unsigned int, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned int, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames = 1, const unsigned int timeframesDeltaIDC = 1);
+  IDCFactorization(const std::array<unsigned char, Mapper::NREGIONS>& groupPads, const std::array<unsigned char, Mapper::NREGIONS>& groupRows, const std::array<unsigned char, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned char, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int timeFrames = 1, const unsigned int timeframesDeltaIDC = 1);
 
   /// default constructor for ROOT I/O
   IDCFactorization() = default;
-
-  /// IDC types
-  enum class IDCType { IDC = 0,     ///< integrated and grouped IDCs
-                       IDCZero = 1, ///< IDC0: I_0(r,\phi) = <I(r,\phi,t)>_t
-                       IDCOne = 2,  ///< IDC1: I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-                       IDCDelta = 3 ///< IDCDelta: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  };
 
   /// calculate I_0(r,\phi) = <I(r,\phi,t)>_t
   /// calculate I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
@@ -71,18 +65,7 @@ class IDCFactorization
   /// \param grow row in the region of the grouped IDCs
   /// \param gpad pad number of the grouped IDCs
   /// \param integrationInterval integration interval
-  float operator()(const unsigned int sector, const unsigned int region, unsigned int grow, unsigned int gpad, unsigned int integrationInterval) const { return mIDCs[sector * Mapper::NREGIONS + region][integrationInterval][mOffsRow[region][grow] + gpad]; }
-
-  /// \return returns grouped pad for ungrouped row and pad
-  /// \param region region
-  /// \param urow local ungrouped row in a region
-  /// \param upad ungrouped pad
-  unsigned int getGroupedPad(const unsigned int region, unsigned int urow, unsigned int upad) const { return IDCGroup::getGroupedPad(upad, urow, region, mGroupPads[region], mGroupRows[region], mRows[region], mPadsPerRow[region]); }
-
-  /// \return returns the row of the group from the local ungrouped row in a region
-  /// \param region region
-  /// \param urow local ungrouped row in a region
-  unsigned int getGroupedRow(const unsigned int region, unsigned int urow) const { return IDCGroup::getGroupedRow(urow, mGroupRows[region], mRows[region]); }
+  float getIDCValGrouped(const unsigned int sector, const unsigned int region, const unsigned int grow, unsigned int gpad, unsigned int integrationInterval) const { return mIDCs[sector * Mapper::NREGIONS + region][integrationInterval][mOffsRow[region][grow] + gpad]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
   /// \param sector sector
@@ -90,7 +73,7 @@ class IDCFactorization
   /// \param urow row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float getIDCVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const;
+  float getIDCValUngrouped(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const;
 
   /// \return returns the stored IDC0 value for local ungrouped pad row and ungrouped pad
   /// \param sector sector
@@ -108,14 +91,6 @@ class IDCFactorization
   /// \param localintegrationInterval local integration interval for chunk (can be obtained with getLocalIntegrationInterval())
   float getIDCDeltaVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int chunk, unsigned int localintegrationInterval) const { return mIDCDelta[chunk].getValue(Sector(sector).side(), getIndexUngrouped(sector, region, urow, upad, localintegrationInterval)); }
 
-  /// \return returns the index to the grouped data with ungrouped inputs
-  /// \param sector sector
-  /// \param region TPC region
-  /// \param urow row of the ungrouped IDCs
-  /// \param upad pad number of the ungrouped IDCs
-  /// \param integrationInterval integration interval
-  unsigned int getIndexUngrouped(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return getIndexGrouped(sector % o2::tpc::SECTORSPERSIDE, region, getGroupedRow(region, urow), getGroupedPad(region, urow, upad), integrationInterval); }
-
   /// \return returns index of integration interval in the chunk from global integration interval
   /// \param region TPC region
   /// \param integrationInterval integration interval
@@ -123,43 +98,8 @@ class IDCFactorization
   /// \param localintegrationInterval local integration interval for chunk which will be set in the function
   void getLocalIntegrationInterval(const unsigned int region, const unsigned int integrationInterval, unsigned int& chunk, unsigned int& localintegrationInterval) const;
 
-  /// \returns grouping definition in pad direction (How many pads are grouped)
-  /// \param region TPC region
-  unsigned int getGroupPads(const unsigned int region) const { return mGroupPads[region]; }
-
-  /// \returns grouping definition in pad direction (How many pads are grouped)
-  const auto& getGroupPads() const { return mGroupPads; }
-
-  /// \returns grouping definition in row direction (How many rows are grouped)
-  /// \param region TPC region
-  unsigned int getGroupRows(const unsigned int region) const { return mGroupRows[region]; }
-
-  /// \returns grouping definition in row direction (How many rows are grouped)
-  const auto& getGroupRows() const { return mGroupRows; }
-
-  /// \returns grouping threshold for last group in pad direction
-  /// \param region TPC region
-  unsigned int getPadThreshold(const unsigned int region) const { return mGroupLastPadsThreshold[region]; }
-
-  /// \returns grouping threshold for last group in pad direction
-  const auto& getPadThreshold() const { return mGroupLastPadsThreshold; }
-
-  /// \returns grouping threshold for last group in row direction
-  /// \param region TPC region
-  unsigned int getRowThreshold(const unsigned int region) const { return mGroupLastRowsThreshold[region]; }
-
-  /// \returns grouping threshold for last group in row direction
-  const auto& getRowThreshold() const { return mGroupLastRowsThreshold; }
-
   /// \return returns number of timeframes for which the IDCs are stored
   unsigned int getNTimeframes() const { return mTimeFrames; }
-
-  /// \return returns total number of IDCs per region per integration interval
-  /// \param region TPC region
-  unsigned int getIDCsPerCRU(const unsigned int region) const { return mNIDCsPerCRU[region]; }
-
-  /// \return returns number of grouped IDCs per sector
-  unsigned int getIDCsPerSector() const { return mNIDCsPerSector; }
 
   /// \return returns the number of stored integration intervals for given Delta IDC chunk
   /// \param chunk chunk of Delta IDC
@@ -278,23 +218,13 @@ class IDCFactorization
   void reset();
 
  private:
-  const std::array<unsigned int, Mapper::NREGIONS> mGroupPads{};              ///< grouping definition in pad direction (How many pads are grouped)
-  const std::array<unsigned int, Mapper::NREGIONS> mGroupRows{};              ///< grouping definition in row direction (How many rows are grouped)
-  const std::array<unsigned int, Mapper::NREGIONS> mGroupLastRowsThreshold{}; ///< if the last group (region edges) consists in row direction of less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
-  const std::array<unsigned int, Mapper::NREGIONS> mGroupLastPadsThreshold{}; ///< if the last group (sector edges) consists in pad direction of less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
-  const unsigned int mTimeFrames{};                                           ///< number of timeframes which are stored
-  const unsigned int mTimeFramesDeltaIDC{};                                   ///< number of timeframes of which Delta IDCs are stored
-  std::array<unsigned int, Mapper::NREGIONS> mNIDCsPerCRU{1};                 ///< total number of IDCs per region per integration interval
-  std::array<std::vector<std::vector<float>>, CRU::MaxCRU> mIDCs{};           ///< grouped and integrated IDCs for the whole TPC. CRU -> time frame -> IDCs
-  IDCZero mIDCZero{};                                                         ///< I_0(r,\phi) = <I(r,\phi,t)>_t
-  IDCOne mIDCOne{};                                                           ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-  std::vector<IDCDelta<float>> mIDCDelta{};                                   ///< uncompressed: chunk -> Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  unsigned int mNIDCsPerSector{};                                             ///< number of grouped IDCs per sector
-  std::array<unsigned int, Mapper::NREGIONS> mRows{};                         ///< number of grouped rows per region
-  std::array<unsigned int, Mapper::NREGIONS> mRegionOffs{};                   ///< offset for the region per region
-  std::array<std::vector<unsigned int>, Mapper::NREGIONS> mPadsPerRow{};      ///< number of pads per row per region
-  std::array<std::vector<unsigned int>, Mapper::NREGIONS> mOffsRow{};         ///< offset to calculate the index in the data from row and pad per region
-  inline static int sNThreads{1};                                             ///< number of threads which are used during the calculations
+  const unsigned int mTimeFrames{};                                 ///< number of timeframes which are stored
+  const unsigned int mTimeFramesDeltaIDC{};                         ///< number of timeframes of which Delta IDCs are stored
+  std::array<std::vector<std::vector<float>>, CRU::MaxCRU> mIDCs{}; ///< grouped and integrated IDCs for the whole TPC. CRU -> time frame -> IDCs
+  IDCZero mIDCZero{};                                               ///< I_0(r,\phi) = <I(r,\phi,t)>_t
+  IDCOne mIDCOne{};                                                 ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+  std::vector<IDCDelta<float>> mIDCDelta{};                         ///< uncompressed: chunk -> Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+  inline static int sNThreads{1};                                   ///< number of threads which are used during the calculations
 
   /// calculate I_0(r,\phi) = <I(r,\phi,t)>_t
   void calcIDCZero();
@@ -304,11 +234,6 @@ class IDCFactorization
 
   /// calculate \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   void calcIDCDelta();
-
-  /// \return returns index to the data
-  /// \param row row of the grouped IDCs
-  /// \param pad pad of the grouped IDCs
-  unsigned int getIndexGrouped(const unsigned int sector, const unsigned int region, const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerSector * (integrationInterval * SECTORSPERSIDE + sector) + mRegionOffs[region] + mOffsRow[region][row] + pad; }
 
   /// draw IDCs for one sector for one integration interval
   /// \param sector sector which will be drawn

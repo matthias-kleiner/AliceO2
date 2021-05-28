@@ -29,6 +29,8 @@
 #pragma link C++ class o2::tpc::FastHisto<float> +;
 #pragma link C++ class o2::tpc::FastHisto<unsigned int> +;
 #pragma link C++ class o2::tpc::IDCGroup +;
+#pragma link C++ class o2::tpc::IDCGroupHelperRegion +;
+#pragma link C++ class o2::tpc::IDCGroupHelperSector +;
 #pragma link C++ struct o2::tpc::ParameterIDCGroup;
 #pragma link C++ struct o2::tpc::ParameterIDCCompression;
 #pragma link C++ class o2::tpc::IDCAverageGroup +;
@@ -49,5 +51,8 @@
 #pragma link C++ struct o2::tpc::ParameterIDCGroupCCDB +;
 #pragma link C++ class o2::tpc::RobustAverage +;
 #pragma link C++ class o2::tpc::IDCFourierTransform +;
+#pragma link C++ class o2::tpc::IDCCCDBHelper<float> +;
+#pragma link C++ class o2::tpc::IDCCCDBHelper<short> +;
+#pragma link C++ class o2::tpc::IDCCCDBHelper<char> +;
 
 #endif

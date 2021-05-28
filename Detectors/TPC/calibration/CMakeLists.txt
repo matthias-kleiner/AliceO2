@@ -23,10 +23,13 @@ o2_add_library(TPCCalibration
                        src/CalibPadGainTracks.cxx
                        src/IDCAverageGroup.cxx
                        src/IDCGroup.cxx
+                       src/IDCGroupHelperRegion.cxx
+                       src/IDCGroupHelperSector.cxx
                        src/ParameterIDC.cxx
                        src/IDCFactorization.cxx
                        src/IDCFourierTransform.cxx
                        src/RobustAverage.cxx
+                       src/IDCCCDBHelper.cxx
                PUBLIC_LINK_LIBRARIES O2::DataFormatsTPC O2::TPCBase
                                      O2::TPCReconstruction ROOT::Minuit
                                      Microsoft.GSL::GSL)
@@ -44,11 +47,14 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/FastHisto.h
                                   include/TPCCalibration/IDCAverageGroup.h
                                   include/TPCCalibration/IDCGroup.h
+                                  include/TPCCalibration/IDCGroupHelperRegion.h
+                                  include/TPCCalibration/IDCGroupHelperSector.h
                                   include/TPCCalibration/IDCFactorization.h
                                   include/TPCCalibration/ParameterIDC.h
                                   include/TPCCalibration/IDCFactorizationContainer.h
                                   include/TPCCalibration/RobustAverage.h
-                                  include/TPCCalibration/IDCFourierTransform.h)
+                                  include/TPCCalibration/IDCFourierTransform.h
+                                  include/TPCCalibration/IDCCCDBHelper.h)
 
 o2_add_test_root_macro(macro/comparePedestalsAndNoise.C
                        PUBLIC_LINK_LIBRARIES O2::TPCBase

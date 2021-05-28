@@ -83,10 +83,10 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const boost::tokenizer<boost::char_separator<char>> tgroupLastRowsThreshold(sgroupLastRowsThreshold, sep);
   const boost::tokenizer<boost::char_separator<char>> tgroupLastPadsThreshold(sgroupLastPadsThreshold, sep);
 
-  std::vector<unsigned int> vgroupPads;
-  std::vector<unsigned int> vgroupRows;
-  std::vector<unsigned int> vgroupLastRowsThreshold;
-  std::vector<unsigned int> vgroupLastPadsThreshold;
+  std::vector<unsigned char> vgroupPads;
+  std::vector<unsigned char> vgroupRows;
+  std::vector<unsigned char> vgroupLastRowsThreshold;
+  std::vector<unsigned char> vgroupLastPadsThreshold;
   vgroupPads.reserve(Mapper::NREGIONS);
   vgroupRows.reserve(Mapper::NREGIONS);
   vgroupLastRowsThreshold.reserve(Mapper::NREGIONS);
@@ -98,34 +98,34 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   std::transform(tgroupLastPadsThreshold.begin(), tgroupLastPadsThreshold.end(), std::back_inserter(vgroupLastPadsThreshold), &boost::lexical_cast<int, std::string>);
 
   if (vgroupPads.size() == 1) {
-    vgroupPads = std::vector<unsigned int>(Mapper::NREGIONS, vgroupPads.front());
+    vgroupPads = std::vector<unsigned char>(Mapper::NREGIONS, vgroupPads.front());
   } else if (vgroupPads.size() != Mapper::NREGIONS) {
     LOGP(error, "wrong number of parameters inserted for groupPads (n={}). Number should be 1 or {}", vgroupPads.size(), Mapper::NREGIONS);
   }
 
   if (vgroupRows.size() == 1) {
-    vgroupRows = std::vector<unsigned int>(Mapper::NREGIONS, vgroupRows.front());
+    vgroupRows = std::vector<unsigned char>(Mapper::NREGIONS, vgroupRows.front());
   } else if (vgroupRows.size() != Mapper::NREGIONS) {
     LOGP(error, "wrong number of parameters inserted for groupRows (n={}). Number should be 1 or {}", vgroupRows.size(), Mapper::NREGIONS);
   }
 
   if (vgroupLastRowsThreshold.size() == 1) {
-    vgroupLastRowsThreshold = std::vector<unsigned int>(Mapper::NREGIONS, vgroupLastRowsThreshold.front());
+    vgroupLastRowsThreshold = std::vector<unsigned char>(Mapper::NREGIONS, vgroupLastRowsThreshold.front());
   } else if (vgroupLastRowsThreshold.size() != Mapper::NREGIONS) {
     LOGP(error, "wrong number of parameters inserted for groupLastRowsThreshold (n={}). Number should be 1 or {}", vgroupLastRowsThreshold.size(), Mapper::NREGIONS);
   }
 
   if (vgroupLastPadsThreshold.size() == 1) {
-    vgroupLastPadsThreshold = std::vector<unsigned int>(Mapper::NREGIONS, vgroupLastPadsThreshold.front());
+    vgroupLastPadsThreshold = std::vector<unsigned char>(Mapper::NREGIONS, vgroupLastPadsThreshold.front());
   } else if (vgroupLastPadsThreshold.size() != Mapper::NREGIONS) {
     LOGP(error, "wrong number of parameters inserted for groupLastPadsThreshold (n={}). Number should be 1 or {}", vgroupLastPadsThreshold.size(), Mapper::NREGIONS);
   }
 
   for (int i = 0; i < Mapper::NREGIONS; ++i) {
-    o2::conf::ConfigurableParam::setValue<unsigned int>("TPCIDCGroupParam", fmt::format("GroupPads[{}]", i).data(), vgroupPads[i]);
-    o2::conf::ConfigurableParam::setValue<unsigned int>("TPCIDCGroupParam", fmt::format("GroupRows[{}]", i).data(), vgroupRows[i]);
-    o2::conf::ConfigurableParam::setValue<unsigned int>("TPCIDCGroupParam", fmt::format("GroupLastRowsThreshold[{}]", i).data(), vgroupLastRowsThreshold[i]);
-    o2::conf::ConfigurableParam::setValue<unsigned int>("TPCIDCGroupParam", fmt::format("GroupLastPadsThreshold[{}]", i).data(), vgroupLastPadsThreshold[i]);
+    o2::conf::ConfigurableParam::setValue<unsigned char>("TPCIDCGroupParam", fmt::format("GroupPads[{}]", i).data(), vgroupPads[i]);
+    o2::conf::ConfigurableParam::setValue<unsigned char>("TPCIDCGroupParam", fmt::format("GroupRows[{}]", i).data(), vgroupRows[i]);
+    o2::conf::ConfigurableParam::setValue<unsigned char>("TPCIDCGroupParam", fmt::format("GroupLastRowsThreshold[{}]", i).data(), vgroupLastRowsThreshold[i]);
+    o2::conf::ConfigurableParam::setValue<unsigned char>("TPCIDCGroupParam", fmt::format("GroupLastPadsThreshold[{}]", i).data(), vgroupLastPadsThreshold[i]);
   }
 
   // set up configuration
