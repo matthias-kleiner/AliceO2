@@ -147,67 +147,25 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mDBapi.storeAsTFileAny<o2::tpc::IDCZero>(&mIDCs.getIDCZero(), "TPC/Calib/IDC/IDC0", mMetadata, timeStampStart, timeStampEnd);
       mDBapi.storeAsTFileAny<o2::tpc::IDCOne>(&mIDCFourierTransform.getIDCOne(), "TPC/Calib/IDC/IDC1", mMetadata, timeStampStart, timeStampEnd);
       mDBapi.storeAsTFileAny<o2::tpc::FourierCoeff>(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata, timeStampStart, timeStampEnd);
-    }
 
-    // for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-      // const o2::tpc::Side side = iSide ? Side::C : Side::A;
-      // const header::DataHeader::SubSpecificationType subSpec{iSide};
-      // output.snapshot(Output{gDataOriginTPC, "IDC0", subSpec, Lifetime::Timeframe}, mIDCs.getIDCZero(side));
-      // output.snapshot(Output{gDataOriginTPC, "IDC1", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getIDCOne(side));
-      // output.snapshot(Output{gDataOriginTPC, "FOURIERREAL", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::REAL));
-      // output.snapshot(Output{gDataOriginTPC, "FOURIERIMAG", subSpec, Lifetime::Timeframe}, mIDCFourierTransform.getFourierCoefficients(side, FourierCoeff::CoeffType::IMAG));
-    // }
-
-    switch (mCompressionDeltaIDC) {
-      case IDCDeltaCompression::MEDIUM: {
-        for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
-          auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed(iChunk);
-          if (mWriteToDB) {
-            // if (iChunk == 0) {
-              // mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaMediumCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata, getFirstTF(), getLastTF());
-            // }
+      for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
+        switch (mCompressionDeltaIDC) {
+          case IDCDeltaCompression::MEDIUM: {
+            auto idcDeltaMediumCompressed = mIDCs.getIDCDeltaMediumCompressed(iChunk);
             mDBapi.storeAsTFileAny<o2::tpc::IDCDelta<short>>(&idcDeltaMediumCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
+            break;
           }
-          for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-            const o2::tpc::Side side = iSide ? Side::C : Side::A;
-            const header::DataHeader::SubSpecificationType subSpec{iSide};
-            output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.getIDCDelta(side));
-            // output.snapshot(Output{gDataOriginTPC, "IDCDELTACOMP", subSpec, Lifetime::Timeframe}, idcDeltaMediumCompressed.getCompressionFactor(side));
+          case IDCDeltaCompression::HIGH: {
+            auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed(iChunk);
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDelta<char>>(&idcDeltaHighCompressed, "TPC/Calib/IDC/IDCDELTA", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
+            break;
           }
+          case IDCDeltaCompression::NO:
+          default:
+            mDBapi.storeAsTFileAny<o2::tpc::IDCDelta<float>>(&mIDCs.getIDCDeltaUncompressed(iChunk), "TPC/Calib/IDC/IDCDELTA", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
+            break;
         }
-        break;
       }
-      case IDCDeltaCompression::HIGH: {
-        for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
-          auto idcDeltaHighCompressed = mIDCs.getIDCDeltaHighCompressed(iChunk);
-          if (mWriteToDB) {
-            if (iChunk == 0) {
-              mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaCompressionFactors>(&idcDeltaHighCompressed.getCompressionFactors(), "TPC/Calib/IDC/IDCDELTA/COMPFACTOR", mMetadata, getFirstTF(), getLastTF());
-            }
-            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<char>>(&idcDeltaHighCompressed.getIDCDelta(), "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
-          }
-          for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-            const o2::tpc::Side side = iSide ? Side::C : Side::A;
-            const header::DataHeader::SubSpecificationType subSpec{iSide};
-            output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.getIDCDelta(side));
-            // output.snapshot(Output{gDataOriginTPC, "IDCDELTACOMP", subSpec, Lifetime::Timeframe}, idcDeltaHighCompressed.getCompressionFactor(side));
-          }
-        }
-        break;
-      }
-      case IDCDeltaCompression::NO:
-      default:
-        for (unsigned int iChunk = 0; iChunk < mIDCs.getNChunks(); ++iChunk) {
-          if (mWriteToDB) {
-            mDBapi.storeAsTFileAny<o2::tpc::IDCDeltaContainer<float>>(&mIDCs.getIDCDeltaUncompressed(iChunk).mIDCDelta, "TPC/Calib/IDC/IDCDELTA/CONTAINER", mMetadata, getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk));
-          }
-          for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-            const o2::tpc::Side side = iSide ? Side::C : Side::A;
-            const header::DataHeader::SubSpecificationType subSpec{iSide};
-            output.snapshot(Output{gDataOriginTPC, "IDCDELTA", subSpec, Lifetime::Timeframe}, mIDCs.getIDCDeltaUncompressed(side, iChunk));
-          }
-        }
-        break;
     }
     // reseting aggregated IDCs. This is done for safety, but if all data is received in the next aggregation interval it isnt necessary... remove it?
     mIDCs.reset();
@@ -217,15 +175,6 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const unsigned int rangeIDC, const IDCDeltaCompression compression, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
-  for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-    const header::DataHeader::SubSpecificationType subSpec{iSide};
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDC0", subSpec});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDC1", subSpec});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCDELTA", subSpec});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "FOURIERREAL", subSpec});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "FOURIERIMAG", subSpec});
-  }
-
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(crus.size());
   for (const auto& cru : crus) {

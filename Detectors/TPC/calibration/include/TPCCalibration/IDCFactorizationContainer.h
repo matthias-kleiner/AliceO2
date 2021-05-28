@@ -31,12 +31,12 @@ namespace o2
 namespace tpc
 {
 
-  /// IDC types
-  enum class IDCType { IDC = 0,     ///< integrated and grouped IDCs
-                       IDCZero = 1, ///< IDC0: I_0(r,\phi) = <I(r,\phi,t)>_t
-                       IDCOne = 2,  ///< IDC1: I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-                       IDCDelta = 3 ///< IDCDelta: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  };
+/// IDC types
+enum class IDCType { IDC = 0,     ///< integrated and grouped IDCs
+                     IDCZero = 1, ///< IDC0: I_0(r,\phi) = <I(r,\phi,t)>_t
+                     IDCOne = 2,  ///< IDC1: I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+                     IDCDelta = 3 ///< IDCDelta: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+};
 
 /// struct containing the IDC delta values
 template <typename DataT>
@@ -233,55 +233,50 @@ struct IDCOne {
 
 /// struct containing the fourier coefficients calculated from IDC0 for n timeframes
 struct FourierCoeff {
-  /// IDC types
-  enum class CoeffType { REAL = 0, ///< real coefficient
-                         IMAG = 1  ///< imag coefficient
-  };
-
   /// constructor
-  /// \param nFourierCoefficients number of real/imag fourier coefficients which will be stored
-  FourierCoeff(const unsigned int nFourierCoefficients = 1)
-    : mFourierCoefficients{{{std::vector<float>(nFourierCoefficients), std::vector<float>(nFourierCoefficients)}, {std::vector<float>(nFourierCoefficients), std::vector<float>(nFourierCoefficients)}}} {};
+  /// \param nTimeFrames number of time frames
+  /// \param nCoeff number of real/imag fourier coefficients which will be stored
+  FourierCoeff(const unsigned int nTimeFrames, const unsigned int nCoeff)
+    : mFourierCoefficients{{std::vector<float>(nTimeFrames*nCoeff), std::vector<float>(nTimeFrames*nCoeff)}}, mCoeffPerTF{nCoeff} {};
 
   /// \return returns total number of stored coefficients for given side and real/complex type
   /// \param side side
-  /// \param type coefficient type CoeffType::REAL or CoeffType::IMAG
-  unsigned long getNValues(const o2::tpc::Side side, const CoeffType type = CoeffType::REAL) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)].size(); }
+  unsigned long getNCoefficients(const o2::tpc::Side side) const { return mFourierCoefficients[side].size(); }
+
+  /// \return returns number of stored coefficients for TF
+  /// \param side side
+  unsigned long getNCoefficientsPerTF() const { return mCoeffPerTF; }
 
   /// \return returns all stored coefficients for given side and real/complex type
   /// \param side side
-  /// \param type coefficient type CoeffType::REAL or CoeffType::IMAG
-  const auto& getFourierCoefficients(const o2::tpc::Side side, const FourierCoeff::CoeffType type) const { return mFourierCoefficients[side][static_cast<int>(type)]; }
+  const auto& getFourierCoefficients(const o2::tpc::Side side) const { return mFourierCoefficients[side]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
   /// \param index index of the data. For calculation see IDCFourierTransform::getIndex()
-  /// \param CoeffType real or imag coefficient
-  float operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)][index]; }
+  float operator()(const o2::tpc::Side side, unsigned int index) const { return mFourierCoefficients[side][index]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
   /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
-  /// \param CoeffType real or imag coefficient
-  float& operator()(const o2::tpc::Side side, unsigned int index, const CoeffType type) { return mFourierCoefficients[side][static_cast<unsigned int>(type)][index]; }
+  float& operator()(const o2::tpc::Side side, unsigned int index) { return mFourierCoefficients[side][index]; }
 
-  unsigned long getNTotalCoefficients(const o2::tpc::Side side, const CoeffType type) const { return mFourierCoefficients[side][static_cast<unsigned int>(type)].size(); }
-
-  std::array<std::array<std::vector<float>, 2>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> real/imag -> coefficient
+  std::array<std::vector<float>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> coefficient real and complex parameters are stored alternating
+  const unsigned int mCoeffPerTF{}; ///< number of real+imag coefficients per TF
 };
 
-/// struct for storing the number of fourier coefficients per interval to access the fourier ceofficients
-struct FourierCoeffParameters {
-
-  /// constructor
-  /// nCoefficientsPerInterval number of fourier coefficientes per interval
-  FourierCoeffParameters(const unsigned int nCoefficientsPerInterval = 50) : mNCoefficientsPerInterval{static_cast<unsigned char>(nCoefficientsPerInterval)} {};
-
-  /// \return returns number of fourier coefficients per interval
-  unsigned int getNCoefficientsPerInterval() const { return static_cast<unsigned int>(mNCoefficientsPerInterval); }
-
-  const unsigned char mNCoefficientsPerInterval{}; ///< number of real/imag fourier coefficients per integration interval
-};
+// /// struct for storing the number of fourier coefficients per interval to access the fourier ceofficients
+// struct FourierCoeffParameters {
+//
+//   /// constructor
+//   /// nCoefficientsPerInterval number of fourier coefficientes per interval
+//   FourierCoeffParameters(const unsigned int nCoefficientsPerInterval = 50) : mNCoefficientsPerInterval{static_cast<unsigned char>(nCoefficientsPerInterval)} {};
+//
+//   /// \return returns number of fourier coefficients per interval
+//   unsigned int getNCoefficientsPerInterval() const { return static_cast<unsigned int>(mNCoefficientsPerInterval); }
+//
+//   const unsigned char mNCoefficientsPerInterval{}; ///< number of real/imag fourier coefficients per integration interval
+// };
 
 } // namespace tpc
 } // namespace o2

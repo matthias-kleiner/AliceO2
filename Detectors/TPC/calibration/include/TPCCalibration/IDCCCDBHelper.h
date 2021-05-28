@@ -23,6 +23,7 @@
 namespace o2::tpc
 {
 
+/// \tparam DataT the data type for the IDCDelta which are stored in the CCDB (short, char, float)
 template <typename DataT = short>
 class IDCCCDBHelper
 {

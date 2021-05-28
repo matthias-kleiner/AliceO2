@@ -47,7 +47,6 @@
 #pragma link C++ struct o2::tpc::IDCZero +;
 #pragma link C++ struct o2::tpc::IDCOne +;
 #pragma link C++ struct o2::tpc::FourierCoeff +;
-#pragma link C++ struct o2::tpc::FourierCoeffParameters +;
 #pragma link C++ struct o2::tpc::ParameterIDCGroupCCDB +;
 #pragma link C++ class o2::tpc::RobustAverage +;
 #pragma link C++ class o2::tpc::IDCFourierTransform +;

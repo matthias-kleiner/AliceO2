@@ -43,7 +43,7 @@ class IDCFourierTransform
   /// \return returns number of IDCs for each interval which will be used to calculate the fourier coefficients
   unsigned int getrangeIDC() const { return mRangeIDC; }
 
-  /// \return returns numbers of stored fourier coeffiecients
+  /// \return returns numbers of stored real/imag fourier coeffiecients
   unsigned int getNCoefficients() const { return mNFourierCoefficients; }
 
   /// \return returns number of 1D-IDCs
@@ -57,21 +57,19 @@ class IDCFourierTransform
   /// \param side TPC side
   /// \param interval index of interval
   /// \param coefficient index of coefficient
-  /// \param type whether to get real or imag coefficient
-  auto getFourierCoefficient(const o2::tpc::Side side, const unsigned int interval, const unsigned int coefficient, const FourierCoeff::CoeffType type) const { return mFourierCoefficients(side, getIndex(interval, coefficient), type); }
+  auto getFourierCoefficient(const o2::tpc::Side side, const unsigned int interval, const unsigned int coefficient) const { return mFourierCoefficients(side, getIndex(interval, coefficient)); }
 
   /// \return returns struct holding all fourier coefficients
   const auto& getFourierCoefficients() const { return mFourierCoefficients; }
 
   /// \return returns vector of all fourier coefficients for given side and type
   /// \param side TPC side
-  /// \param type whether to get real or imag coefficient
-  const auto& getFourierCoefficients(const o2::tpc::Side side, const FourierCoeff::CoeffType type) const { return mFourierCoefficients.getFourierCoefficients(side, type); }
+  const auto& getFourierCoefficients(const o2::tpc::Side side) const { return mFourierCoefficients.getFourierCoefficients(side); }
 
   /// \return returns index to fourier coefficient
   /// \param interval index of interval
   /// \param coefficient index of coefficient
-  unsigned int getIndex(const unsigned int interval, const unsigned int coefficient) const { return interval * mNFourierCoefficients + coefficient; }
+  unsigned int getIndex(const unsigned int interval, const unsigned int coefficient, const o2::tpc::Side side = o2::tpc::Side::A) const { return interval * mFourierCoefficients.getNCoefficientsPerTF() + coefficient; }
 
   /// returns 1D-IDC
   /// \param index of the 0D-IDC value. This cam also be negative forgetting the values from the last aggregation interval
@@ -130,15 +128,15 @@ class IDCFourierTransform
   void dumpToTree(const char* outFileName = "FourierTree.root") const;
 
  private:
-  const unsigned int mRangeIDC{};                                         ///< number of IDCs used for the calculation of fourier coefficients
-  const unsigned int mNFourierCoefficients{};                             ///< number of fourier coefficients which will be calculated
-  const unsigned int mTimeFrames{};                                       ///< number of timeframes which for which teh fourier coefficients are stored
-  std::array<IDCOne, 2> mIDCOne{};                                        ///< all 1D-IDCs which are used to calculate the fourier coefficients. A buffer for the last aggregation interval is used to calculate the fourier coefficients for the first TFs
-  std::array<std::vector<unsigned int>, 2> mIntegrationIntervalsPerTF{};  ///< number of integration intervals per TF used to set the correct range of IDCs. A buffer is needed for the last aggregation interval.
-  bool mBufferIndex{true};                                                ///< index for the buffer
-  FourierCoeff mFourierCoefficients{mTimeFrames * mNFourierCoefficients}; ///< fourier coefficients. side -> interval -> coefficient
-  inline static int sFftw{1};                                             ///< using fftw or naive approach for calculation of fourier coefficients
-  inline static int sNThreads{1};                                         ///< number of threads which are used during the calculation of the fourier coefficients
+  const unsigned int mRangeIDC{};                                            ///< number of IDCs used for the calculation of fourier coefficients
+  const unsigned int mNFourierCoefficients{};                                ///< number of fourier coefficients which will be calculated
+  const unsigned int mTimeFrames{};                                          ///< number of timeframes which for which teh fourier coefficients are stored
+  std::array<IDCOne, 2> mIDCOne{};                                           ///< all 1D-IDCs which are used to calculate the fourier coefficients. A buffer for the last aggregation interval is used to calculate the fourier coefficients for the first TFs
+  std::array<std::vector<unsigned int>, 2> mIntegrationIntervalsPerTF{};     ///< number of integration intervals per TF used to set the correct range of IDCs. A buffer is needed for the last aggregation interval.
+  bool mBufferIndex{true};                                                   ///< index for the buffer
+  FourierCoeff mFourierCoefficients{mTimeFrames, mNFourierCoefficients * 2}; ///< fourier coefficients. side -> interval -> coefficient
+  inline static int sFftw{1};                                                ///< using fftw or naive approach for calculation of fourier coefficients
+  inline static int sNThreads{1};                                            ///< number of threads which are used during the calculation of the fourier coefficients
 
   /// calculate fourier coefficients
   void calcFourierCoefficientsNaive();
