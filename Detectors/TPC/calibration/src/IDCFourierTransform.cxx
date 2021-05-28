@@ -78,23 +78,19 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive(const o2::tpc::S
         mFourierCoefficients(side, indexDataImag) -= idc * std::sin(term);
         ++counter;
       }
-      // normalize coefficient to number of used points
-      mFourierCoefficients(side, indexDataReal) /= mRangeIDC;
-      mFourierCoefficients(side, indexDataImag) /= mRangeIDC;
     }
   }
+  // normalize coefficient to number of used points
+  std::transform(mFourierCoefficients.mFourierCoefficients[side].begin(), mFourierCoefficients.mFourierCoefficients[side].end(), mFourierCoefficients.mFourierCoefficients[side].begin(), std::bind(std::divides<float>(), std::placeholders::_1, mRangeIDC));
 }
 
 void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::Side side, const std::vector<int>& endIndex)
 {
-  const auto sizeInp = sizeof(float) * mRangeIDC;
-  const auto sizeOut = sizeof(fftwf_complex) * mNFourierCoefficients;
-
   // for FFTW and OMP see: https://stackoverflow.com/questions/15012054/fftw-plan-creation-using-openmp
 #pragma omp parallel num_threads(sNThreads)
   {
-    float* val1DIDCs = (float*)fftwf_malloc(sizeInp);
-    fftwf_complex* coefficients = (fftwf_complex*)fftwf_malloc(sizeOut);
+    float* val1DIDCs = fftwf_alloc_real(mRangeIDC);
+    fftwf_complex* coefficients = fftwf_alloc_complex(mNFourierCoefficients);
     fftwf_plan fftwPlan;
 
 #pragma omp critical(make_plan)
@@ -106,20 +102,14 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::S
       for (int index = getStartIndex(endIndex[interval]); index <= endIndex[interval]; ++index) {
         val1DIDCs[counter++] = getIDCOne(index, side);
       }
-
       fftwf_execute_dft_r2c(fftwPlan, val1DIDCs, coefficients);
-      for (unsigned int coeff = 0; coeff < mNFourierCoefficients; ++coeff) {
-        const unsigned int indexDataReal = getIndex(interval, 2 * coeff); // index for storing real fourier coefficient
-        const unsigned int indexDataImag = indexDataReal + 1;             // index for storing complex fourier coefficient
-        // normalize coefficient to number of used points
-        mFourierCoefficients(side, indexDataReal) = coefficients[coeff][0] / mRangeIDC;
-        mFourierCoefficients(side, indexDataImag) = coefficients[coeff][1] / mRangeIDC;
-      }
+      mFourierCoefficients.mFourierCoefficients[side].insert(mFourierCoefficients.mFourierCoefficients[side].begin() + getIndex(interval, 0), *coefficients, *coefficients + mFourierCoefficients.mCoeffPerTF);
     }
     fftwf_destroy_plan(fftwPlan);
     fftwf_free(coefficients);
     fftwf_free(val1DIDCs);
   }
+  std::transform(mFourierCoefficients.mFourierCoefficients[side].begin(), mFourierCoefficients.mFourierCoefficients[side].end(), mFourierCoefficients.mFourierCoefficients[side].begin(), std::bind(std::divides<float>(), std::placeholders::_1, mRangeIDC));
 }
 
 std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTransform(const o2::tpc::Side side) const
