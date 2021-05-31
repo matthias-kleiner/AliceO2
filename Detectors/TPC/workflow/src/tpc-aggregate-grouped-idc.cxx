@@ -45,7 +45,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"rangeIDC", VariantType::Int, 10, {"Number 1D-IDCs which will be used for the calculation of the fourier coefficients."}},
     {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
-    {"fft", VariantType::Bool, false, {"using FFT or naive approach"}},
+    {"use-naive-fft", VariantType::Bool, false, {"using naive fourier transform or FFTW"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
     {"compression", VariantType::Int, 1, {"compression of DeltaIDC: 0 -> No, 1 -> Medium (data compression ratio 2), 2 -> High (data compression ratio ~6)"}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCIDCCompressionParam.MaxIDCDeltaValue=0.5;')"}}};

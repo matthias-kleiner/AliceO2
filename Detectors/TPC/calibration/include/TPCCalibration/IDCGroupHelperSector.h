@@ -9,7 +9,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file IDCGroupHelperSector.h
-/// \brief class for storing grouped IDCs
+/// \brief helper class for grouping of pads for one sector
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
 #ifndef ALICEO2_TPC_IDCGROUPHELPERSECTOR_H_
@@ -25,7 +25,7 @@
 namespace o2::tpc
 {
 
-/// Class to hold grouped IDC values for one CRU for one TF
+/// Helper class for accessing grouped pads for one sector
 
 class IDCGroupHelperSector
 {
@@ -61,7 +61,7 @@ class IDCGroupHelperSector
   unsigned int getIndexGrouped(const unsigned int sector, const unsigned int region, const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerSector * (integrationInterval * SECTORSPERSIDE + sector) + mRegionOffs[region] + mOffsRow[region][row] + pad; }
 
   /// \return returns offsets for rows to calculate data index
-    /// \param grow grouped row in the region of the grouped IDCs
+  /// \param grow grouped row in the region of the grouped IDCs
   const unsigned int getRowOffset(const unsigned int region, const unsigned int grow) const { return mOffsRow[region][grow]; }
 
   /// \return returns grouped pad for ungrouped row and pad
@@ -115,23 +115,17 @@ class IDCGroupHelperSector
   /// \param region TPC region
   unsigned int getIDCsPerCRU(const unsigned int region) const { return mNIDCsPerCRU[region]; }
 
-  /// draw IDC zero I_0(r,\phi) = <I(r,\phi,t)>_t
-  /// \param side side which will be drawn
-  /// \param filename name of the output file. If empty the canvas is drawn.
-  // void drawIDCZeroSide(const o2::tpc::Side side, const std::string filename = "IDCZeroSide.pdf") const { drawSide(IDCType::IDCZero, side, 0, filename); }
-  // void drawSide(IDCDelta<float> idcdelta);
-
-protected:
+ protected:
   const std::array<unsigned char, Mapper::NREGIONS> mGroupPads{};              ///< grouping definition in pad direction (How many pads are grouped)
   const std::array<unsigned char, Mapper::NREGIONS> mGroupRows{};              ///< grouping definition in row direction (How many rows are grouped)
   const std::array<unsigned char, Mapper::NREGIONS> mGroupLastRowsThreshold{}; ///< if the last group (region edges) consists in row direction of less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
   const std::array<unsigned char, Mapper::NREGIONS> mGroupLastPadsThreshold{}; ///< if the last group (sector edges) consists in pad direction of less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
-  std::array<unsigned int, Mapper::NREGIONS> mNIDCsPerCRU{1};                 ///< total number of IDCs per region per integration interval
-  unsigned int mNIDCsPerSector{};                                             ///< number of grouped IDCs per sector
-  std::array<unsigned int, Mapper::NREGIONS> mRows{};                         ///< number of grouped rows per region
-  std::array<unsigned int, Mapper::NREGIONS> mRegionOffs{};                   ///< offset for the region per region
-  std::array<std::vector<unsigned int>, Mapper::NREGIONS> mPadsPerRow{};      ///< number of pads per row per region
-  std::array<std::vector<unsigned int>, Mapper::NREGIONS> mOffsRow{};         ///< offset to calculate the index in the data from row and pad per region
+  std::array<unsigned int, Mapper::NREGIONS> mNIDCsPerCRU{1};                  ///< total number of IDCs per region per integration interval
+  unsigned int mNIDCsPerSector{};                                              ///< number of grouped IDCs per sector
+  std::array<unsigned int, Mapper::NREGIONS> mRows{};                          ///< number of grouped rows per region
+  std::array<unsigned int, Mapper::NREGIONS> mRegionOffs{};                    ///< offset for the region per region
+  std::array<std::vector<unsigned int>, Mapper::NREGIONS> mPadsPerRow{};       ///< number of pads per row per region
+  std::array<std::vector<unsigned int>, Mapper::NREGIONS> mOffsRow{};          ///< offset to calculate the index in the data from row and pad per region
 
   ClassDefNV(IDCGroupHelperSector, 1)
 };

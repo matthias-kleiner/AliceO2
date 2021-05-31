@@ -9,7 +9,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file IDCGroupHelperRegion.h
-/// \brief class for storing grouped IDCs
+/// \brief helper class for grouping of pads for one region
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
 #ifndef ALICEO2_TPC_IDCGroupHelperRegion_H_
@@ -22,7 +22,7 @@
 namespace o2::tpc
 {
 
-/// Helper for accessing the parameters for the grouped pads for one region
+  /// Helper class for accessing grouped pads for one region
 
 class IDCGroupHelperRegion
 {

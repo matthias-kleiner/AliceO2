@@ -24,7 +24,6 @@ o2_add_library(TPCCalibration
                        src/IDCAverageGroup.cxx
                        src/IDCGroup.cxx
                        src/IDCGroupHelperRegion.cxx
-                       src/IDCGroupHelperSector.cxx
                        src/ParameterIDC.cxx
                        src/IDCFactorization.cxx
                        src/IDCFourierTransform.cxx

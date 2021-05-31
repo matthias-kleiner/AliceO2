@@ -9,7 +9,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file IDCFactorizationContainer.h
-/// \brief This file provides the structs for storing the factorized IDC values to be stored in the CCDB
+/// \brief This file provides the structs for storing the factorized IDC values and fourier coefficients to be stored in the CCDB
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Apr 30, 2021
@@ -23,7 +23,6 @@
 #include <math.h>
 #include <complex>
 #include "DataFormatsTPC/Defs.h"
-#include "Framework/Logger.h"
 #include "TPCCalibration/ParameterIDC.h"
 
 namespace o2
@@ -54,10 +53,6 @@ struct IDCDeltaCompressionFactors {
 template <typename DataT>
 struct IDCDelta {
 
-  IDCDelta() = default;
-
-  IDCDelta(const IDCDeltaContainer<DataT>* idcDelta, const IDCDeltaCompressionFactors* compressionFactor) : mIDCDelta{*idcDelta}, mCompressionFactor{*compressionFactor} {};
-
   /// set idcDelta for given index
   /// \param idcDelta Delta IDC value which will be set
   /// \param side side of the TPC
@@ -69,7 +64,7 @@ struct IDCDelta {
   /// \param side side of the TPC
   void emplace_back(const float idcDelta, const o2::tpc::Side side) { mIDCDelta.mIDCDelta[side].emplace_back(compressValue(idcDelta, side)); }
 
-  /// \return returns converted IDC value from float to new data type
+  /// \return returns converted IDC value from float to new data type specified by template parameter of the object
   /// \param idcDelta Delta IDC value which will be set
   /// \param side side of the TPC
   DataT compressValue(const float idcDelta, const o2::tpc::Side side) const
@@ -207,8 +202,17 @@ struct IDCZero {
   std::array<std::vector<float>, o2::tpc::SIDES> mIDCZero{}; ///< I_0(r,\phi) = <I(r,\phi,t)>_t
 };
 
-///<struct containing the IDC0 and IDC1 values
+///<struct containing the IDC0
 struct IDCOne {
+
+  /// default constructor
+  IDCOne() = default;
+
+  /// constructor for initializing member with default value (this is used in the IDCFourierTransform class to perform calculation of the fourier coefficients for the first aggregation interval)
+  /// \param nIDC number of IDCs which will be initialized
+  /// \param val initialization value
+  IDCOne(const unsigned int nIDC, const float val) : mIDCOne{std::vector<float>(nIDC, val), std::vector<float>(nIDC, val)} {};
+
   /// set IDC one for given index
   /// \param idcOne Delta IDC value which will be set
   /// \param side side of the TPC
@@ -237,15 +241,14 @@ struct FourierCoeff {
   /// \param nTimeFrames number of time frames
   /// \param nCoeff number of real/imag fourier coefficients which will be stored
   FourierCoeff(const unsigned int nTimeFrames, const unsigned int nCoeff)
-    : mFourierCoefficients{{std::vector<float>(nTimeFrames*nCoeff), std::vector<float>(nTimeFrames*nCoeff)}}, mCoeffPerTF{nCoeff} {};
+    : mFourierCoefficients{{std::vector<float>(nTimeFrames * nCoeff), std::vector<float>(nTimeFrames * nCoeff)}}, mCoeffPerTF{nCoeff} {};
 
   /// \return returns total number of stored coefficients for given side and real/complex type
   /// \param side side
   unsigned long getNCoefficients(const o2::tpc::Side side) const { return mFourierCoefficients[side].size(); }
 
   /// \return returns number of stored coefficients for TF
-  /// \param side side
-  unsigned long getNCoefficientsPerTF() const { return mCoeffPerTF; }
+  unsigned int getNCoefficientsPerTF() const { return mCoeffPerTF; }
 
   /// \return returns all stored coefficients for given side and real/complex type
   /// \param side side
@@ -262,21 +265,8 @@ struct FourierCoeff {
   float& operator()(const o2::tpc::Side side, unsigned int index) { return mFourierCoefficients[side][index]; }
 
   std::array<std::vector<float>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> coefficient real and complex parameters are stored alternating
-  const unsigned int mCoeffPerTF{}; ///< number of real+imag coefficients per TF
+  const unsigned int mCoeffPerTF{};                                      ///< number of real+imag coefficients per TF
 };
-
-// /// struct for storing the number of fourier coefficients per interval to access the fourier ceofficients
-// struct FourierCoeffParameters {
-//
-//   /// constructor
-//   /// nCoefficientsPerInterval number of fourier coefficientes per interval
-//   FourierCoeffParameters(const unsigned int nCoefficientsPerInterval = 50) : mNCoefficientsPerInterval{static_cast<unsigned char>(nCoefficientsPerInterval)} {};
-//
-//   /// \return returns number of fourier coefficients per interval
-//   unsigned int getNCoefficientsPerInterval() const { return static_cast<unsigned int>(mNCoefficientsPerInterval); }
-//
-//   const unsigned char mNCoefficientsPerInterval{}; ///< number of real/imag fourier coefficients per integration interval
-// };
 
 } // namespace tpc
 } // namespace o2

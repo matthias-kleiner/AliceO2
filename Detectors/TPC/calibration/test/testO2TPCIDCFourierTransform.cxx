@@ -59,27 +59,31 @@ BOOST_AUTO_TEST_CASE(IDCFourierTransform_test)
   const unsigned int rangeIDC = 200;            // number of IDCs used to calculate the fourier coefficients
   gRandom->SetSeed(1);
 
-  o2::tpc::IDCFourierTransform::setFFT(true);
-  o2::tpc::IDCFourierTransform idcFourierTransform{rangeIDC, tfs};
-  const auto intervalsPerTF = getIntegrationIntervalsPerTF(integrationIntervals, tfs);
-  idcFourierTransform.setIDCs(getIDCsOne(intervalsPerTF), intervalsPerTF);
-  idcFourierTransform.setIDCs(getIDCsOne(intervalsPerTF), intervalsPerTF);
-  idcFourierTransform.calcFourierCoefficients();
+  for (int iType = 0; iType < 2; ++iType) {
+    const bool fft = iType == 0 ? false : true;
+    o2::tpc::IDCFourierTransform::setFFT(fft);
+    o2::tpc::IDCFourierTransform idcFourierTransform{rangeIDC, tfs};
+    const auto intervalsPerTF = getIntegrationIntervalsPerTF(integrationIntervals, tfs);
+    idcFourierTransform.setIDCs(getIDCsOne(intervalsPerTF), intervalsPerTF);
+    idcFourierTransform.setIDCs(getIDCsOne(intervalsPerTF), intervalsPerTF);
+    idcFourierTransform.calcFourierCoefficients();
 
-  const std::vector<int> endIndex = idcFourierTransform.getLastIntervals();
-  for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
-    const o2::tpc::Side side = iSide == 0 ? Side::A : Side::C;
-    const auto inverseFourierFFTW3 = idcFourierTransform.inverseFourierTransformFFTW3(side);
-    for (unsigned int coeff = 0; coeff < idcFourierTransform.getNCoefficients(); ++coeff) {
-      for (unsigned int interval = 0; interval < idcFourierTransform.getNIntervals(); ++interval) {
-        unsigned int indexIDFT = 0;
-        for (int index = idcFourierTransform.getStartIndex(endIndex[interval]); index <= endIndex[interval]; ++index) {
-          const float origIDCOne = idcFourierTransform.getIDCOne(index, side);
-          const float idftIDCOne = inverseFourierFFTW3[interval][indexIDFT++];
-          if (std::fabs(origIDCOne) < ABSTOLERANCE) {
-            BOOST_CHECK_SMALL(idftIDCOne - origIDCOne, ABSTOLERANCE);
-          } else {
-            BOOST_CHECK_CLOSE(idftIDCOne, origIDCOne, TOLERANCE);
+    const std::vector<unsigned int> offsetIndex = idcFourierTransform.getLastIntervals();
+    for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
+      const o2::tpc::Side side = iSide == 0 ? Side::A : Side::C;
+      const auto idcOneExpanded = idcFourierTransform.getExpandedIDCOne(side);
+      const auto inverseFourierFFTW3 = idcFourierTransform.inverseFourierTransformFFTW3(side);
+      for (unsigned int coeff = 0; coeff < idcFourierTransform.getNCoefficients(); ++coeff) {
+        for (unsigned int interval = 0; interval < idcFourierTransform.getNIntervals(); ++interval) {
+          unsigned int indexIDFT = 0;
+          for (unsigned int index = 0; index < rangeIDC; ++index) {
+            const float origIDCOne = idcOneExpanded[index + offsetIndex[interval]];
+            const float idftIDCOne = inverseFourierFFTW3[interval][indexIDFT++];
+            if (std::fabs(origIDCOne) < ABSTOLERANCE) {
+              BOOST_CHECK_SMALL(idftIDCOne - origIDCOne, ABSTOLERANCE);
+            } else {
+              BOOST_CHECK_CLOSE(idftIDCOne, origIDCOne, TOLERANCE);
+            }
           }
         }
       }
