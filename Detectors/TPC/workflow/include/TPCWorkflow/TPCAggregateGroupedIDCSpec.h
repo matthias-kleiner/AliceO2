@@ -53,7 +53,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     // mDBapi.init(ic.options().get<std::string>("ccdb-uri")); // or http://localhost:8080 for a local installation
     mDBapi.init("http://localhost:8080"); // or http://localhost:8080 for a local installation
     mWriteToDB = mDBapi.isHostReachable() ? true : false;
-    mUpdateGroupingPar = ic.options().get<bool>("updateGroupingPar");
+    mUpdateGroupingPar = ic.options().get<bool>("update-not-grouping-parameter");
   }
 
   void run(o2::framework::ProcessingContext& pc) final
@@ -62,12 +62,12 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
     if (mProcessedTFs == 0) {
       mTFRange[0] = getCurrentTF(pc);
 
-      if (mWriteToDB && mUpdateGroupingPar) {
+      if (mWriteToDB && !mUpdateGroupingPar) {
         // write struct containing grouping parameters to access grouped IDCs to CCDB
         const ParameterIDCGroupCCDB parGrouping(mIDCs.getGroupPads(), mIDCs.getGroupRows(), mIDCs.getRowThreshold(), mIDCs.getPadThreshold());
         // validity for grouping parameters is from first TF to some really large TF (until it is updated)
         mDBapi.storeAsTFileAny<o2::tpc::ParameterIDCGroupCCDB>(&parGrouping, "TPC/Calib/IDC/GROUPINGPAR", mMetadata, getFirstTF(), std::numeric_limits<uint32_t>::max());
-        mUpdateGroupingPar = false;
+        mUpdateGroupingPar = true;
       }
     }
 
@@ -198,7 +198,7 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
     outputSpecs,
     AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, rangeIDC, compression, debug)},
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}},
-            {"updateGroupingPar", VariantType::Bool, false, {"Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
+            {"update-not-grouping-parameter", VariantType::Bool, false, {"Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
 }
 
 } // namespace o2::tpc

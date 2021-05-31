@@ -9,17 +9,15 @@
 // or submit itself to any jurisdiction.
 
 #include <fmt/format.h>
+#include <vector>
+#include <string>
 #include "Algorithm/RangeTokenizer.h"
 #include "Framework/WorkflowSpec.h"
 #include "Framework/Logger.h"
 #include "Framework/ConfigParamSpec.h"
 #include "Framework/CompletionPolicy.h"
 #include "Framework/CompletionPolicyHelpers.h"
-#include "Headers/DataHeader.h"
-#include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
-#include <vector>
-#include <string>
 #include "TPCWorkflow/TPCAggregateGroupedIDCSpec.h"
 #include "TPCCalibration/IDCFactorization.h"
 #include "TPCCalibration/IDCFourierTransform.h"
@@ -40,12 +38,13 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
   std::vector<ConfigParamSpec> options{
     {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
-    {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated."}},
-    {"timeframesDeltaIDC", VariantType::Int, 2, {"Number of TFs used for storing DeltaIDC in CCDB."}},
-    {"rangeIDC", VariantType::Int, 10, {"Number 1D-IDCs which will be used for the calculation of the fourier coefficients."}},
-    {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during factorization of the IDCs."}},
+    {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated per aggregation interval."}},
+    {"timeframesDeltaIDC", VariantType::Int, 2, {"Number of TFs used for storing the IDCDelta struct in the CCDB."}},
+    {"rangeIDC", VariantType::Int, 10, {"Number of 1D-IDCs which will be used for the calculation of the fourier coefficients."}},
+    {"nthreads-IDC-factorization", VariantType::Int, 1, {"Number of threads which will be used during the factorization of the IDCs."}},
+    {"nthreads-IDC-fourier-transform", VariantType::Int, 1, {"Number of threads which will be used during the calculation of the fourier coefficients."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
-    {"use-naive-fft", VariantType::Bool, false, {"using naive fourier transform or FFTW"}},
+    {"use-naive-fft", VariantType::Bool, false, {"using naive fourier transform (true) or FFTW (false)"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
     {"compression", VariantType::Int, 1, {"compression of DeltaIDC: 0 -> No, 1 -> Medium (data compression ratio 2), 2 -> High (data compression ratio ~6)"}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCIDCCompressionParam.MaxIDCDeltaValue=0.5;')"}}};
@@ -69,11 +68,13 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto timeframes = static_cast<unsigned int>(config.options().get<int>("timeframes"));
   const auto timeframesDeltaIDC = static_cast<unsigned int>(config.options().get<int>("timeframesDeltaIDC"));
   const auto debug = config.options().get<bool>("debug");
-  const auto fft = config.options().get<bool>("fft");
+  const bool fft = config.options().get<bool>("use-naive-fft");
   const auto rangeIDC = static_cast<unsigned int>(config.options().get<int>("rangeIDC"));
-  const auto nthreads = static_cast<unsigned long>(config.options().get<int>("nthreads"));
-  IDCFactorization::setNThreads(nthreads);
-  IDCFourierTransform::setFFT(fft);
+  const auto nthreadsFactorization = static_cast<unsigned long>(config.options().get<int>("nthreads-IDC-factorization"));
+  const auto nthreadsFourier = static_cast<unsigned long>(config.options().get<int>("nthreads-IDC-fourier-transform"));
+  IDCFactorization::setNThreads(nthreadsFactorization);
+  IDCFourierTransform::setNThreads(nthreadsFourier);
+  IDCFourierTransform::setFFT(!fft);
 
   const int compressionTmp = config.options().get<int>("compression");
   IDCDeltaCompression compression;
@@ -94,6 +95,5 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto last = std::min(tpcCRUs.end(), first + nCRUs);
   const std::vector<uint32_t> rangeCRUs(first, last);
   workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, timeframesDeltaIDC, rangeIDC, compression, debug));
-
   return workflow;
 }

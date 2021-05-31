@@ -16,8 +16,6 @@
 #include "Framework/ConfigParamSpec.h"
 #include "Framework/CompletionPolicy.h"
 #include "Framework/CompletionPolicyHelpers.h"
-#include "Headers/DataHeader.h"
-#include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
 #include "DetectorsCommonDataFormats/NameConf.h"
@@ -69,7 +67,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   const auto& hbfu = o2::raw::HBFUtils::Instance();
   const int orbitsperTF = hbfu.getNOrbitsPerTF();
-  hbfu.printKeyValues();
+  hbfu.printKeyValues(); // TODO remove this
   o2::tpc::IDCSim::setNOrbitsPerTF(orbitsperTF);
 
   const auto nOrbits = config.options().get<int>("nOrbits");

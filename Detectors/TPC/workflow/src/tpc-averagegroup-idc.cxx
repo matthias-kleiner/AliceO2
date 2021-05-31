@@ -18,8 +18,6 @@
 #include "Framework/ConfigParamSpec.h"
 #include "Framework/CompletionPolicy.h"
 #include "Framework/CompletionPolicyHelpers.h"
-#include "Headers/DataHeader.h"
-#include "Headers/RAWDataHeader.h"
 #include "CommonUtils/ConfigurableParam.h"
 #include "TPCWorkflow/TPCAverageGroupIDCSpec.h"
 #include "TPCBase/CRU.h"

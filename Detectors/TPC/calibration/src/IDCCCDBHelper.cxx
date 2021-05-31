@@ -28,6 +28,7 @@ std::string o2::tpc::IDCCCDBHelper<DataT>::getZAxisTitle(const o2::tpc::IDCType 
       break;
     case IDCType::IDCOne:
     case IDCType::IDC:
+      return "Wrong Type";
       break;
   }
 }
@@ -50,7 +51,6 @@ void o2::tpc::IDCCCDBHelper<DataT>::drawSide(const o2::tpc::IDCType type, const 
   can->SetTopMargin(0.04f);
   can->SetRightMargin(0.14f);
   can->SetLeftMargin(0.1f);
-
   poly->Draw("colz");
 
   unsigned int sectorStart = (side == Side::A) ? 0 : o2::tpc::SECTORSPERSIDE;
@@ -111,7 +111,6 @@ void o2::tpc::IDCCCDBHelper<DataT>::drawSector(const IDCType type, const unsigne
   TLatex lat;
   lat.SetTextFont(63);
   lat.SetTextSize(2);
-
   poly->Draw("colz");
 
   for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {

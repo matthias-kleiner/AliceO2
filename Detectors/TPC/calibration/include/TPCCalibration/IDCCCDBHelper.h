@@ -23,6 +23,16 @@
 namespace o2::tpc
 {
 
+/// Usage
+/// o2::tpc::IDCCCDBHelper<short> helper;
+/// helper.setTimeStamp(0);
+/// helper.loadAll();
+/// helper.drawIDCZeroSide(o2::tpc::Side::A);
+/// const unsigned int sector 10;
+/// const unsigned int integrationInterval =3;
+/// helper.drawIDCDeltaSector(sector, 3);
+/// TODO add drawing of 1D-distributions
+
 /// \tparam DataT the data type for the IDCDelta which are stored in the CCDB (short, char, float)
 template <typename DataT = short>
 class IDCCCDBHelper
@@ -49,7 +59,7 @@ class IDCCCDBHelper
   }
 
   /// update timestamp
-  void updateTimeStamp(const long long timestamp) { mCCDBManager.setTimestamp(timestamp); }
+  void setTimeStamp(const long long timestamp) { mCCDBManager.setTimestamp(timestamp); }
 
   /// \return returns the stored IDC0 value for local ungrouped pad row and ungrouped pad
   /// \param sector sector
@@ -107,6 +117,7 @@ class IDCCCDBHelper
   /// \param filename name of the output file. If empty the canvas is drawn.
   void drawSector(const IDCType type, const unsigned int sector, const unsigned int integrationInterval, const std::string filename) const;
 
+  /// return returns title for z axis for given IDCType
   std::string getZAxisTitle(const o2::tpc::IDCType type) const;
 
   ClassDefNV(IDCCCDBHelper, 1)

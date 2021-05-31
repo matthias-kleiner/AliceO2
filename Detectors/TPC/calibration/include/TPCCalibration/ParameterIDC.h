@@ -64,16 +64,16 @@ struct ParameterIDCGroupCCDB {
   unsigned char getGroupLastPadsThreshold(const unsigned int region) const { return GroupLastPadsThreshold[region]; }
 
   /// \return returns number of pads in pad direction which are grouped for all regions
-  const std::array<unsigned char, Mapper::NREGIONS>& getGroupPads() const{ return GroupPads; }
+  const std::array<unsigned char, Mapper::NREGIONS>& getGroupPads() const { return GroupPads; }
 
   /// \return returns number of pads in row direction which are grouped for all regions
-  const std::array<unsigned char, Mapper::NREGIONS>& getGroupRows() const{ return GroupRows; }
+  const std::array<unsigned char, Mapper::NREGIONS>& getGroupRows() const { return GroupRows; }
 
   /// \return returns minimum number of pads in row direction for the last group in row direction for all regions
-  const std::array<unsigned char, Mapper::NREGIONS>& getGroupLastRowsThreshold() const{ return GroupLastRowsThreshold; }
+  const std::array<unsigned char, Mapper::NREGIONS>& getGroupLastRowsThreshold() const { return GroupLastRowsThreshold; }
 
   /// \return returns minimum number of pads in pad direction for the last group in pad direction for all regions
-  const std::array<unsigned char, Mapper::NREGIONS>& getGroupLastPadsThreshold() const{ return GroupLastPadsThreshold; }
+  const std::array<unsigned char, Mapper::NREGIONS>& getGroupLastPadsThreshold() const { return GroupLastPadsThreshold; }
 
   std::array<unsigned char, Mapper::NREGIONS> GroupPads{};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
   std::array<unsigned char, Mapper::NREGIONS> GroupRows{};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
