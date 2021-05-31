@@ -74,7 +74,6 @@ void o2::tpc::IDCGroup::draw(const unsigned int integrationInterval, const std::
   }
 }
 
-
 void o2::tpc::IDCGroup::dumpToFile(const char* outFileName, const char* outName) const
 {
   TFile fOut(outFileName, "UPDATE");

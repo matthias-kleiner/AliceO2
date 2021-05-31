@@ -25,7 +25,6 @@ namespace o2::tpc
 
 /// Class to hold grouped IDC values for one CRU for one TF
 
-
 class IDCGroup : public IDCGroupHelperRegion
 {
  public:
@@ -36,7 +35,7 @@ class IDCGroup : public IDCGroupHelperRegion
   /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction
   /// \param region region of the TPC
   IDCGroup(const unsigned char groupPads = 4, const unsigned char groupRows = 4, const unsigned char groupLastRowsThreshold = 2, const unsigned char groupLastPadsThreshold = 2, const unsigned int region = 0)
-    : IDCGroupHelperRegion{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, region}, mIDCsGrouped(getNIDCsPerIntegrationInterval()) {};
+    : IDCGroupHelperRegion{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, region}, mIDCsGrouped(getNIDCsPerIntegrationInterval()){};
 
   /// extend the size of the grouped and averaged IDC values corresponding to the number of integration intervals.
   /// without using this function the object can hold only one integration interval
