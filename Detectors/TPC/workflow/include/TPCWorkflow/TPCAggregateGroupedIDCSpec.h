@@ -43,10 +43,10 @@ namespace o2::tpc
 class TPCAggregateGroupedIDCSpec : public o2::framework::Task
 {
  public:
-  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned char, Mapper::NREGIONS> groupPads,
+  TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int nFourierCoefficientsStore, const unsigned int timeframesDeltaIDC, std::array<unsigned char, Mapper::NREGIONS> groupPads,
                              std::array<unsigned char, Mapper::NREGIONS> groupRows, std::array<unsigned char, Mapper::NREGIONS> groupLastRowsThreshold,
                              std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int rangeIDC, const IDCDeltaCompression compression, const bool debug = false)
-    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mIDCFourierTransform{rangeIDC, timeframes}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
+    : mCRUs{crus}, mIDCs{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mIDCFourierTransform{rangeIDC, timeframes, nFourierCoefficientsStore}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -172,7 +172,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const unsigned int rangeIDC, const IDCDeltaCompression compression, const bool debug = false)
+DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const unsigned int rangeIDC, const unsigned int nFourierCoefficientsStore, const IDCDeltaCompression compression, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   std::vector<InputSpec> inputSpecs;
@@ -196,9 +196,9 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
     "tpc-aggregate-idc",
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, rangeIDC, compression, debug)},
+    AlgorithmSpec{adaptFromTask<TPCAggregateGroupedIDCSpec>(crus, timeframes, nFourierCoefficientsStore, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, rangeIDC, compression, debug)},
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}},
-            {"update-not-grouping-parameter", VariantType::Bool, false, {"Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
+            {"update-not-grouping-parameter", VariantType::Bool, false, {"Do NOT Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
 }
 
 } // namespace o2::tpc

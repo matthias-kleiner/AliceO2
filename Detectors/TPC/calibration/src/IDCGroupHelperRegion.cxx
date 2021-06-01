@@ -13,15 +13,6 @@
 #include "TFile.h"
 #include <numeric>
 
-void o2::tpc::IDCGroupHelperRegion::initStorage()
-{
-  mNIDCsPerCRU = std::accumulate(mPadsPerRow.begin(), mPadsPerRow.end(), decltype(mPadsPerRow)::value_type(0));
-  for (unsigned int i = 1; i < mRows; ++i) {
-    const unsigned int lastInd = i - 1;
-    mOffsRow[i] = mOffsRow[lastInd] + mPadsPerRow[lastInd];
-  }
-}
-
 unsigned int o2::tpc::IDCGroupHelperRegion::getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int groupedrows)
 {
   const unsigned int row = lrow / groupRows;
@@ -77,7 +68,12 @@ void o2::tpc::IDCGroupHelperRegion::initIDCGroupHelperRegion()
     const unsigned int row = irow * mGroupRows;
     mPadsPerRow[irow] = 2 * (getLastPad(row) / mGroupPads + 1);
   }
-  initStorage();
+  
+  mNIDCsPerCRU = std::accumulate(mPadsPerRow.begin(), mPadsPerRow.end(), decltype(mPadsPerRow)::value_type(0));
+  for (unsigned int i = 1; i < mRows; ++i) {
+    const unsigned int lastInd = i - 1;
+    mOffsRow[i] = mOffsRow[lastInd] + mPadsPerRow[lastInd];
+  }
 }
 
 void o2::tpc::IDCGroupHelperRegion::dumpToFile(const char* outFileName, const char* outName) const

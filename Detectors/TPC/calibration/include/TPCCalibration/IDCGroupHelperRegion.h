@@ -22,7 +22,7 @@
 namespace o2::tpc
 {
 
-  /// Helper class for accessing grouped pads for one region
+/// Helper class for accessing grouped pads for one region
 
 class IDCGroupHelperRegion
 {
@@ -129,20 +129,17 @@ class IDCGroupHelperRegion
   const unsigned char mGroupRows{4};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
   const unsigned char mGroupLastRowsThreshold{2}; ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
   const unsigned char mGroupLastPadsThreshold{2}; ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
-  const unsigned int mRegion{};                  ///< region of input IDCs
-  unsigned int mNIDCsPerCRU{1};                  ///< total number of IDCs per CRU per integration interval
-  unsigned int mRows{};                          ///< number of grouped rows
-  std::vector<unsigned int> mPadsPerRow{};       ///< number of pads per row
-  std::vector<unsigned int> mOffsRow{};          ///< offset to calculate the index in the data from row and pad
+  const unsigned int mRegion{};                   ///< region of input IDCs
+  unsigned int mNIDCsPerCRU{1};                   ///< total number of IDCs per CRU per integration interval
+  unsigned int mRows{};                           ///< number of grouped rows
+  std::vector<unsigned int> mPadsPerRow{};        ///< number of pads per row
+  std::vector<unsigned int> mOffsRow{};           ///< offset to calculate the index in the data from row and pad
 
   /// set number of grouped rows
   void setRows(const unsigned int nRows);
 
   /// initialize members
   void initIDCGroupHelperRegion();
-
-  /// initialize the member containing the grouped IDCs
-  void initStorage();
 
   ClassDefNV(IDCGroupHelperRegion, 1)
 };

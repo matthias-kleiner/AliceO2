@@ -54,15 +54,16 @@ std::vector<unsigned int> getIntegrationIntervalsPerTF(const unsigned int integr
 
 BOOST_AUTO_TEST_CASE(IDCFourierTransform_test)
 {
-  const unsigned int integrationIntervals = 10; // number of integration intervals for first TF
-  const unsigned int tfs = 200;                 // number of aggregated TFs
-  const unsigned int rangeIDC = 200;            // number of IDCs used to calculate the fourier coefficients
+  const unsigned int integrationIntervals = 10;    // number of integration intervals for first TF
+  const unsigned int tfs = 200;                    // number of aggregated TFs
+  const unsigned int rangeIDC = 200;               // number of IDCs used to calculate the fourier coefficients
+  const unsigned int nFourierCoeff = rangeIDC + 2; // number of fourier coefficients which will be calculated/stored needs to be the maximum value to be able to perform IFT
   gRandom->SetSeed(1);
 
   for (int iType = 0; iType < 2; ++iType) {
     const bool fft = iType == 0 ? false : true;
     o2::tpc::IDCFourierTransform::setFFT(fft);
-    o2::tpc::IDCFourierTransform idcFourierTransform{rangeIDC, tfs};
+    o2::tpc::IDCFourierTransform idcFourierTransform{rangeIDC, tfs, nFourierCoeff};
     const auto intervalsPerTF = getIntegrationIntervalsPerTF(integrationIntervals, tfs);
     idcFourierTransform.setIDCs(getIDCsOne(intervalsPerTF), intervalsPerTF);
     idcFourierTransform.setIDCs(getIDCsOne(intervalsPerTF), intervalsPerTF);

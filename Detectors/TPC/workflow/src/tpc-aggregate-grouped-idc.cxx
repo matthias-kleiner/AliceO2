@@ -41,6 +41,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated per aggregation interval."}},
     {"timeframesDeltaIDC", VariantType::Int, 2, {"Number of TFs used for storing the IDCDelta struct in the CCDB."}},
     {"rangeIDC", VariantType::Int, 10, {"Number of 1D-IDCs which will be used for the calculation of the fourier coefficients."}},
+    {"nFourierCoeff", VariantType::Int, 12, {"Number of fourier coefficients (real+imag) which will be stored in the CCDB. The maximum can be 'rangeIDC + 2'."}},
     {"nthreads-IDC-factorization", VariantType::Int, 1, {"Number of threads which will be used during the factorization of the IDCs."}},
     {"nthreads-IDC-fourier-transform", VariantType::Int, 1, {"Number of threads which will be used during the calculation of the fourier coefficients."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
@@ -70,6 +71,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto debug = config.options().get<bool>("debug");
   const bool fft = config.options().get<bool>("use-naive-fft");
   const auto rangeIDC = static_cast<unsigned int>(config.options().get<int>("rangeIDC"));
+  const auto nFourierCoeff = static_cast<unsigned int>(config.options().get<int>("nFourierCoeff"));
   const auto nthreadsFactorization = static_cast<unsigned long>(config.options().get<int>("nthreads-IDC-factorization"));
   const auto nthreadsFourier = static_cast<unsigned long>(config.options().get<int>("nthreads-IDC-fourier-transform"));
   IDCFactorization::setNThreads(nthreadsFactorization);
@@ -94,6 +96,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto first = tpcCRUs.begin();
   const auto last = std::min(tpcCRUs.end(), first + nCRUs);
   const std::vector<uint32_t> rangeCRUs(first, last);
-  workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, timeframesDeltaIDC, rangeIDC, compression, debug));
+  workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, timeframesDeltaIDC, rangeIDC, nFourierCoeff, compression, debug));
   return workflow;
 }

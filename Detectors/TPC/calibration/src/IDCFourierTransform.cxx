@@ -11,6 +11,7 @@
 #include "TPCCalibration/IDCFourierTransform.h"
 #include "CommonUtils/TreeStreamRedirector.h"
 #include "CommonConstants/MathConstants.h"
+#include "Framework/Logger.h"
 #include "TFile.h"
 #include <cmath>
 #include <fftw3.h>
@@ -35,6 +36,9 @@ void o2::tpc::IDCFourierTransform::setIDCs(const IDCOne& idcsOne, const std::vec
 
 void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive()
 {
+  if (mFourierCoefficients.getNCoefficientsPerTF() % 2) {
+    LOGP(warning, "number of specified fourier coefficients is {}, but should be an even number! you can use FFTW3 method instead!", mFourierCoefficients.getNCoefficientsPerTF());
+  }
   const std::vector<unsigned int> offsetIndex = getLastIntervals();
   calcFourierCoefficientsNaive(o2::tpc::Side::A, offsetIndex);
   calcFourierCoefficientsNaive(o2::tpc::Side::C, offsetIndex);
@@ -53,7 +57,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive(const o2::tpc::S
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
     const auto idcOneExpanded = getExpandedIDCOne(side);
-    for (unsigned int coeff = 0; coeff < mNFourierCoefficients; ++coeff) {
+    for (unsigned int coeff = 0; coeff < mFourierCoefficients.getNCoefficientsPerTF() / 2; ++coeff) {
       const unsigned int indexDataReal = getIndex(interval, 2 * coeff); // index for storing real fourier coefficient
       const unsigned int indexDataImag = indexDataReal + 1;             // index for storing complex fourier coefficient
       const float term0 = o2::constants::math::TwoPI * coeff / mRangeIDC;
@@ -84,7 +88,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::S
 #pragma omp for
     for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
       fftwf_execute_dft_r2c(fftwPlan, &(val1DIDCs[offsetIndex[interval]]), coefficients);
-      std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + getIndex(interval, 0))), coefficients, mFourierCoefficients.mCoeffPerTF * sizeof(float));
+      std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + getIndex(interval, 0))), coefficients, mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float));
     }
     // free memory
     fftwf_free(coefficients);
@@ -176,17 +180,14 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
         idcOne.emplace_back(idcOneExpanded[index + offsetIndex[interval]]);
       }
 
-      for (unsigned int coeff = 0; coeff < getNCoefficients(); ++coeff) {
-        const unsigned int indexDataReal = getIndex(interval, 2 * coeff); // index for storing real fourier coefficient
-        const unsigned int indexDataImag = indexDataReal + 1;             // index for storing complex fourier coefficient
-        float real = mFourierCoefficients(side, indexDataReal);
-        float imag = mFourierCoefficients(side, indexDataImag);
+      for (unsigned int coeff = 0; coeff < mFourierCoefficients.getNCoefficientsPerTF(); ++coeff) {
+        float coefficient = mFourierCoefficients(side, getIndex(interval, coeff));
+
         pcstream << "tree"
                  << "side=" << iSide
                  << "interval=" << interval
-                 << "coefficient=" << coeff
-                 << "real=" << real
-                 << "imag=" << imag
+                 << "icoefficient=" << coeff      // index of ith coefficient
+                 << "coefficient=" << coefficient // value for ith coefficient
                  << "IDCOne.=" << idcOne
                  << "IDCOneiDFT.=" << idcOneInverse
                  << "IDCOneiDFTFFTW3.=" << idcOneInverseFFTW3

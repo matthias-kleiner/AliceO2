@@ -33,7 +33,8 @@ class IDCFourierTransform
   /// contructor
   /// \param rangeIDC number of IDCs for each interval which will be used to calculate the fourier coefficients
   /// \param timeFrames number of time frames which will be stored
-  IDCFourierTransform(const unsigned int rangeIDC = 200, const unsigned int timeFrames = 2000) : mRangeIDC{rangeIDC}, mNFourierCoefficients{mRangeIDC / 2 + 1}, mTimeFrames{timeFrames} {};
+  /// \param nFourierCoefficientsStore number of courier coefficients (real+imag) which will be stored (the maximum can be 'rangeIDC + 2', should be an even number when using naive FT). If less than maximum is setn the inverse fourier transform will not work.
+  IDCFourierTransform(const unsigned int rangeIDC = 200, const unsigned int timeFrames = 2000, const unsigned int nFourierCoefficientsStore = 200 + 2) : mRangeIDC{rangeIDC}, mNFourierCoefficients{mRangeIDC / 2 + 1}, mTimeFrames{timeFrames}, mFourierCoefficients{mTimeFrames, nFourierCoefficientsStore} {};
 
   /// calculate fourier coefficients
   void calcFourierCoefficients() { sFftw ? calcFourierCoefficientsFFTW3() : calcFourierCoefficientsNaive(); }
@@ -130,7 +131,7 @@ class IDCFourierTransform
   const unsigned int mTimeFrames{};                                                                ///< number of timeframes which for which teh fourier coefficients are stored
   std::array<std::vector<unsigned int>, 2> mIntegrationIntervalsPerTF{};                           ///< number of integration intervals per TF used to set the correct range of IDCs. A buffer is needed for the last aggregation interval.
   bool mBufferIndex{true};                                                                         ///< index for the buffer
-  FourierCoeff mFourierCoefficients{mTimeFrames, mNFourierCoefficients * 2};                       ///< fourier coefficients. side -> interval -> coefficient
+  FourierCoeff mFourierCoefficients;                                                               ///< fourier coefficients. side -> interval -> coefficient
   inline static int sFftw{1};                                                                      ///< using fftw or naive approach for calculation of fourier coefficients
   inline static int sNThreads{1};                                                                  ///< number of threads which are used during the calculation of the fourier coefficients
   std::array<IDCOne, 2> mIDCOne{IDCOne(mRangeIDC, getNormVal()), IDCOne(mRangeIDC, getNormVal())}; ///< all 1D-IDCs which are used to calculate the fourier coefficients. A buffer for the last aggregation interval is used to calculate the fourier coefficients for the first TFs
