@@ -9,8 +9,9 @@
 // or submit itself to any jurisdiction.
 
 #include "TPCCalibration/IDCGroup.h"
-#include "CommonUtils/TreeStreamRedirector.h" // for debugging
+#include "CommonUtils/TreeStreamRedirector.h"
 #include "TPCBase/Painter.h"
+#include "TPCBase/Mapper.h"
 #include "TH2Poly.h"
 #include "TFile.h"
 #include "TCanvas.h"
@@ -79,4 +80,9 @@ void o2::tpc::IDCGroup::dumpToFile(const char* outFileName, const char* outName)
   TFile fOut(outFileName, "UPDATE");
   fOut.WriteObject(this, outName);
   fOut.Close();
+}
+
+float o2::tpc::IDCGroup::getValUngroupedGlobal(unsigned int ugrow, unsigned int upad, unsigned int integrationInterval) const
+{
+  return mIDCsGrouped[getIndexUngrouped(Mapper::getLocalRowFromGlobalRow(ugrow), upad, integrationInterval)];
 }

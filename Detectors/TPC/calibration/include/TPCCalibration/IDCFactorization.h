@@ -20,11 +20,9 @@
 #include <vector>
 #include "Rtypes.h"
 #include "TPCBase/Mapper.h"
-#include "TPCCalibration/IDCGroup.h"
 #include "TPCCalibration/IDCFactorizationContainer.h"
 #include "TPCCalibration/IDCGroupHelperSector.h"
 #include "DataFormatsTPC/Defs.h"
-#include "Framework/Logger.h"
 
 #if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
 #include <omp.h>

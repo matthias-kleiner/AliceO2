@@ -23,7 +23,7 @@
 #include <math.h>
 #include <complex>
 #include "DataFormatsTPC/Defs.h"
-#include "TPCCalibration/ParameterIDC.h"
+#include "TPCCalibration/IDCGroupingParameter.h"
 
 namespace o2
 {
@@ -236,6 +236,9 @@ struct FourierCoeff {
   FourierCoeff(const unsigned int nTimeFrames, const unsigned int nCoeff)
     : mFourierCoefficients{{std::vector<float>(nTimeFrames * nCoeff), std::vector<float>(nTimeFrames * nCoeff)}}, mCoeffPerTF{nCoeff} {};
 
+  /// default constructor for ROOT I/O
+  FourierCoeff() = default;
+
   /// \return returns total number of stored coefficients for given side and real/complex type
   /// \param side side
   unsigned long getNCoefficients(const o2::tpc::Side side) const { return mFourierCoefficients[side].size(); }
@@ -247,14 +250,19 @@ struct FourierCoeff {
   /// \param side side
   const auto& getFourierCoefficients(const o2::tpc::Side side) const { return mFourierCoefficients[side]; }
 
+  /// \return returns index to fourier coefficient
+  /// \param interval index of interval
+  /// \param coefficient index of coefficient
+  unsigned int getIndex(const unsigned int interval, const unsigned int coefficient) const { return interval * mCoeffPerTF + coefficient; }
+
   /// \return returns the stored value
   /// \param side side of the TPC
-  /// \param index index of the data. For calculation see IDCFourierTransform::getIndex()
+  /// \param index index of the data
   float operator()(const o2::tpc::Side side, unsigned int index) const { return mFourierCoefficients[side][index]; }
 
   /// \return returns the stored value
   /// \param side side of the TPC
-  /// \param index index of the data. TFor calculation see IDCFourierTransform::getIndex()
+  /// \param index index of the data
   float& operator()(const o2::tpc::Side side, unsigned int index) { return mFourierCoefficients[side][index]; }
 
   std::array<std::vector<float>, o2::tpc::SIDES> mFourierCoefficients{}; ///< fourier coefficients. side -> coefficient real and complex parameters are stored alternating

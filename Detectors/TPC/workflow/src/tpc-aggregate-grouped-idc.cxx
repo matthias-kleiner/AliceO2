@@ -8,7 +8,6 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include <fmt/format.h>
 #include <vector>
 #include <string>
 #include "Algorithm/RangeTokenizer.h"
@@ -38,17 +37,17 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
   std::vector<ConfigParamSpec> options{
     {"configFile", VariantType::String, "o2tpcaveragegroupidc_configuration.ini", {"configuration file for configurable parameters"}},
-    {"timeframes", VariantType::Int, 10, {"Number of TFs which will be aggregated per aggregation interval."}},
-    {"timeframesDeltaIDC", VariantType::Int, 2, {"Number of TFs used for storing the IDCDelta struct in the CCDB."}},
-    {"rangeIDC", VariantType::Int, 10, {"Number of 1D-IDCs which will be used for the calculation of the fourier coefficients."}},
-    {"nFourierCoeff", VariantType::Int, 12, {"Number of fourier coefficients (real+imag) which will be stored in the CCDB. The maximum can be 'rangeIDC + 2'."}},
+    {"timeframes", VariantType::Int, 2000, {"Number of TFs which will be aggregated per aggregation interval."}},
+    {"timeframesDeltaIDC", VariantType::Int, 100, {"Number of TFs used for storing the IDCDelta struct in the CCDB."}},
+    {"rangeIDC", VariantType::Int, 200, {"Number of 1D-IDCs which will be used for the calculation of the fourier coefficients."}},
+    {"nFourierCoeff", VariantType::Int, 60, {"Number of fourier coefficients (real+imag) which will be stored in the CCDB. The maximum can be 'rangeIDC + 2'."}},
     {"nthreads-IDC-factorization", VariantType::Int, 1, {"Number of threads which will be used during the factorization of the IDCs."}},
     {"nthreads-IDC-fourier-transform", VariantType::Int, 1, {"Number of threads which will be used during the calculation of the fourier coefficients."}},
     {"debug", VariantType::Bool, false, {"create debug files"}},
     {"use-naive-fft", VariantType::Bool, false, {"using naive fourier transform (true) or FFTW (false)"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
     {"compression", VariantType::Int, 1, {"compression of DeltaIDC: 0 -> No, 1 -> Medium (data compression ratio 2), 2 -> High (data compression ratio ~6)"}},
-    {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g.: 'TPCIDCCompressionParam.MaxIDCDeltaValue=0.5;')"}}};
+    {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g. for pp 50kHz: 'TPCIDCCompressionParam.MaxIDCDeltaValue=15;')"}}};
 
   std::swap(workflowOptions, options);
 }
@@ -97,5 +96,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto last = std::min(tpcCRUs.end(), first + nCRUs);
   const std::vector<uint32_t> rangeCRUs(first, last);
   workflow.emplace_back(getTPCAggregateGroupedIDCSpec(rangeCRUs, timeframes, timeframesDeltaIDC, rangeIDC, nFourierCoeff, compression, debug));
+
   return workflow;
 }

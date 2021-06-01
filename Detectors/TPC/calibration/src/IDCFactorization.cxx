@@ -9,9 +9,8 @@
 // or submit itself to any jurisdiction.
 
 #include "TPCCalibration/IDCFactorization.h"
-#include "TPCCalibration/IDCGroup.h"
-#include "TPCBase/Mapper.h"
 #include "CommonUtils/TreeStreamRedirector.h"
+#include "Framework/Logger.h"
 #include "TPCBase/Painter.h"
 #include "TH2Poly.h"
 #include "TFile.h"
@@ -47,13 +46,11 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   TLatex lat;
   lat.SetTextFont(63);
   lat.SetTextSize(2);
-
   poly->Draw("colz");
 
   unsigned int chunk = 0;
   unsigned int localintegrationInterval = 0;
   getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
-
   for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
     for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
       for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
@@ -106,35 +103,6 @@ void o2::tpc::IDCFactorization::drawSector(const IDCType type, const unsigned in
   }
 }
 
-std::string o2::tpc::IDCFactorization::getZAxisTitle(const IDCType type, const IDCDeltaCompression compression) const
-{
-  switch (type) {
-    case IDCType::IDC:
-    default:
-      return "#it{IDC}";
-      break;
-    case IDCType::IDCZero:
-      return "#it{IDC_{0}}";
-      break;
-    case IDCType::IDCDelta:
-      switch (compression) {
-        case IDCDeltaCompression::NO:
-        default:
-          return "#Delta#it{IDC}";
-          break;
-        case IDCDeltaCompression::MEDIUM:
-          return "#Delta#it{IDC}_{medium compressed}";
-          break;
-        case IDCDeltaCompression::HIGH:
-          return "#Delta#it{IDC}_{high compressed}";
-          break;
-      }
-    case IDCType::IDCOne:
-      return "#Delta#it{IDC}_{1}";
-      break;
-  }
-}
-
 void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side side, const unsigned int integrationInterval, const std::string filename, const IDCDeltaCompression compression) const
 {
   const auto coords = o2::tpc::painter::getPadCoordinatesSector();
@@ -152,12 +120,11 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
   can->SetTopMargin(0.04f);
   can->SetRightMargin(0.14f);
   can->SetLeftMargin(0.1f);
-
   poly->Draw("colz");
+
   unsigned int chunk = 0;
   unsigned int localintegrationInterval = 0;
   getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
-
   unsigned int sectorStart = (side == Side::A) ? 0 : o2::tpc::SECTORSPERSIDE;
   unsigned int sectorEnd = (side == Side::A) ? o2::tpc::SECTORSPERSIDE : Mapper::NSECTORS;
   for (unsigned int sector = sectorStart; sector < sectorEnd; ++sector) {
@@ -213,6 +180,35 @@ void o2::tpc::IDCFactorization::drawSide(const IDCType type, const o2::tpc::Side
   }
 }
 
+std::string o2::tpc::IDCFactorization::getZAxisTitle(const IDCType type, const IDCDeltaCompression compression) const
+{
+  switch (type) {
+    case IDCType::IDC:
+    default:
+      return "#it{IDC}";
+      break;
+    case IDCType::IDCZero:
+      return "#it{IDC_{0}}";
+      break;
+    case IDCType::IDCDelta:
+      switch (compression) {
+        case IDCDeltaCompression::NO:
+        default:
+          return "#Delta#it{IDC}";
+          break;
+        case IDCDeltaCompression::MEDIUM:
+          return "#Delta#it{IDC}_{medium compressed}";
+          break;
+        case IDCDeltaCompression::HIGH:
+          return "#Delta#it{IDC}_{high compressed}";
+          break;
+      }
+    case IDCType::IDCOne:
+      return "#Delta#it{IDC}_{1}";
+      break;
+  }
+}
+
 void o2::tpc::IDCFactorization::dumpToFile(const char* outFileName, const char* outName) const
 {
   TFile fOut(outFileName, "RECREATE");
@@ -233,7 +229,6 @@ void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals) const
   std::vector<float> idcOneA = mIDCOne.mIDCOne[0];
   std::vector<float> idcOneC = mIDCOne.mIDCOne[1];
   for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
-    LOGP(info, "Dumpin integrationInterval {}", integrationInterval);
     const unsigned int nIDCsSector = Mapper::getPadsInSector() * Mapper::NSECTORS;
     std::vector<int> vRow(nIDCsSector);
     std::vector<int> vPad(nIDCsSector);
@@ -251,7 +246,6 @@ void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals) const
     unsigned int chunk = 0;
     unsigned int localintegrationInterval = 0;
     getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
-
     const auto idcDeltaMedium = getIDCDeltaMediumCompressed(chunk);
     const auto idcDeltaHigh = getIDCDeltaHighCompressed(chunk);
 
@@ -275,8 +269,7 @@ void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals) const
             idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, chunk, localintegrationInterval);
             idcsDeltaMedium[index] = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
             idcsDeltaHigh[index] = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
-            sectorv[index] = sector;
-            ++index;
+            sectorv[index++] = sector;
           }
         }
       }

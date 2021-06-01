@@ -8,7 +8,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "TPCCalibration/ParameterIDC.h"
+#include "TPCCalibration/IDCGroupingParameter.h"
 
 using namespace o2::tpc;
 O2ParamImpl(o2::tpc::ParameterIDCGroup);

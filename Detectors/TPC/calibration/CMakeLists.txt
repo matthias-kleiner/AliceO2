@@ -24,7 +24,7 @@ o2_add_library(TPCCalibration
                        src/IDCAverageGroup.cxx
                        src/IDCGroup.cxx
                        src/IDCGroupHelperRegion.cxx
-                       src/ParameterIDC.cxx
+                       src/IDCGroupingParameter.cxx
                        src/IDCFactorization.cxx
                        src/IDCFourierTransform.cxx
                        src/RobustAverage.cxx
@@ -49,7 +49,7 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/IDCGroupHelperRegion.h
                                   include/TPCCalibration/IDCGroupHelperSector.h
                                   include/TPCCalibration/IDCFactorization.h
-                                  include/TPCCalibration/ParameterIDC.h
+                                  include/TPCCalibration/IDCGroupingParameter.h
                                   include/TPCCalibration/IDCFactorizationContainer.h
                                   include/TPCCalibration/RobustAverage.h
                                   include/TPCCalibration/IDCFourierTransform.h

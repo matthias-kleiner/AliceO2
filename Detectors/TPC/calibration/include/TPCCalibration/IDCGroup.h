@@ -18,7 +18,6 @@
 #include <vector>
 #include "Rtypes.h"
 #include "TPCCalibration/IDCGroupHelperRegion.h"
-#include "TPCBase/Mapper.h"
 
 namespace o2::tpc
 {
@@ -37,44 +36,43 @@ class IDCGroup : public IDCGroupHelperRegion
   IDCGroup(const unsigned char groupPads = 4, const unsigned char groupRows = 4, const unsigned char groupLastRowsThreshold = 2, const unsigned char groupLastPadsThreshold = 2, const unsigned int region = 0)
     : IDCGroupHelperRegion{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, region}, mIDCsGrouped(getNIDCsPerIntegrationInterval()){};
 
-  /// extend the size of the grouped and averaged IDC values corresponding to the number of integration intervals.
+  /// extend the size of the grouped and averaged IDC values corresponding to the number of integration intervals. This has to be called befor filling values!
   /// without using this function the object can hold only one integration interval
   /// \param nIntegrationIntervals number of ontegration intervals for which teh IDCs are stored
   void resize(const unsigned int nIntegrationIntervals) { mIDCsGrouped.resize(getNIDCsPerIntegrationInterval() * nIntegrationIntervals); }
 
   /// \return returns the stored value
-  /// \param row row of the grouped IDCs
+  /// \param glrow local row of the grouped IDCs
   /// \param pad pad number of the grouped IDCs
   /// \param integrationInterval integration interval
-  float operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
+  float operator()(unsigned int glrow, unsigned int pad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndex(glrow, pad, integrationInterval)]; }
 
   /// \return returns the stored value
-  /// \param row row of the grouped IDCs
+  /// \param glrow local row of the grouped IDCs
   /// \param pad pad number of the grouped IDCs
   /// \param integrationInterval integration interval
-  float& operator()(unsigned int row, unsigned int pad, unsigned int integrationInterval) { return mIDCsGrouped[getIndex(row, pad, integrationInterval)]; }
+  float& operator()(unsigned int glrow, unsigned int pad, unsigned int integrationInterval) { return mIDCsGrouped[getIndex(glrow, pad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
-  /// \param urow local row in region of the ungrouped IDCs
+  /// \param ulrow local row in region of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float& setValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
+  float& setValUngrouped(unsigned int ulrow, unsigned int upad, unsigned int integrationInterval) { return mIDCsGrouped[getIndexUngrouped(ulrow, upad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
-  /// \param urow local row in region of the ungrouped IDCs
+  /// \param ulrow local row in region of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float getValUngrouped(unsigned int urow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(urow, upad, integrationInterval)]; }
+  float getValUngrouped(unsigned int ulrow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(ulrow, upad, integrationInterval)]; }
 
   /// \return returns the stored value for local ungrouped pad row and ungrouped pad
-  /// \param grow global row of the ungrouped IDCs
+  /// \param ugrow global row of the ungrouped IDCs
   /// \param upad pad number of the ungrouped IDCs
   /// \param integrationInterval integration interval
-  float getValUngroupedGlobal(unsigned int grow, unsigned int upad, unsigned int integrationInterval) const { return mIDCsGrouped[getIndexUngrouped(Mapper::getLocalRowFromGlobalRow(grow), upad, integrationInterval)]; }
+  float getValUngroupedGlobal(unsigned int ugrow, unsigned int upad, unsigned int integrationInterval) const;
 
   /// \return returns grouped and averaged IDC values
   const auto& getData() const { return mIDCsGrouped; }
-  auto& getData() { return mIDCsGrouped; }
 
   /// \return returns number of stored integration intervals
   unsigned int getNIntegrationIntervals() const { return mIDCsGrouped.size() / getNIDCsPerIntegrationInterval(); }

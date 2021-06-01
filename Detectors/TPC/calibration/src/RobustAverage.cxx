@@ -20,6 +20,11 @@ float o2::tpc::RobustAverage::getFilteredAverage(const float sigma)
   const float mean = getMean();
   const float stdev = getStdDev(mean);
   filterOutliers(mean, stdev, sigma);
+
+  if (mValues.empty()) {
+    return 0;
+  }
+
   return getMean();
 }
 
@@ -27,7 +32,7 @@ float o2::tpc::RobustAverage::getStdDev(const float mean) const
 {
   std::vector<float> diff(mValues.size());
   std::transform(mValues.begin(), mValues.end(), diff.begin(), [mean](const float val) { return val - mean; });
-  const float sqsum = std::inner_product(diff.begin(), diff.end(), diff.begin(), decltype(mValues)::value_type(0));
+  const float sqsum = std::inner_product(diff.begin(), diff.end(), diff.begin(), decltype(diff)::value_type(0));
   const float stdev = std::sqrt(sqsum / diff.size());
   return stdev;
 }
@@ -39,8 +44,8 @@ void o2::tpc::RobustAverage::filterOutliers(const float mean, const float stdev,
   const float minVal = mean - sigmastddev;
   const float maxVal = mean + sigmastddev;
   const auto upper = std::upper_bound(mValues.begin(), mValues.end(), maxVal);
-  const auto lower = std::lower_bound(mValues.begin(), mValues.end(), minVal);
   mValues.erase(upper, mValues.end());
+  const auto lower = std::lower_bound(mValues.begin(), mValues.end(), minVal);
   mValues.erase(mValues.begin(), lower);
 }
 

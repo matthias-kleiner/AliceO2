@@ -11,6 +11,7 @@
 #include "TPCCalibration/IDCAverageGroup.h"
 #include "TPCCalibration/IDCGroup.h"
 #include "TPCCalibration/RobustAverage.h"
+#include "CommonUtils/TreeStreamRedirector.h"
 
 #include "TFile.h"
 #include "TPCBase/Painter.h"
@@ -101,12 +102,9 @@ void o2::tpc::IDCAverageGroup::drawUngroupedIDCs(const unsigned int integrationI
       const auto coordinate = coords[padNum];
       const float yPos = -0.5 * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
       const float xPos = 0.5 * (coordinate.xVals[0] + coordinate.xVals[2]);
-
       const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][irow] + ipad;
       const float idc = mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region];
-
       poly->Fill(xPos, yPos, idc);
-
       lat.SetTextAlign(12);
       lat.DrawLatex(xPos, yPos, Form("%i", ipad));
     }
@@ -133,8 +131,8 @@ void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameTree, c
 {
   o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
   pcstream.GetFile()->cd();
-
   TFile fInp(filename, "READ");
+
   for (TObject* keyAsObj : *fInp.GetListOfKeys()) {
     const auto key = dynamic_cast<TKey*>(keyAsObj);
     LOGP(info, "Key name: {} Type: {}", key->GetName(), key->GetClassName());
@@ -154,7 +152,6 @@ void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameTree, c
 void o2::tpc::IDCAverageGroup::createDebugTree(const IDCAverageGroup& idcavg, o2::utils::TreeStreamRedirector& pcstream)
 {
   const Mapper& mapper = Mapper::instance();
-
   unsigned int sector = idcavg.getSector();
   unsigned int cru = sector * Mapper::NREGIONS + idcavg.getRegion();
   const o2::tpc::CRU cruTmp(cru);
@@ -180,11 +177,9 @@ void o2::tpc::IDCAverageGroup::createDebugTree(const IDCAverageGroup& idcavg, o2
       vXPos[iPad] = mapper.getPadCentre(padPosLocal).X();
       vYPos[iPad] = mapper.getPadCentre(padPosLocal).Y();
       invPadArea[iPad] = Mapper::PADAREA[region];
-
       const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[iPad], vYPos[iPad]), cruTmp.sector());
       vGlobalXPos[iPad] = globalPos.X();
       vGlobalYPos[iPad] = globalPos.Y();
-
       idcsPerIntegrationInterval[iPad] = idcavg.getUngroupedIDCVal(iPad, integrationInterval);
       groupedidcsPerIntegrationInterval[iPad] = idcavg.getGroupedIDCValGlobal(vRow[iPad], vPad[iPad], integrationInterval);
     }
@@ -205,4 +200,16 @@ void o2::tpc::IDCAverageGroup::createDebugTree(const IDCAverageGroup& idcavg, o2
              << "gy.=" << vGlobalYPos
              << "\n";
   }
+}
+
+void o2::tpc::IDCAverageGroup::setIDCs(const std::vector<float>& idcs)
+{
+  mIDCsUngrouped = idcs;
+  mIDCsGrouped.resize(getNIntegrationIntervals());
+}
+
+void o2::tpc::IDCAverageGroup::setIDCs(std::vector<float>&& idcs)
+{
+  mIDCsUngrouped = std::move(idcs);
+  mIDCsGrouped.resize(getNIntegrationIntervals());
 }

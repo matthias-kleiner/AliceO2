@@ -11,7 +11,6 @@
 #include <fmt/format.h>
 #include <vector>
 #include <string>
-
 #include "Algorithm/RangeTokenizer.h"
 #include "Framework/WorkflowSpec.h"
 #include "Framework/Logger.h"
@@ -75,6 +74,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const std::string sgroupLastRowsThreshold = config.options().get<std::string>("groupLastRowsThreshold");
   const std::string sgroupLastPadsThreshold = config.options().get<std::string>("groupLastPadsThreshold");
 
+  // convert input string to std::vector<unsigned char>
   const boost::char_separator<char> sep(","); /// char separator for the tokenizer
   const boost::tokenizer<boost::char_separator<char>> tgroupPads(sgroupPads, sep);
   const boost::tokenizer<boost::char_separator<char>> tgroupRows(sgroupRows, sep);

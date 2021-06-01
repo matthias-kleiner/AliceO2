@@ -9,7 +9,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file IDCGroupHelperRegion.h
-/// \brief helper class for grouping of pads for one region
+/// \brief helper class for grouping of pads and rows for one region
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
 #ifndef ALICEO2_TPC_IDCGroupHelperRegion_H_
@@ -17,7 +17,6 @@
 
 #include <vector>
 #include "Rtypes.h"
-#include "TPCBase/Mapper.h"
 
 namespace o2::tpc
 {
@@ -43,8 +42,8 @@ class IDCGroupHelperRegion
   unsigned int getNRows() const { return mRows; }
 
   /// \return returns number of grouped pads
-  /// \param row grouped row
-  unsigned int getPadsPerRow(const unsigned int row) const { return mPadsPerRow[row]; }
+  /// \param row grouped local row
+  unsigned int getPadsPerRow(const unsigned int glrow) const { return mPadsPerRow[glrow]; }
 
   /// \return returns number of grouped pads for all rows
   const std::vector<unsigned int>& getPadsPerRow() const { return mPadsPerRow; }
@@ -71,53 +70,53 @@ class IDCGroupHelperRegion
   unsigned int getNIDCsPerIntegrationInterval() const { return mNIDCsPerCRU; }
 
   /// \return returns the row of the group from the local ungrouped row in a region
-  /// \param lrow local ungrouped row in a region
+  /// \param ulrow local ungrouped row in a region
   /// \param groupRows grouping parameter for number of pads in row direction which are grouped
   /// \param groupedrows number of grouped rows
-  static unsigned int getGroupedRow(const unsigned int lrow, const unsigned int groupRows, const unsigned int groupedrows);
+  static unsigned int getGroupedRow(const unsigned int ulrow, const unsigned int groupRows, const unsigned int groupedrows);
 
   /// \return returns the row of the group from the local ungrouped row in a region
-  /// \param lrow local ungrouped row in a region
-  unsigned int getGroupedRow(const unsigned int lrow) const { return getGroupedRow(lrow, mGroupRows, mRows); }
+  /// \param ulrow local ungrouped row in a region
+  unsigned int getGroupedRow(const unsigned int ulrow) const { return getGroupedRow(ulrow, mGroupRows, mRows); }
 
   /// \return returns the grouped pad index from ungrouped pad and row
-  /// \param pad ungrouped pad
-  /// \param lrow local ungrouped row in a region
+  /// \param upad ungrouped pad
+  /// \param ulrow local ungrouped row in a region
   /// \param region region
   /// \param groupPads grouping parameter for number of pads in pad direction which are grouped
   /// \param groupRows grouping parameter for number of pads in row direction which are grouped
   /// \param groupedrows number of grouped rows
   /// \param padsPerRow vector containing the number of pads per row
-  static unsigned int getGroupedPad(const unsigned int pad, const unsigned int lrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int groupedrows, const std::vector<unsigned int>& padsPerRow);
-
-  /// \return returns index to the data
-  /// \param row row of the grouped IDCs
-  /// \param pad pad of the grouped IDCs
-  /// \param integrationInterval integration interval
-  unsigned int getIndex(const unsigned int row, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerCRU * integrationInterval + mOffsRow[row] + pad; }
-
-  /// \return returns index to the data
-  /// \param urow ungrouped row
-  /// \param upad ungrouped pad
-  /// \param integrationInterval integration interval
-  unsigned int getIndexUngrouped(const unsigned int urow, const unsigned int upad, unsigned int integrationInterval) const { return getIndex(getGroupedRow(urow), getGroupedPad(upad, urow), integrationInterval); }
-
-  /// \return returns the global pad number for given local pad row and pad
-  /// \param lrow local ungrouped row in a region
-  /// \param pad ungrouped pad in row
-  unsigned int getGlobalPadNumber(const unsigned int lrow, const unsigned int pad) const { return Mapper::getGlobalPadNumber(lrow, pad, mRegion); }
+  static unsigned int getGroupedPad(const unsigned int upad, const unsigned int ulrow, const unsigned int region, const unsigned int groupPads, const unsigned int groupRows, const unsigned int groupedrows, const std::vector<unsigned int>& padsPerRow);
 
   /// \return returns the grouped pad index from ungrouped pad and row
   /// \param pad ungrouped pad
   /// \param lrow local ungrouped row in a region
-  unsigned int getGroupedPad(const unsigned int pad, const unsigned int lrow) const { return getGroupedPad(pad, lrow, mRegion, mGroupPads, mGroupRows, mRows, mPadsPerRow); };
+  unsigned int getGroupedPad(const unsigned int pad, const unsigned int ulrow) const { return getGroupedPad(pad, ulrow, mRegion, mGroupPads, mGroupRows, mRows, mPadsPerRow); };
+
+  /// \return returns index to the data
+  /// \param row local row of the grouped IDCs
+  /// \param pad pad of the grouped IDCs
+  /// \param integrationInterval integration interval
+  unsigned int getIndex(const unsigned int glrow, const unsigned int pad, unsigned int integrationInterval) const { return mNIDCsPerCRU * integrationInterval + mOffsRow[glrow] + pad; }
+
+  /// \return returns index to the data
+  /// \param urow local ungrouped row
+  /// \param upad ungrouped pad
+  /// \param integrationInterval integration interval
+  unsigned int getIndexUngrouped(const unsigned int ulrow, const unsigned int upad, unsigned int integrationInterval) const { return getIndex(getGroupedRow(ulrow), getGroupedPad(upad, ulrow), integrationInterval); }
+
+  /// \return returns the global pad number for given local pad row and pad
+  /// \param ulrow local ungrouped row in a region
+  /// \param pad ungrouped pad in row
+  unsigned int getGlobalPadNumber(const unsigned int ulrow, const unsigned int pad) const;
 
   /// \return returns last ungrouped row
   unsigned int getLastRow() const;
 
   /// \return returns last ungrouped pad for given global row
-  /// \param row ungrouped row
-  unsigned int getLastPad(const unsigned int row) const;
+  /// \param row local ungrouped row
+  unsigned int getLastPad(const unsigned int ulrow) const;
 
   /// dump object to disc
   /// \param outFileName name of the output file
@@ -125,15 +124,15 @@ class IDCGroupHelperRegion
   void dumpToFile(const char* outFileName = "IDCGroupHelperRegion.root", const char* outName = "IDCGroupHelperRegion") const;
 
  protected:
-  const unsigned char mGroupPads{4};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
-  const unsigned char mGroupRows{4};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
-  const unsigned char mGroupLastRowsThreshold{2}; ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
-  const unsigned char mGroupLastPadsThreshold{2}; ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
-  const unsigned int mRegion{};                   ///< region of input IDCs
-  unsigned int mNIDCsPerCRU{1};                   ///< total number of IDCs per CRU per integration interval
-  unsigned int mRows{};                           ///< number of grouped rows
-  std::vector<unsigned int> mPadsPerRow{};        ///< number of pads per row
-  std::vector<unsigned int> mOffsRow{};           ///< offset to calculate the index in the data from row and pad
+  const unsigned char mGroupPads{};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
+  const unsigned char mGroupRows{};              ///< grouping parameter in pad direction (how many pads in pad direction are grouped)
+  const unsigned char mGroupLastRowsThreshold{}; ///< if the last group (region edges) consists in row direction less then mGroupLastRowsThreshold pads then it will be grouped into the previous group
+  const unsigned char mGroupLastPadsThreshold{}; ///< if the last group (sector edges) consists in pad direction less then mGroupLastPadsThreshold pads then it will be grouped into the previous group
+  const unsigned int mRegion{};                  ///< region of input IDCs
+  unsigned int mNIDCsPerCRU{};                   ///< total number of IDCs per CRU per integration interval
+  unsigned int mRows{};                          ///< number of grouped rows
+  std::vector<unsigned int> mPadsPerRow{};       ///< number of grouped pads per grouped row
+  std::vector<unsigned int> mOffsRow{};          ///< offset to calculate the index in the data from grouped row and grouped pad
 
   /// set number of grouped rows
   void setRows(const unsigned int nRows);

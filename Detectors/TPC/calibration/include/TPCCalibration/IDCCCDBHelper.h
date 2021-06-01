@@ -40,9 +40,12 @@ class IDCCCDBHelper
  public:
   /// constructor
   /// \param uri path to CCDB
-  IDCCCDBHelper(const char* uri = "http://localhost:8080") { mCCDBManager.setURL(uri); }
+  IDCCCDBHelper(const char* uri = "http://ccdb-test.cern.ch:8080") { mCCDBManager.setURL(uri); }
 
-  /// load IDC-Delta, 0D-IDCs, grouping parameter
+  /// update timestamp (time frame)
+  void setTimeStamp(const long long timestamp) { mCCDBManager.setTimestamp(timestamp); }
+
+  /// load IDC-Delta, 0D-IDCs, grouping parameter needed for access
   void loadAll();
 
   /// load/update IDCDelta
@@ -52,14 +55,7 @@ class IDCCCDBHelper
   void loadIDCZero() { mIDCZero = mCCDBManager.get<o2::tpc::IDCZero>("TPC/Calib/IDC/IDC0"); }
 
   /// load/update grouping parameter
-  void loadGroupingParameter()
-  {
-    const auto groupingPar = mCCDBManager.get<o2::tpc::ParameterIDCGroupCCDB>("TPC/Calib/IDC/GROUPINGPAR");
-    mHelperSector = std::make_unique<IDCGroupHelperSector>(IDCGroupHelperSector{groupingPar->getGroupPads(), groupingPar->getGroupRows(), groupingPar->getGroupLastRowsThreshold(), groupingPar->getGroupLastPadsThreshold()});
-  }
-
-  /// update timestamp
-  void setTimeStamp(const long long timestamp) { mCCDBManager.setTimestamp(timestamp); }
+  void loadGroupingParameter() { mHelperSector = std::make_unique<IDCGroupHelperSector>(IDCGroupHelperSector{*mCCDBManager.get<o2::tpc::ParameterIDCGroupCCDB>("TPC/Calib/IDC/GROUPINGPAR")}); }
 
   /// \return returns the stored IDC0 value for local ungrouped pad row and ungrouped pad
   /// \param sector sector
@@ -102,7 +98,7 @@ class IDCCCDBHelper
  private:
   IDCZero* mIDCZero = nullptr;                                                      ///< 0D-IDCs: ///< I_0(r,\phi) = <I(r,\phi,t)>_t
   IDCDelta<DataT>* mIDCDelta = nullptr;                                             ///< compressed or uncompressed Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  std::unique_ptr<IDCGroupHelperSector> mHelperSector;                              ///< helper for accessing 0D and IDC-Delta
+  std::unique_ptr<IDCGroupHelperSector> mHelperSector{};                            ///< helper for accessing IDC0 and IDC-Delta
   o2::ccdb::BasicCCDBManager mCCDBManager = o2::ccdb::BasicCCDBManager::instance(); ///< CCDB manager for loading objects
 
   /// draw IDCs for one side for one integration interval

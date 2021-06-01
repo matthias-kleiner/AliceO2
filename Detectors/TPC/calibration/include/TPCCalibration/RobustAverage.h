@@ -40,9 +40,11 @@ namespace o2::tpc
 class RobustAverage
 {
  public:
+  /// constructor
   /// \param maxValues maximum number of values which will be averaged. Copy of values will be done.
   RobustAverage(const unsigned int maxValues) { mValues.reserve(maxValues); }
 
+  /// constructor
   /// \param values values which will be averaged and filtered. Move operator is used here!
   RobustAverage(std::vector<float>&& values) : mValues{std::move(values)} {};
 
@@ -72,7 +74,7 @@ class RobustAverage
   /// \param mean mean of the stored values
   /// \param stdev standard deviation of the values
   /// \param sigma maximum accepted standard deviation: sigma*stdev
-  void filterOutliers(const float mean, const float stdev, const float sigma = 3);
+  void filterOutliers(const float mean, const float stdev, const float sigma);
 };
 
 } // namespace o2::tpc

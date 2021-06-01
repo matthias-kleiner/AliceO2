@@ -9,12 +9,12 @@
 // or submit itself to any jurisdiction.
 
 /// \file IDCSim.h
-/// \brief Integration of IDCs
+/// \brief class for integration of IDCs
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Apr 16, 2021
 
-#ifndef ALICEO2_TPC_IDCSim_H_
-#define ALICEO2_TPC_IDCSim_H_
+#ifndef ALICEO2_TPC_IDCSIM_H_
+#define ALICEO2_TPC_IDCSIM_H_
 
 #include <vector>
 #include <array>
@@ -24,7 +24,11 @@
 #include "TPCBase/Mapper.h"
 #include <gsl/span>
 #include "Rtypes.h"
-#include "CommonUtils/TreeStreamRedirector.h" // for debugging
+
+namespace o2::utils
+{
+class TreeStreamRedirector;
+}
 
 namespace o2::tpc
 {
@@ -103,7 +107,7 @@ class IDCSim
   const unsigned int mSector{};                                                                                                               ///< sector for which the IDCs are integrated
   const unsigned int mNOrbits{12};                                                                                                            ///< integration intervals of IDCs in units of orbits
   const unsigned int mTimeStampsPerIntegrationInterval{(o2::constants::lhc::LHCMaxBunches * mNOrbits) / o2::tpc::constants::LHCBCPERTIMEBIN}; ///< number of time stamps for each integration interval (5346)
-  const bool mAddInterval{(mOrbitsPerTF % mNOrbits) > 0 ? true : false};                                                                      ///< if the division has a reminder 256/12=21.333 then add an additional integration interval
+  const bool mAddInterval{(mOrbitsPerTF % mNOrbits) > 0 ? true : false};                                                                      ///< if the division has a remainder 256/12=21.333 then add an additional integration interval
   const unsigned int mIntegrationIntervalsPerTF{mOrbitsPerTF / mNOrbits + mAddInterval};                                                      ///< number of integration intervals per TF. Add 1: 256/12=21.333
   const unsigned int mTimeStampsRemainder{mTimeStampsPerIntegrationInterval * (mOrbitsPerTF % mNOrbits) / mNOrbits};                          ///< number time stamps which remain in one TF and will be buffered to the next TF
   int mTimeBinsOff{};                                                                                                                         ///< offset from last time bin

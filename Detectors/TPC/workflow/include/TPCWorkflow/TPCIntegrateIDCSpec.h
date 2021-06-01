@@ -18,12 +18,11 @@
 
 #include <vector>
 #include <fmt/format.h>
-
 #include "Framework/Task.h"
 #include "Framework/ControlService.h"
 #include "Framework/Logger.h"
 #include "Framework/DataProcessorSpec.h"
-#include "CommonUtils/MemFileHelper.h"
+// #include "CommonUtils/MemFileHelper.h"
 #include "Headers/DataHeader.h"
 #include "TPCSimulation/IDCSim.h"
 #include "DataFormatsTPC/TPCSectorHeader.h"
@@ -34,9 +33,7 @@ using namespace o2::framework;
 using o2::header::gDataOriginTPC;
 using namespace o2::tpc;
 
-namespace o2
-{
-namespace tpc
+namespace o2::tpc
 {
 
 class TPCIntegrateIDCDevice : public o2::framework::Task
@@ -48,7 +45,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     Real = 1 // output format of real CRUs
   };
 
-  TPCIntegrateIDCDevice(const int lane, const std::vector<unsigned int>& sectors, const int nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mLane{lane}, mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
+  TPCIntegrateIDCDevice(const std::vector<unsigned int>& sectors, const int nOrbitsPerIDCIntervall, const IDCFormat outputFormat, const bool debug) : mSectors{sectors}, mIDCFormat{outputFormat}, mDebug{debug}
   {
     for (const auto& sector : mSectors) {
       mIDCs.emplace(sector, IDCSim(sector, nOrbitsPerIDCIntervall));
@@ -68,8 +65,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
 
       if (mDebug) {
         auto const* tpcHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
-        const auto tf = tpcHeader->tfCounter;
-        mIDCs[sector].dumpIDCs(fmt::format("idcs_obj_sec{:02}_tf{:02}.root", sector, tf).data(), fmt::format("IDCSim_sec{:02}", sector).data());
+        mIDCs[sector].dumpIDCs(fmt::format("idcs_obj_sec{:02}_tf{:02}.root", sector, tpcHeader->tfCounter).data(), fmt::format("IDCSim_sec{:02}", sector).data());
       }
 
       // send the output for one sector for one TF
@@ -90,7 +86,6 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 
  private:
-  const int mLane{};                                ///< lane number of processor
   const std::vector<unsigned int> mSectors{};       ///< sectors to process in this instance
   const IDCFormat mIDCFormat{IDCFormat::Sim};       ///< type of the output format. Sim=simulation, Real=realistic format
   const bool mDebug{false};                         ///< dump IDCs to tree for debugging
@@ -117,7 +112,7 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane = 0, const std::vector<unsigned int>& sectors = {}, const int nOrbits = 12, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
+DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane, const std::vector<unsigned int>& sectors, const int nOrbits = 12, const TPCIntegrateIDCDevice::IDCFormat outputFormat = TPCIntegrateIDCDevice::IDCFormat::Sim, const bool debug = false)
 {
   std::vector<InputSpec> inputSpecs;
   inputSpecs.reserve(sectors.size());
@@ -143,10 +138,9 @@ DataProcessorSpec getTPCIntegrateIDCSpec(const int ilane = 0, const std::vector<
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCIntegrateIDCDevice>(ilane, sectors, nOrbits, outputFormat, debug)}}; // end DataProcessorSpec
+    AlgorithmSpec{adaptFromTask<TPCIntegrateIDCDevice>(sectors, nOrbits, outputFormat, debug)}}; // end DataProcessorSpec
 }
 
-} // namespace tpc
-} // namespace o2
+} // namespace o2::tpc
 
 #endif

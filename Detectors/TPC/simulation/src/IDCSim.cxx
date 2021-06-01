@@ -9,6 +9,7 @@
 // or submit itself to any jurisdiction.
 
 #include "TPCSimulation/IDCSim.h"
+#include "CommonUtils/TreeStreamRedirector.h"
 #include "TFile.h"
 #include "TPCBase/Mapper.h"
 #include <fmt/format.h>

@@ -58,8 +58,8 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive(const o2::tpc::S
   for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
     const auto idcOneExpanded = getExpandedIDCOne(side);
     for (unsigned int coeff = 0; coeff < mFourierCoefficients.getNCoefficientsPerTF() / 2; ++coeff) {
-      const unsigned int indexDataReal = getIndex(interval, 2 * coeff); // index for storing real fourier coefficient
-      const unsigned int indexDataImag = indexDataReal + 1;             // index for storing complex fourier coefficient
+      const unsigned int indexDataReal = mFourierCoefficients.getIndex(interval, 2 * coeff); // index for storing real fourier coefficient
+      const unsigned int indexDataImag = indexDataReal + 1;                                  // index for storing complex fourier coefficient
       const float term0 = o2::constants::math::TwoPI * coeff / mRangeIDC;
       for (unsigned int index = 0; index < mRangeIDC; ++index) {
         const float term = term0 * index;
@@ -80,7 +80,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::S
   {
     fftwf_plan fftwPlan = nullptr;
     float* val1DIDCs = getExpandedIDCOneFFTW(side);
-    fftwf_complex* coefficients = fftwf_alloc_complex(mNFourierCoefficients);
+    fftwf_complex* coefficients = fftwf_alloc_complex(getNMaxCoefficients());
 
 #pragma omp critical(make_plan)
     fftwPlan = fftwf_plan_dft_r2c_1d(mRangeIDC, val1DIDCs, coefficients, FFTW_ESTIMATE);
@@ -88,7 +88,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::S
 #pragma omp for
     for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
       fftwf_execute_dft_r2c(fftwPlan, &(val1DIDCs[offsetIndex[interval]]), coefficients);
-      std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + getIndex(interval, 0))), coefficients, mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float));
+      std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + mFourierCoefficients.getIndex(interval, 0))), coefficients, mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float));
     }
     // free memory
     fftwf_free(coefficients);
@@ -98,7 +98,7 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::S
   normalizeCoefficients(side);
 }
 
-std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTransform(const o2::tpc::Side side) const
+std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTransformNaive(const o2::tpc::Side side) const
 {
   // vector containing for each intervall the inverse fourier IDCs
   std::vector<std::vector<float>> inverse(getNIntervals());
@@ -112,11 +112,11 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
       unsigned int coeffTmp = 0;
       int fac = 1; // if input data is real (and it is) the coefficients are mirrored https://dsp.stackexchange.com/questions/4825/why-is-the-fft-mirrored
       for (unsigned int coeff = 0; coeff < mRangeIDC; ++coeff) {
-        const unsigned int indexDataReal = getIndex(interval, 2 * coeffTmp); // index for storing real fourier coefficient
-        const unsigned int indexDataImag = indexDataReal + 1;                // index for storing complex fourier coefficient
+        const unsigned int indexDataReal = mFourierCoefficients.getIndex(interval, 2 * coeffTmp); // index for storing real fourier coefficient
+        const unsigned int indexDataImag = indexDataReal + 1;                                     // index for storing complex fourier coefficient
         const float term = term0 * coeff;
         inverse[interval][index] += mFourierCoefficients(side, indexDataReal) * std::cos(term) - fac * mFourierCoefficients(side, indexDataImag) * std::sin(term);
-        if (coeff < mNFourierCoefficients - 1) {
+        if (coeff < getNMaxCoefficients() - 1) {
           ++coeffTmp;
         } else {
           --coeffTmp;
@@ -139,9 +139,9 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
     inverse[interval].resize(mRangeIDC);
     std::vector<std::array<float, 2>> val1DIDCs;
     val1DIDCs.reserve(mRangeIDC);
-    for (unsigned int index = 0; index < getNCoefficients(); ++index) {
-      const unsigned int indexDataReal = getIndex(interval, 2 * index); // index for storing real fourier coefficient
-      const unsigned int indexDataImag = indexDataReal + 1;             // index for storing complex fourier coefficient
+    for (unsigned int index = 0; index < getNMaxCoefficients(); ++index) {
+      const unsigned int indexDataReal = mFourierCoefficients.getIndex(interval, 2 * index); // index for storing real fourier coefficient
+      const unsigned int indexDataImag = indexDataReal + 1;                                  // index for storing complex fourier coefficient
       val1DIDCs.emplace_back(std::array<float, 2>{mFourierCoefficients(side, indexDataReal), mFourierCoefficients(side, indexDataImag)});
     }
     const fftwf_plan fftwPlan = fftwf_plan_dft_c2r_1d(mRangeIDC, reinterpret_cast<fftwf_complex*>(val1DIDCs.data()), inverse[interval].data(), FFTW_ESTIMATE);
@@ -166,7 +166,7 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
   for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
     const o2::tpc::Side side = iSide == 0 ? Side::A : Side::C;
     const auto idcOneExpanded = getExpandedIDCOne(side);
-    const auto inverseFourier = inverseFourierTransform(side);
+    const auto inverseFourier = inverseFourierTransformNaive(side);
     const auto inverseFourierFFTW3 = inverseFourierTransformFFTW3(side);
 
     for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
@@ -181,7 +181,7 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
       }
 
       for (unsigned int coeff = 0; coeff < mFourierCoefficients.getNCoefficientsPerTF(); ++coeff) {
-        float coefficient = mFourierCoefficients(side, getIndex(interval, coeff));
+        float coefficient = mFourierCoefficients(side, mFourierCoefficients.getIndex(interval, coeff));
 
         pcstream << "tree"
                  << "side=" << iSide
@@ -211,17 +211,21 @@ std::vector<unsigned int> o2::tpc::IDCFourierTransform::getLastIntervals() const
 std::vector<float> o2::tpc::IDCFourierTransform::getExpandedIDCOne(const o2::tpc::Side side) const
 {
   std::vector<float> val1DIDCs = mIDCOne[!mBufferIndex].mIDCOne[side]; // just copy the elements
-  val1DIDCs.insert(val1DIDCs.begin(), mIDCOne[mBufferIndex].mIDCOne[side].end() - mRangeIDC + mIntegrationIntervalsPerTF[!mBufferIndex][0], mIDCOne[mBufferIndex].mIDCOne[side].end());
+  if (useLastBuffer()) {
+    val1DIDCs.insert(val1DIDCs.begin(), mIDCOne[mBufferIndex].mIDCOne[side].end() - mRangeIDC + mIntegrationIntervalsPerTF[!mBufferIndex][0], mIDCOne[mBufferIndex].mIDCOne[side].end());
+  }
   transformIDCs(val1DIDCs.data(), val1DIDCs.size());
   return val1DIDCs;
 }
 
 float* o2::tpc::IDCFourierTransform::getExpandedIDCOneFFTW(const o2::tpc::Side side) const
 {
-  const unsigned int nElementsLastBuffer = mRangeIDC - mIntegrationIntervalsPerTF[!mBufferIndex][0];
+  const unsigned int nElementsLastBuffer = useLastBuffer() ? mRangeIDC - mIntegrationIntervalsPerTF[!mBufferIndex][0] : 0;
   const unsigned int nElementsAll = mIDCOne[!mBufferIndex].getNIDCs(side) + nElementsLastBuffer;
   float* val1DIDCs = fftwf_alloc_real(nElementsAll);
-  std::memcpy(val1DIDCs, &(*(mIDCOne[mBufferIndex].mIDCOne[side].end() - nElementsLastBuffer)), nElementsLastBuffer * sizeof(float));               // copy IDCs from old buffer
+  if (useLastBuffer()) {
+    std::memcpy(val1DIDCs, &(*(mIDCOne[mBufferIndex].mIDCOne[side].end() - nElementsLastBuffer)), nElementsLastBuffer * sizeof(float)); // copy IDCs from old buffer
+  }
   std::memcpy(&val1DIDCs[nElementsLastBuffer], mIDCOne[!mBufferIndex].mIDCOne[side].data(), mIDCOne[!mBufferIndex].getNIDCs(side) * sizeof(float)); // copy all IDCs from current buffer
   transformIDCs(val1DIDCs, nElementsAll);
   return val1DIDCs;

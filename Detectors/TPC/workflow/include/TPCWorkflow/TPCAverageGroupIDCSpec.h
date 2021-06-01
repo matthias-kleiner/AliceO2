@@ -18,7 +18,6 @@
 
 #include <vector>
 #include <fmt/format.h>
-
 #include "Framework/Task.h"
 #include "Framework/ControlService.h"
 #include "Framework/Logger.h"
@@ -26,8 +25,7 @@
 #include "Headers/DataHeader.h"
 #include "TPCCalibration/IDCAverageGroup.h"
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
-#include "TPCBase/Mapper.h"
-#include "TPCCalibration/ParameterIDC.h"
+#include "TPCCalibration/IDCGroupingParameter.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -78,15 +76,14 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
 
   void endOfStream(o2::framework::EndOfStreamContext& ec) final
   {
-    LOGP(info, "endOfStream");
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
 
  private:
-  const int mLane{0};                                        ///< lane number of processor
+  const int mLane{};                                         ///< lane number of processor
   const std::vector<uint32_t> mCRUs{};                       ///< CRUs to process in this instance
   const bool mDebug{};                                       ///< dump IDCs to tree for debugging
-  std::unordered_map<unsigned int, IDCAverageGroup> mIDCs{}; ///< object for averaging and grouping the IDCs
+  std::unordered_map<unsigned int, IDCAverageGroup> mIDCs{}; ///< object for averaging and grouping of the IDCs
 
   void sendOutput(DataAllocator& output, const uint32_t cru)
   {

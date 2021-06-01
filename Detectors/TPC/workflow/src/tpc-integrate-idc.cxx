@@ -10,7 +10,6 @@
 
 #include <vector>
 #include <string>
-
 #include "Algorithm/RangeTokenizer.h"
 #include "Framework/WorkflowSpec.h"
 #include "Framework/ConfigParamSpec.h"
@@ -40,12 +39,12 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
 
   std::vector<ConfigParamSpec> options{
     {"nOrbits", VariantType::Int, 12, {"number of orbits for which the IDCs are integrated"}},
-    {"outputFormat", VariantType::String, "Sim", {"setting the output format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs"}},
+    {"outputFormat", VariantType::String, "Sim", {"setting the output format type: 'Sim'=IDC simulation format, 'Real'=real output format of CRUs (not implemented yet)"}},
     {"debug", VariantType::Bool, false, {"create debug tree"}},
     {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}},
     {"lanes", VariantType::Int, defaultlanes, {"Number of parallel processing lanes."}},
     {"sectors", VariantType::String, sectorDefault.c_str(), {"List of TPC sectors, comma separated ranges, e.g. 0-3,7,9-15"}},
-    {"hbfutils-config", VariantType::String, std::string(o2::base::NameConf::DIGITIZATIONCONFIGFILE), {"config file for HBFUtils (or none)"}}};
+    {"hbfutils-config", VariantType::String, std::string(o2::base::NameConf::DIGITIZATIONCONFIGFILE), {"config file for HBFUtils (or none) to get number of orbits per TF"}}};
 
   std::swap(workflowOptions, options);
 }
@@ -62,19 +61,15 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   if (!confDig.empty() && confDig != "none") {
     o2::conf::ConfigurableParam::updateFromFile(confDig, "HBFUtils");
   }
-
   o2::conf::ConfigurableParam::writeINI("o2tpcintegrateidc_configuration.ini");
 
   const auto& hbfu = o2::raw::HBFUtils::Instance();
-  const int orbitsperTF = hbfu.getNOrbitsPerTF();
-  hbfu.printKeyValues(); // TODO remove this
-  o2::tpc::IDCSim::setNOrbitsPerTF(orbitsperTF);
+  o2::tpc::IDCSim::setNOrbitsPerTF(hbfu.getNOrbitsPerTF());
 
   const auto nOrbits = config.options().get<int>("nOrbits");
   const auto outputFormatStr = config.options().get<std::string>("outputFormat");
   const TPCIntegrateIDCDevice::IDCFormat outputFormat = outputFormatStr.compare("Sim") ? TPCIntegrateIDCDevice::IDCFormat::Real : TPCIntegrateIDCDevice::IDCFormat::Sim;
   const auto debug = config.options().get<bool>("debug");
-
   const auto tpcsectors = o2::RangeTokenizer::tokenize<int>(config.options().get<std::string>("sectors"));
   const auto nSectors = tpcsectors.size();
   const auto nLanes = std::min(static_cast<unsigned long>(config.options().get<int>("lanes")), nSectors);
