@@ -91,8 +91,11 @@ class IDCGroup : public IDCGroupHelperRegion
   /// \param filename name of the output file. If empty the canvas is drawn.
   void draw(const unsigned int integrationInterval = 0, const std::string filename = "IDCsGrouped.pdf") const;
 
+  /// calculate and return 1D-IDCs for this CRU
+  std::vector<float> get1DIDCs() const;
+
  private:
-  std::vector<float> mIDCsGrouped{}; ///< grouped and averaged IDC values
+  std::vector<float> mIDCsGrouped{}; ///< grouped and averaged IDC values for n integration intervals for one CRU
 
   ClassDefNV(IDCGroup, 1)
 };

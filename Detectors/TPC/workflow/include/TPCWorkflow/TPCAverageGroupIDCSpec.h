@@ -79,6 +79,12 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
 
+  /// return datadescription for IDC Group
+  static constexpr header::DataDescription getDataDescriptionIDCGroup(){ return header::DataDescription{"IDCGROUP"}; }
+
+  /// return datadescription for 1D IDCs
+  static constexpr header::DataDescription getDataDescription1DIDC(){ return header::DataDescription{"1DIDC"}; }
+
  private:
   const int mLane{};                                         ///< lane number of processor
   const std::vector<uint32_t> mCRUs{};                       ///< CRUs to process in this instance
@@ -88,11 +94,15 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   void sendOutput(DataAllocator& output, const uint32_t cru)
   {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
-    output.snapshot(Output{gDataOriginTPC, "IDCGROUP", subSpec, Lifetime::Timeframe}, mIDCs[cru].getIDCGroup().getData());
+    output.snapshot(Output{gDataOriginTPC, getDataDescriptionIDCGroup(), subSpec, Lifetime::Timeframe}, mIDCs[cru].getIDCGroup().getData());
+
+    // calculate 1D-IDCs = sum over 2D-IDCs as a function of the integration interval
+    const std::vector<float> vec1DIDCs = mIDCs[cru].getIDCGroup().get1DIDCs();
+    output.snapshot(Output{gDataOriginTPC, getDataDescription1DIDC(), subSpec, Lifetime::Timeframe}, vec1DIDCs);
   }
 };
 
-DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vector<uint32_t>& crus = {}, const bool debug = false)
+DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane, const std::vector<uint32_t>& crus, const bool debug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   std::vector<InputSpec> inputSpecs;
@@ -102,7 +112,8 @@ DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane = 0, const std::vect
   for (const auto& cru : crus) {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
     inputSpecs.emplace_back(InputSpec{"idcs", gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(TPCIntegrateIDCDevice::IDCFormat::Sim), subSpec, Lifetime::Timeframe});
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, "IDCGROUP", subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescriptionIDCGroup(), subSpec});
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescription1DIDC(), subSpec});
   }
 
   const auto id = fmt::format("tpc-averagegroup-idc-{:02}", ilane);

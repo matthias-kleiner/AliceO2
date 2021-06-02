@@ -29,6 +29,8 @@
 #include "Framework/ConfigParamRegistry.h"
 #include "TPCCalibration/IDCGroupingParameter.h"
 #include "TPCCalibration/IDCFourierTransform.h"
+#include "TPCWorkflow/TPCAverageGroupIDCSpec.h"
+#include "TPCBase/CRU.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -43,7 +45,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   TPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int nFourierCoefficientsStore, const unsigned int timeframesDeltaIDC, std::array<unsigned char, Mapper::NREGIONS> groupPads,
                              std::array<unsigned char, Mapper::NREGIONS> groupRows, std::array<unsigned char, Mapper::NREGIONS> groupLastRowsThreshold,
                              std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int rangeIDC, const IDCDeltaCompression compression, const bool debug = false)
-    : mCRUs{crus}, mIDCFactorization{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mIDCFourierTransform{rangeIDC, timeframes, nFourierCoefficientsStore}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
+    : mCRUs{crus}, mIDCFactorization{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, timeframes, timeframesDeltaIDC}, mIDCFourierTransform{rangeIDC, timeframes, nFourierCoefficientsStore}, mOneDIDCAggregator{timeframes}, mCompressionDeltaIDC{compression}, mDebug{debug} {};
 
   void init(o2::framework::InitContext& ic) final
   {
@@ -66,11 +68,21 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mUpdateGroupingPar = false; // write grouping parameters only once
     }
 
-    for (int i = 0; i < mCRUs.size(); ++i) {
+    for (int i = 0; i < 2 * mCRUs.size(); ++i) {
       const DataRef ref = pc.inputs().getByPos(i);
       auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
       const int cru = tpcCRUHeader->subSpecification >> 7;
-      mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, mProcessedTFs); // aggregate IDCs
+      const auto descr = tpcCRUHeader->dataDescription;
+      if (TPCAverageGroupIDCDevice::getDataDescription1DIDC() == descr) {
+        const o2::tpc::CRU cruTmp(cru);
+        LOGP(info, "mProcessedTFs: {}",mProcessedTFs);
+        mOneDIDCAggregator.aggregate1DIDCs(cruTmp.side(), pc.inputs().get<std::vector<float>>(ref), mProcessedTFs);
+      } else if (TPCAverageGroupIDCDevice::getDataDescriptionIDCGroup() == descr) {
+        mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, mProcessedTFs); // aggregate IDCs
+      } else {
+        // wrong dedscr;
+        LOGP(info, "1DIDC. size: {}      descr: {}", pc.inputs().get<std::vector<float>>(ref).size(), descr.str);
+      }
     }
     ++mProcessedTFs;
 
@@ -85,8 +97,9 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
         mIDCFactorization.dumpToFile(fmt::format("IDCFactorized_{:02}.root", getCurrentTF(pc)).data());
       }
 
-      // perform fourier transform of 0D-IDCs
-      mIDCFourierTransform.setIDCs(std::move(mIDCFactorization).getIDCOne(), mIDCFactorization.getIntegrationIntervalsPerTF());
+      // perform fourier transform of 1D-IDCs
+      // mIDCFourierTransform.setIDCs(std::move(mIDCFactorization).getIDCOne(), mIDCFactorization.getIntegrationIntervalsPerTF());
+      mIDCFourierTransform.setIDCs(std::move(mOneDIDCAggregator).getAggregated1DIDCs(), mIDCFactorization.getIntegrationIntervalsPerTF());
       mIDCFourierTransform.calcFourierCoefficients();
 
       // storing to CCDB
@@ -109,6 +122,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
   int mProcessedTFs{0};                             ///< number of processed time frames to keep track of when the writing to CCDB will be done
   IDCFactorization mIDCFactorization{};             ///< object aggregating the IDCs and performing the factorization of the IDCs
   IDCFourierTransform mIDCFourierTransform{};       ///< object for performing the fourier transform of 1D-IDCs
+  OneDIDCAggregator mOneDIDCAggregator{};           ///< helper class for aggregation of 1D-IDCs
   const IDCDeltaCompression mCompressionDeltaIDC{}; ///< compression type for IDC Delta
   const bool mDebug{false};                         ///< dump IDCs to tree for debugging
   o2::ccdb::CcdbApi mDBapi;                         ///< API for storing the IDCs in the CCDB
@@ -138,7 +152,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       const long timeStampStart = getFirstTF();
       const long timeStampEnd = getLastTF();
       mDBapi.storeAsTFileAny<o2::tpc::IDCZero>(&mIDCFactorization.getIDCZero(), "TPC/Calib/IDC/IDC0", mMetadata, timeStampStart, timeStampEnd);
-      mDBapi.storeAsTFileAny<o2::tpc::IDCOne>(&mIDCFourierTransform.getIDCOne(), "TPC/Calib/IDC/IDC1", mMetadata, timeStampStart, timeStampEnd);
+      mDBapi.storeAsTFileAny<o2::tpc::IDCOne>(&mIDCFactorization.getIDCOne(), "TPC/Calib/IDC/IDC1", mMetadata, timeStampStart, timeStampEnd);
       mDBapi.storeAsTFileAny<o2::tpc::FourierCoeff>(&mIDCFourierTransform.getFourierCoefficients(), "TPC/Calib/IDC/FOURIER", mMetadata, timeStampStart, timeStampEnd);
 
       for (unsigned int iChunk = 0; iChunk < mIDCFactorization.getNChunks(); ++iChunk) {
@@ -172,7 +186,8 @@ DataProcessorSpec getTPCAggregateGroupedIDCSpec(const std::vector<uint32_t>& cru
   inputSpecs.reserve(crus.size());
   for (const auto& cru : crus) {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
-    inputSpecs.emplace_back(InputSpec{"idcsgroup", gDataOriginTPC, "IDCGROUP", subSpec, Lifetime::Timeframe});
+    inputSpecs.emplace_back(InputSpec{"idcsgroup", gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescriptionIDCGroup(), subSpec, Lifetime::Timeframe});
+    inputSpecs.emplace_back(InputSpec{"1didc", gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescription1DIDC(), subSpec, Lifetime::Timeframe});
   }
 
   const auto& paramIDCGroup = ParameterIDCGroup::Instance();

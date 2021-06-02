@@ -16,6 +16,7 @@
 #include "TFile.h"
 #include "TCanvas.h"
 #include "TLatex.h"
+#include <numeric>
 
 void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
 {
@@ -85,4 +86,18 @@ void o2::tpc::IDCGroup::dumpToFile(const char* outFileName, const char* outName)
 float o2::tpc::IDCGroup::getValUngroupedGlobal(unsigned int ugrow, unsigned int upad, unsigned int integrationInterval) const
 {
   return mIDCsGrouped[getIndexUngrouped(Mapper::getLocalRowFromGlobalRow(ugrow), upad, integrationInterval)];
+}
+
+std::vector<float> o2::tpc::IDCGroup::get1DIDCs() const
+{
+  // integrate IDCs for each interval
+  std::vector<float> idc;
+  const unsigned int nIntervals = getNIntegrationIntervals();
+  idc.reserve(nIntervals);
+  for (unsigned int i = 0; i < nIntervals; ++i) {
+    const auto start = mIDCsGrouped.begin() + i * getNIDCsPerIntegrationInterval();
+    const auto end = start + getNIDCsPerIntegrationInterval();
+    idc.emplace_back(std::accumulate(start, end, decltype(mIDCsGrouped)::value_type(0)));
+  }
+  return idc;
 }

@@ -20,16 +20,16 @@
 #include <omp.h>
 #endif
 
-void o2::tpc::IDCFourierTransform::setIDCs(IDCOne&& idcsOne, std::vector<unsigned int>&& integrationIntervalsPerTF)
+void o2::tpc::IDCFourierTransform::setIDCs(OneDIDC&& oneDIDCs, std::vector<unsigned int>&& integrationIntervalsPerTF)
 {
-  mIDCOne[mBufferIndex] = std::move(idcsOne);
+  mOneDIDC[mBufferIndex] = std::move(oneDIDCs);
   mIntegrationIntervalsPerTF[mBufferIndex] = std::move(integrationIntervalsPerTF);
   mBufferIndex = !mBufferIndex;
 }
 
-void o2::tpc::IDCFourierTransform::setIDCs(const IDCOne& idcsOne, const std::vector<unsigned int>& integrationIntervalsPerTF)
+void o2::tpc::IDCFourierTransform::setIDCs(const OneDIDC& oneDIDCs, const std::vector<unsigned int>& integrationIntervalsPerTF)
 {
-  mIDCOne[mBufferIndex] = idcsOne;
+  mOneDIDC[mBufferIndex] = oneDIDCs;
   mIntegrationIntervalsPerTF[mBufferIndex] = integrationIntervalsPerTF;
   mBufferIndex = !mBufferIndex;
 }
@@ -210,23 +210,21 @@ std::vector<unsigned int> o2::tpc::IDCFourierTransform::getLastIntervals() const
 
 std::vector<float> o2::tpc::IDCFourierTransform::getExpandedIDCOne(const o2::tpc::Side side) const
 {
-  std::vector<float> val1DIDCs = mIDCOne[!mBufferIndex].mIDCOne[side]; // just copy the elements
+  std::vector<float> val1DIDCs = mOneDIDC[!mBufferIndex].mOneDIDC[side]; // just copy the elements
   if (useLastBuffer()) {
-    val1DIDCs.insert(val1DIDCs.begin(), mIDCOne[mBufferIndex].mIDCOne[side].end() - mRangeIDC + mIntegrationIntervalsPerTF[!mBufferIndex][0], mIDCOne[mBufferIndex].mIDCOne[side].end());
+    val1DIDCs.insert(val1DIDCs.begin(), mOneDIDC[mBufferIndex].mOneDIDC[side].end() - mRangeIDC + mIntegrationIntervalsPerTF[!mBufferIndex][0], mOneDIDC[mBufferIndex].mOneDIDC[side].end());
   }
-  transformIDCs(val1DIDCs.data(), val1DIDCs.size());
   return val1DIDCs;
 }
 
 float* o2::tpc::IDCFourierTransform::getExpandedIDCOneFFTW(const o2::tpc::Side side) const
 {
   const unsigned int nElementsLastBuffer = useLastBuffer() ? mRangeIDC - mIntegrationIntervalsPerTF[!mBufferIndex][0] : 0;
-  const unsigned int nElementsAll = mIDCOne[!mBufferIndex].getNIDCs(side) + nElementsLastBuffer;
+  const unsigned int nElementsAll = mOneDIDC[!mBufferIndex].getNIDCs(side) + nElementsLastBuffer;
   float* val1DIDCs = fftwf_alloc_real(nElementsAll);
   if (useLastBuffer()) {
-    std::memcpy(val1DIDCs, &(*(mIDCOne[mBufferIndex].mIDCOne[side].end() - nElementsLastBuffer)), nElementsLastBuffer * sizeof(float)); // copy IDCs from old buffer
+    std::memcpy(val1DIDCs, &(*(mOneDIDC[mBufferIndex].mOneDIDC[side].end() - nElementsLastBuffer)), nElementsLastBuffer * sizeof(float)); // copy IDCs from old buffer
   }
-  std::memcpy(&val1DIDCs[nElementsLastBuffer], mIDCOne[!mBufferIndex].mIDCOne[side].data(), mIDCOne[!mBufferIndex].getNIDCs(side) * sizeof(float)); // copy all IDCs from current buffer
-  transformIDCs(val1DIDCs, nElementsAll);
+  std::memcpy(&val1DIDCs[nElementsLastBuffer], mOneDIDC[!mBufferIndex].mOneDIDC[side].data(), mOneDIDC[!mBufferIndex].getNIDCs(side) * sizeof(float)); // copy all IDCs from current buffer
   return val1DIDCs;
 }

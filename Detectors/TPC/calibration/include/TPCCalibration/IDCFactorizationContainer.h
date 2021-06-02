@@ -24,6 +24,7 @@
 #include <complex>
 #include "DataFormatsTPC/Defs.h"
 #include "TPCCalibration/IDCGroupingParameter.h"
+#include "Framework/Logger.h"
 
 namespace o2
 {
@@ -128,6 +129,7 @@ struct IDCDelta<float> {
 };
 
 /// helper class to compress Delta IDC values
+/// \tparam template parameter specifying the output format of the compressed IDCDelta
 template <typename DataT>
 class IDCDeltaCompressionHelper
 {
@@ -197,15 +199,6 @@ struct IDCZero {
 
 ///<struct containing the IDC0
 struct IDCOne {
-
-  /// default constructor
-  IDCOne() = default;
-
-  /// constructor for initializing member with default value (this is used in the IDCFourierTransform class to perform calculation of the fourier coefficients for the first aggregation interval)
-  /// \param nIDC number of IDCs which will be initialized
-  /// \param val initialization value
-  IDCOne(const unsigned int nIDC, const float val) : mIDCOne{std::vector<float>(nIDC, val), std::vector<float>(nIDC, val)} {};
-
   /// set IDC one for given index
   /// \param idcOne Delta IDC value which will be set
   /// \param side side of the TPC
@@ -217,15 +210,64 @@ struct IDCOne {
   /// \param index index in the storage
   float getValueIDCOne(const o2::tpc::Side side, const unsigned int index) const { return mIDCOne[side][index]; }
 
+  std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{}; ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+};
+
+/// struct containing 1D-IDCs
+struct OneDIDC {
+
+  /// default constructor
+  OneDIDC() = default;
+
+  /// constructor for initializing member with default value (this is used in the IDCFourierTransform class to perform calculation of the fourier coefficients for the first aggregation interval)
+  /// \param nIDC number of IDCs which will be initialized
+  OneDIDC(const unsigned int nIDC) : mOneDIDC{std::vector<float>(nIDC), std::vector<float>(nIDC)} {};
+
   /// \return returns total number of 1D-IDCs for given side
   /// \param side side of the TPC
-  unsigned int getNIDCs(const o2::tpc::Side side) const { return mIDCOne[side].size(); }
+  unsigned int getNIDCs(const o2::tpc::Side side) const { return mOneDIDC[side].size(); }
 
-  /// \return returns if the container is empty
-  /// \param side side of the TPC
-  bool empty(const o2::tpc::Side side) const { return mIDCOne[side].empty(); }
+  std::array<std::vector<float>, o2::tpc::SIDES> mOneDIDC{}; ///< 1D-IDCs = <I(r,\phi,t)>_{r,\phi}
+};
 
-  std::array<std::vector<float>, o2::tpc::SIDES> mIDCOne{}; ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+/// Helper class for aggregation of OneDIDCs from different CRUs
+class OneDIDCAggregator
+{
+ public:
+  /// constructor
+  /// nTimeFrames number of time frames which will be aggregated
+  OneDIDCAggregator(const unsigned int nTimeFrames = 1) : mOneDIDCAgg(nTimeFrames){};
+
+  /// aggregate 1D-IDCs
+  /// \param side side of the tpcCRUHeader
+  /// \param idc vector containing the 1D-IDCs
+  /// \param timeframe of the input 1D-IDCs
+  void aggregate1DIDCs(const o2::tpc::Side side, const std::vector<float>& idc, const unsigned int timeframe)
+  {
+    if (mOneDIDCAgg[timeframe].mOneDIDC[side].empty()) {
+      mOneDIDCAgg[timeframe].mOneDIDC[side] = idc;
+    } else {
+      std::transform(mOneDIDCAgg[timeframe].mOneDIDC[side].begin(), mOneDIDCAgg[timeframe].mOneDIDC[side].end(), idc.begin(), mOneDIDCAgg[timeframe].mOneDIDC[side].begin(), std::plus<float>()); // reverse_interator!
+    }
+  }
+
+  /// \return returns struct containing aggregated 1D IDCs
+  OneDIDC getAggregated1DIDCs()
+  {
+    OneDIDC oneDIDCTmp;
+    for (unsigned int i = 0; i < mOneDIDCAgg.size(); ++i) {
+      oneDIDCTmp.mOneDIDC[o2::tpc::Side::A].insert(oneDIDCTmp.mOneDIDC[o2::tpc::Side::A].end(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::A].begin(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::A].end());
+      oneDIDCTmp.mOneDIDC[o2::tpc::Side::C].insert(oneDIDCTmp.mOneDIDC[o2::tpc::Side::C].end(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::C].begin(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::C].end());
+      mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::A].clear();
+      mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::C].clear();
+    }
+    return oneDIDCTmp;
+  }
+
+  auto get() { return mOneDIDCAgg; }
+
+ private:
+  std::vector<OneDIDC> mOneDIDCAgg{}; ///< 1D-IDCs = <I(r,\phi,t)>_{r,\phi}
 };
 
 /// struct containing the fourier coefficients calculated from IDC0 for n timeframes

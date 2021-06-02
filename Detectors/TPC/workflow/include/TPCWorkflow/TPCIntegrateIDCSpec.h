@@ -73,17 +73,11 @@ class TPCIntegrateIDCDevice : public o2::framework::Task
     }
   }
 
-  void endOfStream(o2::framework::EndOfStreamContext& ec) final
-  {
-    ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
-  }
+  void endOfStream(o2::framework::EndOfStreamContext& ec) final{ ec.services().get<ControlService>().readyToQuit(QuitRequest::Me); }
 
   /// return the kind of the output for given type.
   /// \param idcFormat type of the IDC format
-  static header::DataDescription getDataDescription(const IDCFormat idcFormat)
-  {
-    return (idcFormat == IDCFormat::Sim) ? header::DataDescription{"IDCVECTOR"} : header::DataDescription{"IDC"};
-  }
+  static constexpr header::DataDescription getDataDescription(const IDCFormat idcFormat){ return (idcFormat == IDCFormat::Sim) ? header::DataDescription{"IDCVECTOR"} : header::DataDescription{"IDC"}; }
 
  private:
   const std::vector<unsigned int> mSectors{};       ///< sectors to process in this instance
