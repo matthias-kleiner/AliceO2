@@ -100,5 +100,7 @@ std::vector<float> o2::tpc::IDCGroup::get1DIDCs() const
     const auto end = start + getNIDCsPerIntegrationInterval();
     idc.emplace_back(std::accumulate(start, end, decltype(mIDCsGrouped)::value_type(0)));
   }
+  // normalize 1D-IDCs to absolute space charge
+  std::transform(idc.begin(), idc.end(), idc.begin(), std::bind(std::multiplies<float>(), std::placeholders::_1, Mapper::REGIONAREA[mRegion] / getNIDCsPerIntegrationInterval()));
   return idc;
 }

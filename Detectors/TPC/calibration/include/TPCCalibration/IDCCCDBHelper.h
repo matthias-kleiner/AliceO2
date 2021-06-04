@@ -15,7 +15,7 @@
 #ifndef ALICEO2_TPC_IDCCCDBHELPER_H_
 #define ALICEO2_TPC_IDCCCDBHELPER_H_
 
-#include "TPCCalibration/IDCFactorizationContainer.h"
+#include "TPCCalibration/IDCContainer.h"
 #include "TPCCalibration/IDCGroupHelperSector.h"
 #include "CCDB/BasicCCDBManager.h"
 #include "Rtypes.h"

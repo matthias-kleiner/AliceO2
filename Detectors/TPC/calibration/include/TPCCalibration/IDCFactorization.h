@@ -20,7 +20,7 @@
 #include <vector>
 #include "Rtypes.h"
 #include "TPCBase/Mapper.h"
-#include "TPCCalibration/IDCFactorizationContainer.h"
+#include "TPCCalibration/IDCContainer.h"
 #include "TPCCalibration/IDCGroupHelperSector.h"
 #include "DataFormatsTPC/Defs.h"
 

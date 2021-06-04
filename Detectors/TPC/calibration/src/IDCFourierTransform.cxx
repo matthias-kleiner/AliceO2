@@ -174,14 +174,14 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
     const auto inverseFourierFFTW3 = inverseFourierTransformFFTW3(side);
 
     for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
-      std::vector<float> idcOneInverse = inverseFourier[interval];
-      std::vector<float> idcOneInverseFFTW3 = inverseFourierFFTW3[interval];
+      std::vector<float> oneDIDCInverse = inverseFourier[interval];
+      std::vector<float> oneDIDCInverseFFTW3 = inverseFourierFFTW3[interval];
 
       // get 1D-IDC values used for calculation of the fourier coefficients
-      std::vector<float> idcOne;
-      idcOne.reserve(mRangeIDC);
+      std::vector<float> oneDIDC;
+      oneDIDC.reserve(mRangeIDC);
       for (unsigned int index = 0; index < mRangeIDC; ++index) {
-        idcOne.emplace_back(idcOneExpanded[index + offsetIndex[interval]]);
+        oneDIDC.emplace_back(idcOneExpanded[index + offsetIndex[interval]]);
       }
 
       for (unsigned int coeff = 0; coeff < mFourierCoefficients.getNCoefficientsPerTF(); ++coeff) {
@@ -192,9 +192,9 @@ void o2::tpc::IDCFourierTransform::dumpToTree(const char* outFileName) const
                  << "interval=" << interval
                  << "icoefficient=" << coeff      // index of ith coefficient
                  << "coefficient=" << coefficient // value for ith coefficient
-                 << "IDCOne.=" << idcOne
-                 << "IDCOneiDFT.=" << idcOneInverse
-                 << "IDCOneiDFTFFTW3.=" << idcOneInverseFFTW3
+                 << "1DIDC.=" << oneDIDC
+                 << "1DIDCiDFT.=" << oneDIDCInverse
+                 << "1DIDiDFTFFTW3.=" << oneDIDCInverseFFTW3
                  << "\n";
       }
     }

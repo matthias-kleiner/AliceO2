@@ -12,8 +12,8 @@
 /// \brief helper class for grouping of pads and rows for one region
 /// \author Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 
-#ifndef ALICEO2_TPC_IDCGroupHelperRegion_H_
-#define ALICEO2_TPC_IDCGroupHelperRegion_H_
+#ifndef ALICEO2_TPC_IDCGROUPHELPERREGION_H_
+#define ALICEO2_TPC_IDCGROUPHELPERREGION_H_
 
 #include <vector>
 #include "Rtypes.h"

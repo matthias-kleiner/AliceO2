@@ -12,8 +12,8 @@
 /// \brief Definition of the parameter for the grouping of the IDCs
 /// \author Matthias Kleiner, mkleiner@ikf.uni-frankfurt.de
 
-#ifndef ALICEO2_TPC_PARAMETERIDCGROUP_H_
-#define ALICEO2_TPC_PARAMETERIDCGROUP_H_
+#ifndef ALICEO2_TPC_IDCGROUPINGPARAMETER_H_
+#define ALICEO2_TPC_IDCGROUPINGPARAMETER_H_
 
 #include <array>
 #include "CommonUtils/ConfigurableParamHelper.h"

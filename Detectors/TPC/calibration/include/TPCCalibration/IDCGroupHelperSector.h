@@ -36,18 +36,11 @@ class IDCGroupHelperSector
   /// \param groupLastRowsThreshold minimum number of pads in row direction for the last group in row direction
   /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction
   IDCGroupHelperSector(const std::array<unsigned char, Mapper::NREGIONS>& groupPads, const std::array<unsigned char, Mapper::NREGIONS>& groupRows, const std::array<unsigned char, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned char, Mapper::NREGIONS>& groupLastPadsThreshold)
-    : mGroupingPar{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold}
-  {
-    initIDCGroupHelperSector();
-  };
+    : mGroupingPar{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold} { initIDCGroupHelperSector(); };
 
   /// constructor
   /// \param groupingParameter struct holding the grouping parameter
-  IDCGroupHelperSector(const ParameterIDCGroupCCDB& groupingParameter)
-    : mGroupingPar{groupingParameter}
-  {
-    initIDCGroupHelperSector();
-  };
+  IDCGroupHelperSector(const ParameterIDCGroupCCDB& groupingParameter) : mGroupingPar{groupingParameter} { initIDCGroupHelperSector(); };
 
   /// default constructor for ROOT I/O
   IDCGroupHelperSector() = default;
@@ -78,6 +71,9 @@ class IDCGroupHelperSector
 
   /// \returns grouping parameter
   const auto& getGroupingParameter() const { return mGroupingPar; }
+
+  /// \return returns number if IDCs for given region
+  unsigned int getNIDCs(const unsigned int region){ return mNIDCsPerCRU[region]; }
 
  protected:
   ParameterIDCGroupCCDB mGroupingPar{};                                  ///< struct containg the grouping parameter

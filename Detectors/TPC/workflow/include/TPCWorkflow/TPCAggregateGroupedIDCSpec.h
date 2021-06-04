@@ -76,7 +76,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       if (TPCAverageGroupIDCDevice::getDataDescription1DIDC() == descr) {
         // 1D-IDCs as input which will be used for FT
         const o2::tpc::CRU cruTmp(cru);
-        mOneDIDCAggregator.aggregate1DIDCs(cruTmp.side(), pc.inputs().get<std::vector<float>>(ref), mProcessedTFs);
+        mOneDIDCAggregator.aggregate1DIDCs(cruTmp.side(), pc.inputs().get<std::vector<float>>(ref), mProcessedTFs, cruTmp.region());
       } else if (TPCAverageGroupIDCDevice::getDataDescriptionIDCGroup() == descr) {
         // 3D-IDCs as input which will be factorized
         mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, mProcessedTFs); // aggregate IDCs
@@ -95,14 +95,14 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mIDCFourierTransform.setIDCs(std::move(mOneDIDCAggregator).getAggregated1DIDCs(), mIDCFactorization.getIntegrationIntervalsPerTF());
       mIDCFourierTransform.calcFourierCoefficients();
 
-      // storing to CCDB
-      sendOutput(pc.outputs());
-
       if (mDebug) {
         LOGP(info, "dumping aggregated and factorized IDCs and FT to file");
         mIDCFactorization.dumpToFile(fmt::format("IDCFactorized_{:02}.root", getCurrentTF(pc)).data());
         mIDCFourierTransform.dumpToFile(fmt::format("Fourier_{:02}.root", getCurrentTF(pc)).data());
       }
+
+      // storing to CCDB
+      sendOutput(pc.outputs());
     }
   }
 

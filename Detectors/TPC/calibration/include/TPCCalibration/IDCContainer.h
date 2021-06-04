@@ -8,23 +8,21 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file IDCFactorizationContainer.h
+/// \file IDCContainer.h
 /// \brief This file provides the structs for storing the factorized IDC values and fourier coefficients to be stored in the CCDB
 ///
 /// \author  Matthias Kleiner <mkleiner@ikf.uni-frankfurt.de>
 /// \date Apr 30, 2021
 
-#ifndef ALICEO2_TPC_IDCFACTORIZATIONCONTAINER_H_
-#define ALICEO2_TPC_IDCFACTORIZATIONCONTAINER_H_
+#ifndef ALICEO2_TPC_IDCCONTAINER_H_
+#define ALICEO2_TPC_IDCCONTAINER_H_
 
 #include <array>
 #include <vector>
 #include <limits>
 #include <math.h>
-#include <complex>
 #include "DataFormatsTPC/Defs.h"
 #include "TPCCalibration/IDCGroupingParameter.h"
-#include "Framework/Logger.h"
 
 namespace o2
 {
@@ -236,30 +234,34 @@ class OneDIDCAggregator
  public:
   /// constructor
   /// nTimeFrames number of time frames which will be aggregated
-  OneDIDCAggregator(const unsigned int nTimeFrames = 1) : mOneDIDCAgg(nTimeFrames){};
+  OneDIDCAggregator(const unsigned int nTimeFrames = 1) : mOneDIDCAgg(nTimeFrames), mWeight(nTimeFrames){};
 
   /// aggregate 1D-IDCs
   /// \param side side of the tpcCRUHeader
   /// \param idc vector containing the 1D-IDCs
   /// \param timeframe of the input 1D-IDCs
-  void aggregate1DIDCs(const o2::tpc::Side side, const std::vector<float>& idc, const unsigned int timeframe)
+  void aggregate1DIDCs(const o2::tpc::Side side, std::vector<float> idc, const unsigned int timeframe, const unsigned int region)
   {
     if (mOneDIDCAgg[timeframe].mOneDIDC[side].empty()) {
       mOneDIDCAgg[timeframe].mOneDIDC[side] = idc;
+      mWeight[timeframe][side] = Mapper::REGIONAREA[region];
     } else {
       std::transform(mOneDIDCAgg[timeframe].mOneDIDC[side].begin(), mOneDIDCAgg[timeframe].mOneDIDC[side].end(), idc.begin(), mOneDIDCAgg[timeframe].mOneDIDC[side].begin(), std::plus<float>()); // reverse_interator!
+      mWeight[timeframe][side] += Mapper::REGIONAREA[region];
     }
   }
 
-  /// \return returns struct containing aggregated 1D IDCs
+  /// \return returns struct containing aggregated 1D IDCs normalized to number of channels weighted with the relative length of each region
   OneDIDC getAggregated1DIDCs()
   {
     OneDIDC oneDIDCTmp;
-    for (unsigned int i = 0; i < mOneDIDCAgg.size(); ++i) {
-      oneDIDCTmp.mOneDIDC[o2::tpc::Side::A].insert(oneDIDCTmp.mOneDIDC[o2::tpc::Side::A].end(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::A].begin(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::A].end());
-      oneDIDCTmp.mOneDIDC[o2::tpc::Side::C].insert(oneDIDCTmp.mOneDIDC[o2::tpc::Side::C].end(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::C].begin(), mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::C].end());
-      mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::A].clear();
-      mOneDIDCAgg[i].mOneDIDC[o2::tpc::Side::C].clear();
+    for (int iside = 0; iside < o2::tpc::SIDES; ++iside) {
+      const o2::tpc::Side side = iside == 0 ? o2::tpc::Side::A : o2::tpc::Side::C;
+      for (unsigned int i = 0; i < mOneDIDCAgg.size(); ++i) {
+        std::transform(mOneDIDCAgg[i].mOneDIDC[side].begin(), mOneDIDCAgg[i].mOneDIDC[side].end(), mOneDIDCAgg[i].mOneDIDC[side].begin(), std::bind(std::divides<float>(), std::placeholders::_1, mWeight[i][side]));
+        oneDIDCTmp.mOneDIDC[side].insert(oneDIDCTmp.mOneDIDC[side].end(), mOneDIDCAgg[i].mOneDIDC[side].begin(), mOneDIDCAgg[i].mOneDIDC[side].end());
+        mOneDIDCAgg[i].mOneDIDC[side].clear();
+      }
     }
     return oneDIDCTmp;
   }
@@ -267,7 +269,8 @@ class OneDIDCAggregator
   auto get() { return mOneDIDCAgg; }
 
  private:
-  std::vector<OneDIDC> mOneDIDCAgg{}; ///< 1D-IDCs = <I(r,\phi,t)>_{r,\phi}
+  std::vector<OneDIDC> mOneDIDCAgg{};                       ///< 1D-IDCs = <I(r,\phi,t)>_{r,\phi}
+  std::vector<std::array<float, o2::tpc::SIDES>> mWeight{}; ///< integrated pad area of received data used for normalization
 };
 
 /// struct containing the fourier coefficients calculated from IDC0 for n timeframes

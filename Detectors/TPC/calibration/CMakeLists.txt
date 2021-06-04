@@ -50,7 +50,7 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/IDCGroupHelperSector.h
                                   include/TPCCalibration/IDCFactorization.h
                                   include/TPCCalibration/IDCGroupingParameter.h
-                                  include/TPCCalibration/IDCFactorizationContainer.h
+                                  include/TPCCalibration/IDCContainer.h
                                   include/TPCCalibration/RobustAverage.h
                                   include/TPCCalibration/IDCFourierTransform.h
                                   include/TPCCalibration/IDCCCDBHelper.h)

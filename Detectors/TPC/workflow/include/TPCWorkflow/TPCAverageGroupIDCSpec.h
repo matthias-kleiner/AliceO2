@@ -79,11 +79,11 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
 
-  /// return datadescription for IDC Group
-  static constexpr header::DataDescription getDataDescriptionIDCGroup(){ return header::DataDescription{"IDCGROUP"}; }
+  /// return data description for IDC Group
+  static constexpr header::DataDescription getDataDescriptionIDCGroup() { return header::DataDescription{"IDCGROUP"}; }
 
-  /// return datadescription for 1D IDCs
-  static constexpr header::DataDescription getDataDescription1DIDC(){ return header::DataDescription{"1DIDC"}; }
+  /// return data description for 1D IDCs
+  static constexpr header::DataDescription getDataDescription1DIDC() { return header::DataDescription{"1DIDC"}; }
 
  private:
   const int mLane{};                                         ///< lane number of processor

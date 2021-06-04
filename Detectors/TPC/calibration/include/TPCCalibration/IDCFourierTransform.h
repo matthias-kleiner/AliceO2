@@ -19,7 +19,7 @@
 #include <vector>
 #include "Rtypes.h"
 #include "DataFormatsTPC/Defs.h"
-#include "TPCCalibration/IDCFactorizationContainer.h"
+#include "TPCCalibration/IDCContainer.h"
 
 namespace o2::tpc
 {
