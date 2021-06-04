@@ -403,7 +403,6 @@ float o2::tpc::IDCFactorization::getIDCValUngrouped(const unsigned int sector, c
   unsigned int timeFrame = 0;
   unsigned int interval = 0;
   getTF(region, integrationInterval, timeFrame, interval);
-  float val = mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
   return mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
 }
 

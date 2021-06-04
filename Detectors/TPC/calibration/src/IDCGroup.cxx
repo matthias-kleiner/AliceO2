@@ -95,6 +95,7 @@ std::vector<float> o2::tpc::IDCGroup::get1DIDCs() const
   const unsigned int nIntervals = getNIntegrationIntervals();
   idc.reserve(nIntervals);
   for (unsigned int i = 0; i < nIntervals; ++i) {
+    // set integration range for one integration interval
     const auto start = mIDCsGrouped.begin() + i * getNIDCsPerIntegrationInterval();
     const auto end = start + getNIDCsPerIntegrationInterval();
     idc.emplace_back(std::accumulate(start, end, decltype(mIDCsGrouped)::value_type(0)));

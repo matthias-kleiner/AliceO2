@@ -230,7 +230,7 @@ struct OneDIDC {
   std::array<std::vector<float>, o2::tpc::SIDES> mOneDIDC{}; ///< 1D-IDCs = <I(r,\phi,t)>_{r,\phi}
 };
 
-/// Helper class for aggregation of OneDIDCs from different CRUs
+/// Helper class for aggregation of 1D-IDCs from different CRUs
 class OneDIDCAggregator
 {
  public:

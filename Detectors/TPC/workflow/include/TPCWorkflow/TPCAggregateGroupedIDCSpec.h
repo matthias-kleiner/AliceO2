@@ -74,14 +74,14 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       const int cru = tpcCRUHeader->subSpecification >> 7;
       const auto descr = tpcCRUHeader->dataDescription;
       if (TPCAverageGroupIDCDevice::getDataDescription1DIDC() == descr) {
+        // 1D-IDCs as input which will be used for FT
         const o2::tpc::CRU cruTmp(cru);
-        LOGP(info, "mProcessedTFs: {}",mProcessedTFs);
         mOneDIDCAggregator.aggregate1DIDCs(cruTmp.side(), pc.inputs().get<std::vector<float>>(ref), mProcessedTFs);
       } else if (TPCAverageGroupIDCDevice::getDataDescriptionIDCGroup() == descr) {
+        // 3D-IDCs as input which will be factorized
         mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, mProcessedTFs); // aggregate IDCs
       } else {
-        // wrong dedscr;
-        LOGP(info, "1DIDC. size: {}      descr: {}", pc.inputs().get<std::vector<float>>(ref).size(), descr.str);
+        // wrong description;
       }
     }
     ++mProcessedTFs;
@@ -91,14 +91,7 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       mProcessedTFs = 0;                 // reset processed TFs for next aggregation interval
       mIDCFactorization.factorizeIDCs(); // calculate DeltaIDC, 0D-IDC, 1D-IDC
 
-      if (mDebug) {
-        // dump this first to also store 1D-IDCs! otherwise they will be moved out and are not available
-        LOGP(info, "dumping aggregated and factorized IDCS to file");
-        mIDCFactorization.dumpToFile(fmt::format("IDCFactorized_{:02}.root", getCurrentTF(pc)).data());
-      }
-
       // perform fourier transform of 1D-IDCs
-      // mIDCFourierTransform.setIDCs(std::move(mIDCFactorization).getIDCOne(), mIDCFactorization.getIntegrationIntervalsPerTF());
       mIDCFourierTransform.setIDCs(std::move(mOneDIDCAggregator).getAggregated1DIDCs(), mIDCFactorization.getIntegrationIntervalsPerTF());
       mIDCFourierTransform.calcFourierCoefficients();
 
@@ -106,7 +99,8 @@ class TPCAggregateGroupedIDCSpec : public o2::framework::Task
       sendOutput(pc.outputs());
 
       if (mDebug) {
-        LOGP(info, "dumping fourier transform to file");
+        LOGP(info, "dumping aggregated and factorized IDCs and FT to file");
+        mIDCFactorization.dumpToFile(fmt::format("IDCFactorized_{:02}.root", getCurrentTF(pc)).data());
         mIDCFourierTransform.dumpToFile(fmt::format("Fourier_{:02}.root", getCurrentTF(pc)).data());
       }
     }

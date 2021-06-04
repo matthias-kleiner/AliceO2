@@ -99,9 +99,3 @@ if (OpenMP_CXX_FOUND)
     target_compile_definitions(${targetName} PRIVATE WITH_OPENMP)
     target_link_libraries(${targetName} PRIVATE OpenMP::OpenMP_CXX)
 endif()
-
-# https://github.com/egpbos/findFFTW
-set(FFTW_DIR .)
-find_package(FFTW REQUIRED)
-target_link_libraries(${targetName} PRIVATE ${FFTW_FLOAT_LIB})
-message(STATUS "FFTW_LIBRARIES : ${FFTW_FLOAT_LIB}")

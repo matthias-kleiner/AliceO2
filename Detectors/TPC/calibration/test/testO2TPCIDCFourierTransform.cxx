@@ -34,7 +34,7 @@ o2::tpc::OneDIDC get1DIDCs(const std::vector<unsigned int>& integrationIntervals
   for (unsigned int iside = 0; iside < 2; ++iside) {
     std::vector<float> idcs(nIDCs);
     for (auto& val : idcs) {
-      val = gRandom->Gaus(1, 0.2);
+      val = gRandom->Gaus(0, 0.2);
     }
     idcsOut.mOneDIDC[iside] = std::move(idcs);
   }

@@ -14,7 +14,7 @@
 #include "Framework/Logger.h"
 #include "TFile.h"
 #include <cmath>
-#include <fftw3.h>
+// #include <fftw3.h>
 
 #if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
 #include <omp.h>
@@ -46,9 +46,11 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive()
 
 void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3()
 {
-  const std::vector<unsigned int> offsetIndex = getLastIntervals();
-  calcFourierCoefficientsFFTW3(o2::tpc::Side::A, offsetIndex);
-  calcFourierCoefficientsFFTW3(o2::tpc::Side::C, offsetIndex);
+  LOGP(warning, "FFTW3 method not available yet. Using naive approach...");
+  calcFourierCoefficientsNaive();
+  // const std::vector<unsigned int> offsetIndex = getLastIntervals();
+  // calcFourierCoefficientsFFTW3(o2::tpc::Side::A, offsetIndex);
+  // calcFourierCoefficientsFFTW3(o2::tpc::Side::C, offsetIndex);
 }
 
 void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive(const o2::tpc::Side side, const std::vector<unsigned int>& offsetIndex)
@@ -75,27 +77,27 @@ void o2::tpc::IDCFourierTransform::calcFourierCoefficientsNaive(const o2::tpc::S
 
 void o2::tpc::IDCFourierTransform::calcFourierCoefficientsFFTW3(const o2::tpc::Side side, const std::vector<unsigned int>& offsetIndex)
 {
-  // for FFTW and OMP see: https://stackoverflow.com/questions/15012054/fftw-plan-creation-using-openmp
-#pragma omp parallel num_threads(sNThreads)
-  {
-    fftwf_plan fftwPlan = nullptr;
-    float* val1DIDCs = getExpandedIDCOneFFTW(side);
-    fftwf_complex* coefficients = fftwf_alloc_complex(getNMaxCoefficients());
-
-#pragma omp critical(make_plan)
-    fftwPlan = fftwf_plan_dft_r2c_1d(mRangeIDC, val1DIDCs, coefficients, FFTW_ESTIMATE);
-
-#pragma omp for
-    for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
-      fftwf_execute_dft_r2c(fftwPlan, &(val1DIDCs[offsetIndex[interval]]), coefficients);
-      std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + mFourierCoefficients.getIndex(interval, 0))), coefficients, mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float));
-    }
-    // free memory
-    fftwf_free(coefficients);
-    fftwf_free(val1DIDCs);
-    fftwf_destroy_plan(fftwPlan);
-  }
-  normalizeCoefficients(side);
+  //   // for FFTW and OMP see: https://stackoverflow.com/questions/15012054/fftw-plan-creation-using-openmp
+  // #pragma omp parallel num_threads(sNThreads)
+  //   {
+  //     fftwf_plan fftwPlan = nullptr;
+  //     float* val1DIDCs = getExpandedIDCOneFFTW(side);
+  //     fftwf_complex* coefficients = fftwf_alloc_complex(getNMaxCoefficients());
+  //
+  // #pragma omp critical(make_plan)
+  //     fftwPlan = fftwf_plan_dft_r2c_1d(mRangeIDC, val1DIDCs, coefficients, FFTW_ESTIMATE);
+  //
+  // #pragma omp for
+  //     for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
+  //       fftwf_execute_dft_r2c(fftwPlan, &(val1DIDCs[offsetIndex[interval]]), coefficients);
+  //       std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + mFourierCoefficients.getIndex(interval, 0))), coefficients, mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float));
+  //     }
+  //     // free memory
+  //     fftwf_free(coefficients);
+  //     fftwf_free(val1DIDCs);
+  //     fftwf_destroy_plan(fftwPlan);
+  //   }
+  //   normalizeCoefficients(side);
 }
 
 std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTransformNaive(const o2::tpc::Side side) const
@@ -130,25 +132,27 @@ std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTran
 
 std::vector<std::vector<float>> o2::tpc::IDCFourierTransform::inverseFourierTransformFFTW3(const o2::tpc::Side side) const
 {
-  // vector containing for each intervall the inverse fourier IDCs
-  std::vector<std::vector<float>> inverse(getNIntervals());
-
-  // loop over all the intervals. For each interval the coefficients are calculated
-  // this loop and execution of FFTW is not optimized as it is used only for debugging
-  for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
-    inverse[interval].resize(mRangeIDC);
-    std::vector<std::array<float, 2>> val1DIDCs;
-    val1DIDCs.reserve(mRangeIDC);
-    for (unsigned int index = 0; index < getNMaxCoefficients(); ++index) {
-      const unsigned int indexDataReal = mFourierCoefficients.getIndex(interval, 2 * index); // index for storing real fourier coefficient
-      const unsigned int indexDataImag = indexDataReal + 1;                                  // index for storing complex fourier coefficient
-      val1DIDCs.emplace_back(std::array<float, 2>{mFourierCoefficients(side, indexDataReal), mFourierCoefficients(side, indexDataImag)});
-    }
-    const fftwf_plan fftwPlan = fftwf_plan_dft_c2r_1d(mRangeIDC, reinterpret_cast<fftwf_complex*>(val1DIDCs.data()), inverse[interval].data(), FFTW_ESTIMATE);
-    fftwf_execute(fftwPlan);
-    fftwf_destroy_plan(fftwPlan);
-  }
-  return inverse;
+  LOGP(warning, "FFTW3 method not available yet. Using naive approach...");
+  return inverseFourierTransformNaive(side);
+  // // vector containing for each intervall the inverse fourier IDCs
+  // std::vector<std::vector<float>> inverse(getNIntervals());
+  //
+  // // loop over all the intervals. For each interval the coefficients are calculated
+  // // this loop and execution of FFTW is not optimized as it is used only for debugging
+  // for (unsigned int interval = 0; interval < getNIntervals(); ++interval) {
+  //   inverse[interval].resize(mRangeIDC);
+  //   std::vector<std::array<float, 2>> val1DIDCs;
+  //   val1DIDCs.reserve(mRangeIDC);
+  //   for (unsigned int index = 0; index < getNMaxCoefficients(); ++index) {
+  //     const unsigned int indexDataReal = mFourierCoefficients.getIndex(interval, 2 * index); // index for storing real fourier coefficient
+  //     const unsigned int indexDataImag = indexDataReal + 1;                                  // index for storing complex fourier coefficient
+  //     val1DIDCs.emplace_back(std::array<float, 2>{mFourierCoefficients(side, indexDataReal), mFourierCoefficients(side, indexDataImag)});
+  //   }
+  //   const fftwf_plan fftwPlan = fftwf_plan_dft_c2r_1d(mRangeIDC, reinterpret_cast<fftwf_complex*>(val1DIDCs.data()), inverse[interval].data(), FFTW_ESTIMATE);
+  //   fftwf_execute(fftwPlan);
+  //   fftwf_destroy_plan(fftwPlan);
+  // }
+  // return inverse;
 }
 
 void o2::tpc::IDCFourierTransform::dumpToFile(const char* outFileName, const char* outName) const
@@ -217,14 +221,14 @@ std::vector<float> o2::tpc::IDCFourierTransform::getExpandedIDCOne(const o2::tpc
   return val1DIDCs;
 }
 
-float* o2::tpc::IDCFourierTransform::getExpandedIDCOneFFTW(const o2::tpc::Side side) const
-{
-  const unsigned int nElementsLastBuffer = useLastBuffer() ? mRangeIDC - mIntegrationIntervalsPerTF[!mBufferIndex][0] : 0;
-  const unsigned int nElementsAll = mOneDIDC[!mBufferIndex].getNIDCs(side) + nElementsLastBuffer;
-  float* val1DIDCs = fftwf_alloc_real(nElementsAll);
-  if (useLastBuffer()) {
-    std::memcpy(val1DIDCs, &(*(mOneDIDC[mBufferIndex].mOneDIDC[side].end() - nElementsLastBuffer)), nElementsLastBuffer * sizeof(float)); // copy IDCs from old buffer
-  }
-  std::memcpy(&val1DIDCs[nElementsLastBuffer], mOneDIDC[!mBufferIndex].mOneDIDC[side].data(), mOneDIDC[!mBufferIndex].getNIDCs(side) * sizeof(float)); // copy all IDCs from current buffer
-  return val1DIDCs;
-}
+// float* o2::tpc::IDCFourierTransform::getExpandedIDCOneFFTW(const o2::tpc::Side side) const
+// {
+// const unsigned int nElementsLastBuffer = useLastBuffer() ? mRangeIDC - mIntegrationIntervalsPerTF[!mBufferIndex][0] : 0;
+// const unsigned int nElementsAll = mOneDIDC[!mBufferIndex].getNIDCs(side) + nElementsLastBuffer;
+// float* val1DIDCs = fftwf_alloc_real(nElementsAll);
+// if (useLastBuffer()) {
+// std::memcpy(val1DIDCs, &(*(mOneDIDC[mBufferIndex].mOneDIDC[side].end() - nElementsLastBuffer)), nElementsLastBuffer * sizeof(float)); // copy IDCs from old buffer
+// }
+// std::memcpy(&val1DIDCs[nElementsLastBuffer], mOneDIDC[!mBufferIndex].mOneDIDC[side].data(), mOneDIDC[!mBufferIndex].getNIDCs(side) * sizeof(float)); // copy all IDCs from current buffer
+// return val1DIDCs;
+// }
