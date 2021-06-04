@@ -73,7 +73,7 @@ class IDCGroupHelperSector
   const auto& getGroupingParameter() const { return mGroupingPar; }
 
   /// \return returns number if IDCs for given region
-  unsigned int getNIDCs(const unsigned int region){ return mNIDCsPerCRU[region]; }
+  unsigned int getNIDCs(const unsigned int region) { return mNIDCsPerCRU[region]; }
 
  protected:
   ParameterIDCGroupCCDB mGroupingPar{};                                  ///< struct containg the grouping parameter
