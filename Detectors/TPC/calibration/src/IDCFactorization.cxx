@@ -217,10 +217,10 @@ void o2::tpc::IDCFactorization::dumpToFile(const char* outFileName, const char* 
   fOut.Close();
 }
 
-void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals) const
+void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals, const char* outFileName) const
 {
   const Mapper& mapper = Mapper::instance();
-  o2::utils::TreeStreamRedirector pcstream("IDCTree.root", "RECREATE");
+  o2::utils::TreeStreamRedirector pcstream(outFileName, "RECREATE");
   pcstream.GetFile()->cd();
 
   if (integrationIntervals <= 0) {
@@ -309,8 +309,10 @@ void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals) const
 void o2::tpc::IDCFactorization::calcIDCZero()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * o2::tpc::SECTORSPERSIDE;
-  mIDCZero.mIDCZero[Side::A].resize(nIDCsSide);
-  mIDCZero.mIDCZero[Side::C].resize(nIDCsSide);
+  mIDCZero.reset(Side::A);
+  mIDCZero.reset(Side::C);
+  mIDCZero.resize(Side::A, nIDCsSide);
+  mIDCZero.resize(Side::C, nIDCsSide);
 
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
@@ -331,9 +333,12 @@ void o2::tpc::IDCFactorization::calcIDCOne()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
   const unsigned int integrationIntervals = getNIntegrationIntervals();
-  mIDCOne.mIDCOne[Side::A].resize(integrationIntervals);
-  mIDCOne.mIDCOne[Side::C].resize(integrationIntervals);
+  mIDCOne.reset(Side::A);
+  mIDCOne.reset(Side::C);
+  mIDCOne.resize(Side::A, integrationIntervals);
+  mIDCOne.resize(Side::C, integrationIntervals);
   const unsigned int crusPerSide = Mapper::NREGIONS * SECTORSPERSIDE;
+
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
@@ -385,7 +390,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const auto idcOne = mIDCOne.mIDCOne[side][integrationIntervalGlobal];
         const auto mult = idcZero * idcOne;
         const auto val = (mult > 0) ? mIDCs[cru][timeframe][idcs] / mult : 0;
-        mIDCDelta[chunk].getIDCDelta(side)[indexGlobMod + integrationIntervalLocal * nIDCsSide] = val - 1;
+        mIDCDelta[chunk].setIDCDelta(side, indexGlobMod + integrationIntervalLocal * nIDCsSide, val - 1.f);
       }
 
       const unsigned int intervals = mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
@@ -479,9 +484,10 @@ unsigned int o2::tpc::IDCFactorization::getNTFsPerChunk(const unsigned int chunk
 
 std::vector<unsigned int> o2::tpc::IDCFactorization::getIntegrationIntervalsPerTF(const unsigned int region) const
 {
-  std::vector<unsigned int> integrationIntervalsPerTF(mTimeFrames);
+  std::vector<unsigned int> integrationIntervalsPerTF;
+  integrationIntervalsPerTF.reserve(mTimeFrames);
   for (unsigned int tf = 0; tf < mTimeFrames; ++tf) {
-    integrationIntervalsPerTF[tf] = mIDCs[region][tf].size() / mNIDCsPerCRU[region];
+    integrationIntervalsPerTF.emplace_back(mIDCs[region][tf].size() / mNIDCsPerCRU[region]);
   }
   return integrationIntervalsPerTF;
 }

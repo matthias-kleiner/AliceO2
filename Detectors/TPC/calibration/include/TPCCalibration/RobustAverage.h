@@ -17,7 +17,6 @@
 #define ALICEO2_ROBUSTAVERAGE_H_
 
 #include <vector>
-#include <numeric>
 
 namespace o2::tpc
 {
@@ -45,9 +44,16 @@ class RobustAverage
   /// \param maxValues maximum number of values which will be averaged. Copy of values will be done.
   RobustAverage(const unsigned int maxValues) { mValues.reserve(maxValues); }
 
+  /// default constructor
+  RobustAverage() = default;
+
   /// constructor
   /// \param values values which will be averaged and filtered. Move operator is used here!
   RobustAverage(std::vector<float>&& values) : mValues{std::move(values)} {};
+
+  /// reserve memory for member
+  /// \param maxValues maximum number of values which will be averaged. Copy of values will be done.
+  void reserve(const unsigned int maxValues) { mValues.reserve(maxValues); }
 
   /// clear the stored values
   void clear() { mValues.clear(); }
@@ -66,7 +72,7 @@ class RobustAverage
   std::vector<float> mValues{}; ///< values which will be averaged and filtered
 
   /// \return returns mean of stored values
-  float getMean() const { return std::accumulate(mValues.begin(), mValues.end(), decltype(mValues)::value_type(0)) / mValues.size(); }
+  float getMean() const;
 
   /// performing outlier filtering of the stored values
   float getStdDev(const float mean) const;
