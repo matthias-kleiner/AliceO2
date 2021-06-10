@@ -29,6 +29,7 @@ o2_add_library(TPCCalibration
                        src/IDCGroupHelperRegion.cxx
                        src/IDCGroupingParameter.cxx
                        src/IDCFactorization.cxx
+                       src/IDCFourierTransformBase.cxx
                        src/IDCFourierTransform.cxx
                        src/RobustAverage.cxx
                        src/IDCCCDBHelper.cxx
@@ -57,6 +58,7 @@ o2_target_root_dictionary(TPCCalibration
                                   include/TPCCalibration/IDCGroupingParameter.h
                                   include/TPCCalibration/IDCContainer.h
                                   include/TPCCalibration/RobustAverage.h
+                                  include/TPCCalibration/IDCFourierTransformBase.h
                                   include/TPCCalibration/IDCFourierTransform.h
                                   include/TPCCalibration/IDCCCDBHelper.h)
 
@@ -104,3 +106,5 @@ if (OpenMP_CXX_FOUND)
     target_compile_definitions(${targetName} PRIVATE WITH_OPENMP)
     target_link_libraries(${targetName} PRIVATE OpenMP::OpenMP_CXX)
 endif()
+
+target_link_libraries(${targetName} PRIVATE FFTW3::fftw3f)

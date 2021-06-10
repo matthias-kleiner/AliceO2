@@ -11,6 +11,7 @@
 
 #include "TPCCalibration/RobustAverage.h"
 #include "Framework/Logger.h"
+#include <numeric>
 
 float o2::tpc::RobustAverage::getFilteredAverage(const float sigma)
 {
@@ -56,4 +57,8 @@ void o2::tpc::RobustAverage::print() const
   for (auto val : mValues) {
     LOGP(info, "{}", val);
   }
+}
+
+float o2::tpc::RobustAverage::getMean() const {
+  return std::accumulate(mValues.begin(), mValues.end(), decltype(mValues)::value_type(0)) / mValues.size();
 }
