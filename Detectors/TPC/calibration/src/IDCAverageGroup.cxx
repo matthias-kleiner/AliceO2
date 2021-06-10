@@ -13,6 +13,7 @@
 #include "TPCCalibration/IDCGroup.h"
 #include "TPCCalibration/RobustAverage.h"
 #include "CommonUtils/TreeStreamRedirector.h"
+#include "TPCBase/Mapper.h"
 
 #include "TFile.h"
 #include "TKey.h"
@@ -29,43 +30,50 @@
 
 void o2::tpc::IDCAverageGroup::processIDCs()
 {
-#pragma omp parallel for num_threads(sNThreads)
-  for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
-    const unsigned int lastRow = mIDCsGrouped.getLastRow();
-    unsigned int rowGrouped = 0;
-    for (unsigned int iRow = 0; iRow <= lastRow; iRow += mIDCsGrouped.getGroupRows()) {
-      // the sectors is divide in to two parts around ylocal=0 to get the same simmetric grouping around ylocal=0
-      for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
-        const unsigned int region = mIDCsGrouped.getRegion();
-        const unsigned int nPads = Mapper::PADSPERROW[region][iRow] / 2;
-        const unsigned int endPads = mIDCsGrouped.getLastPad(iRow) + nPads;
+// #pragma omp parallel for num_threads(sNThreads)
+#pragma omp parallel num_threads(sNThreads)
+  {
+    // TODO make as member thread local?
+    std::array<RobustAverage, Mapper::NREGIONS> robustAverage;
+    for (unsigned int i = 0; i < Mapper::NREGIONS; ++i) {
+      const unsigned int maxGroup = (mIDCsGrouped.getGroupRows() + mIDCsGrouped.getGroupLastRowsThreshold()) * (mIDCsGrouped.getGroupPads() + mIDCsGrouped.getGroupLastPadsThreshold() + Mapper::ADDITIONALPADSPERROW[i].back());
+      robustAverage[i].reserve(maxGroup);
+    }
 
-        const unsigned int halfPadsInRow = mIDCsGrouped.getPadsPerRow(rowGrouped) / 2;
-        unsigned int padGrouped = iYLocalSide ? halfPadsInRow : halfPadsInRow - 1;
-        for (unsigned int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
-          const unsigned int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
+#pragma omp for
+    for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
+      const unsigned int lastRow = mIDCsGrouped.getLastRow();
+      unsigned int rowGrouped = 0;
+      for (unsigned int iRow = 0; iRow <= lastRow; iRow += mIDCsGrouped.getGroupRows()) {
+        // the sectors is divide in to two parts around ylocal=0 to get the same simmetric grouping around ylocal=0
+        for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
+          const unsigned int region = mIDCsGrouped.getRegion();
+          const unsigned int nPads = Mapper::PADSPERROW[region][iRow] / 2;
+          const unsigned int endPads = mIDCsGrouped.getLastPad(iRow) + nPads;
 
-          // TODO Mapper::ADDITIONALPADSPERROW[region].back() factor is to large, but doesnt really matter
-          const unsigned int maxGoup = (mIDCsGrouped.getGroupRows() + mIDCsGrouped.getGroupLastRowsThreshold()) * (mIDCsGrouped.getGroupPads() + mIDCsGrouped.getGroupLastPadsThreshold() + Mapper::ADDITIONALPADSPERROW[region].back());
-          RobustAverage robustAverage(maxGoup);
-
-          for (unsigned int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
-            const unsigned int iRowTmp = iRow + iRowMerge;
-            const auto offs = Mapper::ADDITIONALPADSPERROW[region][iRowTmp] - Mapper::ADDITIONALPADSPERROW[region][iRow];
-            const auto padStart = (ipad == 0) ? 0 : offs;
-            const unsigned int endPadsTmp = (ipad == endPads) ? (Mapper::PADSPERROW[region][iRowTmp] - ipad) : mIDCsGrouped.getGroupPads() + offs;
-            for (unsigned int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
-              const unsigned int iPadTmp = ipad + ipadMerge;
-              const unsigned int iPadSide = iYLocalSide ? iPadTmp : Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1;
-              const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
-              robustAverage.addValue(mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region]);
+          const unsigned int halfPadsInRow = mIDCsGrouped.getPadsPerRow(rowGrouped) / 2;
+          unsigned int padGrouped = iYLocalSide ? halfPadsInRow : halfPadsInRow - 1;
+          for (unsigned int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
+            const unsigned int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
+            robustAverage[region].clear();
+            for (unsigned int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
+              const unsigned int iRowTmp = iRow + iRowMerge;
+              const auto offs = Mapper::ADDITIONALPADSPERROW[region][iRowTmp] - Mapper::ADDITIONALPADSPERROW[region][iRow];
+              const auto padStart = (ipad == 0) ? 0 : offs;
+              const unsigned int endPadsTmp = (ipad == endPads) ? (Mapper::PADSPERROW[region][iRowTmp] - ipad) : mIDCsGrouped.getGroupPads() + offs;
+              for (unsigned int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
+                const unsigned int iPadTmp = ipad + ipadMerge;
+                const unsigned int iPadSide = iYLocalSide ? iPadTmp : Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1;
+                const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
+                robustAverage[region].addValue(mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region]);
+              }
             }
+            mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = robustAverage[region].getFilteredAverage(mSigma);
+            iYLocalSide ? ++padGrouped : --padGrouped;
           }
-          mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = robustAverage.getFilteredAverage();
-          iYLocalSide ? ++padGrouped : --padGrouped;
         }
+        ++rowGrouped;
       }
-      ++rowGrouped;
     }
   }
 }
@@ -121,18 +129,18 @@ void o2::tpc::IDCAverageGroup::drawUngroupedIDCs(const unsigned int integrationI
 }
 
 /// for debugging: creating debug tree for integrated IDCs
-/// \param nameTree name of the output file
-void o2::tpc::IDCAverageGroup::createDebugTree(const char* nameTree) const
+/// \param nameFile name of the output file
+void o2::tpc::IDCAverageGroup::createDebugTree(const char* nameFile) const
 {
-  o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
+  o2::utils::TreeStreamRedirector pcstream(nameFile, "RECREATE");
   pcstream.GetFile()->cd();
   createDebugTree(*this, pcstream);
   pcstream.Close();
 }
 
-void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameTree, const char* filename)
+void o2::tpc::IDCAverageGroup::createDebugTreeForAllCRUs(const char* nameFile, const char* filename)
 {
-  o2::utils::TreeStreamRedirector pcstream(nameTree, "RECREATE");
+  o2::utils::TreeStreamRedirector pcstream(nameFile, "RECREATE");
   pcstream.GetFile()->cd();
   TFile fInp(filename, "READ");
 
@@ -215,4 +223,24 @@ void o2::tpc::IDCAverageGroup::setIDCs(std::vector<float>&& idcs)
 {
   mIDCsUngrouped = std::move(idcs);
   mIDCsGrouped.resize(getNIntegrationIntervals());
+}
+
+unsigned int o2::tpc::IDCAverageGroup::getNIntegrationIntervals() const
+{
+  return mIDCsUngrouped.size() / Mapper::PADSPERREGION[mIDCsGrouped.getRegion()];
+}
+
+float o2::tpc::IDCAverageGroup::getUngroupedIDCVal(const unsigned int localPadNumber, const unsigned int integrationInterval) const
+{
+  return mIDCsUngrouped[localPadNumber + integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()]];
+}
+
+unsigned int o2::tpc::IDCAverageGroup::getUngroupedIndex(const unsigned int ulrow, const unsigned int upad, const unsigned int integrationInterval) const
+{
+  return integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRULOCAL[mIDCsGrouped.getRegion()][ulrow] + upad;
+}
+
+unsigned int o2::tpc::IDCAverageGroup::getUngroupedIndexGlobal(const unsigned int ugrow, const unsigned int upad, const unsigned int integrationInterval) const
+{
+  return integrationInterval * Mapper::PADSPERREGION[mIDCsGrouped.getRegion()] + Mapper::OFFSETCRUGLOBAL[ugrow] + upad;
 }
