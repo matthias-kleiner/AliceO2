@@ -59,6 +59,7 @@ void o2::tpc::RobustAverage::print() const
   }
 }
 
-float o2::tpc::RobustAverage::getMean() const {
+float o2::tpc::RobustAverage::getMean() const
+{
   return std::accumulate(mValues.begin(), mValues.end(), decltype(mValues)::value_type(0)) / mValues.size();
 }
