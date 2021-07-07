@@ -65,23 +65,26 @@ class RobustAverage
   /// \param sigma maximum accepted standard deviation: sigma*stdev
   float getFilteredAverage(const float sigma = 3);
 
+  /// \return returns mean of stored values
+  float getMean() const { return getMean(mValues.begin(), mValues.end()); }
+
   /// values which will be averaged and filtered
   void print() const;
 
  private:
-  std::vector<float> mValues{}; ///< values which will be averaged and filtered
+  std::vector<float> mValues{};    ///< values which will be averaged and filtered
+  std::vector<float> mTmpValues{}; ///< tmp vector used for calculation of std dev
 
-  /// \return returns mean of stored values
-  float getMean() const;
+  float getMean(std::vector<float>::const_iterator begin, std::vector<float>::const_iterator end) const;
 
   /// performing outlier filtering of the stored values
-  float getStdDev(const float mean) const;
+  float getStdDev(const float mean);
 
   /// performing outlier filtering of the stored values by defining range of included values in terms of standard deviation
   /// \param mean mean of the stored values
   /// \param stdev standard deviation of the values
   /// \param sigma maximum accepted standard deviation: sigma*stdev
-  void filterOutliers(const float mean, const float stdev, const float sigma);
+  float getFilteredMean(const float mean, const float stdev, const float sigma);
 };
 
 } // namespace o2::tpc

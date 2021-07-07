@@ -68,4 +68,5 @@
 #pragma link C++ class o2::tpc::IDCCCDBHelper<float> +;
 #pragma link C++ class o2::tpc::IDCCCDBHelper<short> +;
 #pragma link C++ class o2::tpc::IDCCCDBHelper<char> +;
+#pragma link C++ enum o2::tpc::AveragingMethod;
 #endif

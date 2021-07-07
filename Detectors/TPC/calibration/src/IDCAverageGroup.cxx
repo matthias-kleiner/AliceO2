@@ -11,8 +11,8 @@
 
 #include "TPCCalibration/IDCAverageGroup.h"
 #include "TPCCalibration/IDCGroup.h"
-#include "TPCCalibration/RobustAverage.h"
 #include "CommonUtils/TreeStreamRedirector.h"
+#include "TPCCalibration/IDCGroupingParameter.h"
 #include "TPCBase/Mapper.h"
 
 #include "TFile.h"
@@ -26,54 +26,74 @@
 
 #if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
 #include <omp.h>
+#else
+static inline int omp_get_thread_num() { return 0; }
 #endif
+
+o2::tpc::IDCAverageGroup::IDCAverageGroup(const unsigned char groupPads, const unsigned char groupRows, const unsigned char groupLastRowsThreshold, const unsigned char groupLastPadsThreshold, const unsigned int region, const Sector sector, const float sigma)
+  : mIDCsGrouped{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, region}, mSector{sector}, mSigma{sigma}, mRobustAverage(sNThreads)
+{
+  unsigned int maxValues = 0;
+  for (unsigned int i = 0; i < Mapper::NREGIONS; ++i) {
+    const unsigned int maxGroup = (mIDCsGrouped.getGroupRows() + mIDCsGrouped.getGroupLastRowsThreshold()) * (mIDCsGrouped.getGroupPads() + mIDCsGrouped.getGroupLastPadsThreshold() + Mapper::ADDITIONALPADSPERROW[i].back());
+    if (maxGroup > maxValues) {
+      maxValues = maxGroup;
+    }
+  }
+
+  for (auto& rob : mRobustAverage) {
+    rob.reserve(maxValues);
+  }
+}
 
 void o2::tpc::IDCAverageGroup::processIDCs()
 {
-// #pragma omp parallel for num_threads(sNThreads)
-#pragma omp parallel num_threads(sNThreads)
-  {
-    // TODO make as member thread local?
-    std::array<RobustAverage, Mapper::NREGIONS> robustAverage;
-    for (unsigned int i = 0; i < Mapper::NREGIONS; ++i) {
-      const unsigned int maxGroup = (mIDCsGrouped.getGroupRows() + mIDCsGrouped.getGroupLastRowsThreshold()) * (mIDCsGrouped.getGroupPads() + mIDCsGrouped.getGroupLastPadsThreshold() + Mapper::ADDITIONALPADSPERROW[i].back());
-      robustAverage[i].reserve(maxGroup);
-    }
+  const static auto& paramIDCGroup = ParameterIDCGroup::Instance();
 
-#pragma omp for
-    for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
-      const unsigned int lastRow = mIDCsGrouped.getLastRow();
-      unsigned int rowGrouped = 0;
-      for (unsigned int iRow = 0; iRow <= lastRow; iRow += mIDCsGrouped.getGroupRows()) {
-        // the sectors is divide in to two parts around ylocal=0 to get the same simmetric grouping around ylocal=0
-        for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
-          const unsigned int region = mIDCsGrouped.getRegion();
-          const unsigned int nPads = Mapper::PADSPERROW[region][iRow] / 2;
-          const unsigned int endPads = mIDCsGrouped.getLastPad(iRow) + nPads;
+#pragma omp parallel for num_threads(sNThreads)
+  for (unsigned int integrationInterval = 0; integrationInterval < getNIntegrationIntervals(); ++integrationInterval) {
+    const unsigned int threadNum = omp_get_thread_num();
+    const unsigned int lastRow = mIDCsGrouped.getLastRow();
+    unsigned int rowGrouped = 0;
+    for (unsigned int iRow = 0; iRow <= lastRow; iRow += mIDCsGrouped.getGroupRows()) {
+      // the sectors is divide in to two parts around ylocal=0 to get the same simmetric grouping around ylocal=0
+      for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
+        const unsigned int region = mIDCsGrouped.getRegion();
+        const unsigned int nPads = Mapper::PADSPERROW[region][iRow] / 2;
+        const unsigned int endPads = mIDCsGrouped.getLastPad(iRow) + nPads;
 
-          const unsigned int halfPadsInRow = mIDCsGrouped.getPadsPerRow(rowGrouped) / 2;
-          unsigned int padGrouped = iYLocalSide ? halfPadsInRow : halfPadsInRow - 1;
-          for (unsigned int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
-            const unsigned int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
-            robustAverage[region].clear();
-            for (unsigned int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
-              const unsigned int iRowTmp = iRow + iRowMerge;
-              const auto offs = Mapper::ADDITIONALPADSPERROW[region][iRowTmp] - Mapper::ADDITIONALPADSPERROW[region][iRow];
-              const auto padStart = (ipad == 0) ? 0 : offs;
-              const unsigned int endPadsTmp = (ipad == endPads) ? (Mapper::PADSPERROW[region][iRowTmp] - ipad) : mIDCsGrouped.getGroupPads() + offs;
-              for (unsigned int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
-                const unsigned int iPadTmp = ipad + ipadMerge;
-                const unsigned int iPadSide = iYLocalSide ? iPadTmp : Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1;
-                const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
-                robustAverage[region].addValue(mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region]);
-              }
+        const unsigned int halfPadsInRow = mIDCsGrouped.getPadsPerRow(rowGrouped) / 2;
+        unsigned int padGrouped = iYLocalSide ? halfPadsInRow : halfPadsInRow - 1;
+        for (unsigned int ipad = nPads; ipad <= endPads; ipad += mIDCsGrouped.getGroupPads()) {
+          const unsigned int endRows = (iRow == lastRow) ? (Mapper::ROWSPERREGION[region] - iRow) : mIDCsGrouped.getGroupRows();
+          mRobustAverage[threadNum].clear();
+          for (unsigned int iRowMerge = 0; iRowMerge < endRows; ++iRowMerge) {
+            const unsigned int iRowTmp = iRow + iRowMerge;
+            const auto offs = Mapper::ADDITIONALPADSPERROW[region][iRowTmp] - Mapper::ADDITIONALPADSPERROW[region][iRow];
+            const auto padStart = (ipad == 0) ? 0 : offs;
+            const unsigned int endPadsTmp = (ipad == endPads) ? (Mapper::PADSPERROW[region][iRowTmp] - ipad) : mIDCsGrouped.getGroupPads() + offs;
+            for (unsigned int ipadMerge = padStart; ipadMerge < endPadsTmp; ++ipadMerge) {
+              const unsigned int iPadTmp = ipad + ipadMerge;
+              const unsigned int iPadSide = iYLocalSide ? iPadTmp : Mapper::PADSPERROW[region][iRowTmp] - iPadTmp - 1;
+              const unsigned int indexIDC = integrationInterval * Mapper::PADSPERREGION[region] + Mapper::OFFSETCRULOCAL[region][iRowTmp] + iPadSide;
+              mRobustAverage[threadNum].addValue(mIDCsUngrouped[indexIDC] * Mapper::PADAREA[region]);
             }
-            mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = robustAverage[region].getFilteredAverage(mSigma);
-            iYLocalSide ? ++padGrouped : --padGrouped;
           }
+
+          switch (paramIDCGroup.Method) {
+            case o2::tpc::AveragingMethod::SLOW:
+            default:
+              mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = mRobustAverage[threadNum].getFilteredAverage(mSigma);
+              break;
+            case o2::tpc::AveragingMethod::FAST:
+              mIDCsGrouped(rowGrouped, padGrouped, integrationInterval) = mRobustAverage[threadNum].getMean();
+              break;
+          }
+
+          iYLocalSide ? ++padGrouped : --padGrouped;
         }
-        ++rowGrouped;
       }
+      ++rowGrouped;
     }
   }
 }

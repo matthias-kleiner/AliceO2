@@ -23,6 +23,9 @@
 #include "TPCCalibration/IDCContainer.h"
 #include "TPCCalibration/IDCFourierTransformBase.h"
 
+using fftwf_plan = struct fftwf_plan_s*;
+using fftwf_complex = float[2];
+
 namespace o2::tpc
 {
 
@@ -39,20 +42,34 @@ class IDCFourierTransform : public IDCFourierTransformBase<Type>
   /// \param timeFrames number of time frames which will be stored
   /// \param nFourierCoefficientsStore number of courier coefficients (real+imag) which will be stored (the maximum can be 'rangeIDC + 2', should be an even number when using naive FT). If less than maximum is setn the inverse fourier transform will not work.
   template <bool IsEnabled = true, typename std::enable_if<(IsEnabled && (std::is_same<Type, IDCFTType::IDCFourierTransformBaseAggregator>::value)), int>::type = 0>
-  IDCFourierTransform(const unsigned int rangeIDC = 200, const unsigned int timeFrames = 2000, const unsigned int nFourierCoefficientsStore = 200 + 2) : IDCFTType::IDCFourierTransformAggregator(rangeIDC, timeFrames), mFourierCoefficients{timeFrames, nFourierCoefficientsStore} {};
+  IDCFourierTransform(const unsigned int rangeIDC = 200, const unsigned int timeFrames = 2000, const unsigned int nFourierCoefficientsStore = 200 + 2) : IDCFTType::IDCFourierTransformAggregator(rangeIDC, timeFrames), mFourierCoefficients{timeFrames, nFourierCoefficientsStore}, mVal1DIDCs(sNThreads), mCoefficients(sNThreads)
+  {
+    initFFTW3Members();
+  };
 
   /// constructor for IDCFTType::EPN type
   /// \param rangeIDC number of IDCs for each interval which will be used to calculate the fourier coefficients
   /// \param nFourierCoefficientsStore number of courier coefficients (real+imag) which will be stored (the maximum can be 'rangeIDC + 2', should be an even number when using naive FT). If less than maximum is setn the inverse fourier transform will not work.
   template <bool IsEnabled = true, typename std::enable_if<(IsEnabled && (std::is_same<Type, IDCFTType::IDCFourierTransformBaseEPN>::value)), int>::type = 0>
-  IDCFourierTransform(const unsigned int rangeIDC = 200, const unsigned int nFourierCoefficientsStore = 200 + 2) : IDCFTType::IDCFourierTransformEPN(rangeIDC), mFourierCoefficients{1, nFourierCoefficientsStore} {};
+  IDCFourierTransform(const unsigned int rangeIDC = 200, const unsigned int nFourierCoefficientsStore = 200 + 2) : IDCFTType::IDCFourierTransformEPN(rangeIDC), mFourierCoefficients{1, nFourierCoefficientsStore}, mVal1DIDCs(sNThreads), mCoefficients(sNThreads)
+  {
+    initFFTW3Members();
+  };
+
+  // Destructor
+  ~IDCFourierTransform();
 
   /// set fast fourier transform using FFTW3
   /// \param fft use FFTW3 or not (naive approach)
   static void setFFT(const bool fft) { sFftw = fft; }
 
+  /// This function has to be called before the constructor is called
   /// \param nThreads set the number of threads used for calculation of the fourier coefficients
-  static void setNThreads(const int nThreads) { sNThreads = nThreads; }
+  template <bool IsEnabled = true, typename std::enable_if<(IsEnabled && (std::is_same<Type, IDCFTType::IDCFourierTransformBaseAggregator>::value)), int>::type = 0>
+  static void setNThreads(const int nThreads)
+  {
+    sNThreads = nThreads;
+  }
 
   /// calculate fourier coefficients
   void calcFourierCoefficients() { sFftw ? calcFourierCoefficientsFFTW3() : calcFourierCoefficientsNaive(); }
@@ -86,9 +103,12 @@ class IDCFourierTransform : public IDCFourierTransformBase<Type>
   void printFFTWPlan() const;
 
  private:
-  FourierCoeff mFourierCoefficients; ///< fourier coefficients. side -> interval -> coefficient
-  inline static int sFftw{1};        ///< using fftw or naive approach for calculation of fourier coefficients
-  inline static int sNThreads{1};    ///< number of threads which are used during the calculation of the fourier coefficients
+  FourierCoeff mFourierCoefficients;         ///< fourier coefficients. side -> interval -> coefficient
+  inline static int sFftw{1};                ///< using fftw or naive approach for calculation of fourier coefficients
+  inline static int sNThreads{1};            ///< number of threads which are used during the calculation of the fourier coefficients
+  fftwf_plan mFFTWPlan{nullptr};             ///<! FFTW plan which is used during the ft
+  std::vector<float*> mVal1DIDCs;            ///<! buffer for the 1D-IDC values for SIMD usage (each thread will get his one obejct)
+  std::vector<fftwf_complex*> mCoefficients; ///<! buffer for coefficients (each thread will get his one obejct)
 
   /// calculate fourier coefficients
   void calcFourierCoefficientsNaive();
@@ -121,6 +141,12 @@ class IDCFourierTransform : public IDCFourierTransformBase<Type>
 
   /// \return returns maximum numbers of stored real/imag fourier coeffiecients
   unsigned int getNMaxCoefficients() const { return this->mRangeIDC / 2 + 1; }
+
+  /// initalizing fftw members
+  void initFFTW3Members();
+
+  /// performing of ft using FFTW
+  void fftwLoop(const std::vector<float>& idcOneExpanded, const std::vector<unsigned int>& offsetIndex, const unsigned int interval, const o2::tpc::Side side, const unsigned int thread);
 
   ClassDefNV(IDCFourierTransform, 1)
 };
