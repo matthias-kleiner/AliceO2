@@ -69,7 +69,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto sendOutput = config.options().get<bool>("sendOutput");
   const auto nthreadsFactorization = static_cast<unsigned long>(config.options().get<int>("nthreads-IDC-factorization"));
   IDCFactorization::setNThreads(nthreadsFactorization);
-  const auto inlanes = static_cast<unsigned int>(config.options().get<int>("input-lanes"));
+  const auto nLanes = static_cast<unsigned int>(config.options().get<int>("input-lanes"));
 
   const int compressionTmp = config.options().get<int>("compression");
   IDCDeltaCompression compression;
@@ -88,6 +88,11 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto first = tpcCRUs.begin();
   const auto last = std::min(tpcCRUs.end(), first + nCRUs);
   const std::vector<uint32_t> rangeCRUs(first, last);
-  WorkflowSpec workflow{getTPCFactorizeIDCSpec(inlanes, rangeCRUs, timeframes, timeframesDeltaIDC, compression, debug, sendOutput)};
+
+  WorkflowSpec workflow;
+  workflow.reserve(nLanes);
+  for (int ilane = 0; ilane < nLanes; ++ilane) {
+    workflow.emplace_back(getTPCFactorizeIDCSpec(ilane, rangeCRUs, timeframes, timeframesDeltaIDC, compression, debug, sendOutput));
+  }
   return workflow;
 }

@@ -181,7 +181,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCFactorizeIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const IDCDeltaCompression compression, const bool debug = false, const bool senddebug = false)
+DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const IDCDeltaCompression compression, const bool debug = false, const bool senddebug = false)
 {
   std::vector<OutputSpec> outputSpecs;
   if (senddebug) {
@@ -190,7 +190,11 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const std::vector<uint32_t>& crus, cons
     outputSpecs.emplace_back(ConcreteDataTypeMatcher{gDataOriginTPC, TPCFactorizeIDCSpec::getDataDescriptionIDCDelta()});
   }
 
-  std::vector<InputSpec> inputSpecs{InputSpec{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC()}, Lifetime::Timeframe}};
+  std::vector<InputSpec> inputSpecs; //{InputSpec{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC()}, Lifetime::Timeframe}};
+  inputSpecs.reserve(crus.size());
+  for (const auto& cru : crus) {
+    inputSpecs.emplace_back(InputSpec{"idcagg", gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), header::DataHeader::SubSpecificationType{cru + lane * CRU::MaxCRU}, Lifetime::Timeframe});
+  }
 
   const auto& paramIDCGroup = ParameterIDCGroup::Instance();
   std::array<unsigned char, Mapper::NREGIONS> groupPads{};
@@ -202,30 +206,16 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const std::vector<uint32_t>& crus, cons
   std::copy(std::begin(paramIDCGroup.GroupLastRowsThreshold), std::end(paramIDCGroup.GroupLastRowsThreshold), std::begin(groupLastRowsThreshold));
   std::copy(std::begin(paramIDCGroup.GroupLastPadsThreshold), std::end(paramIDCGroup.GroupLastPadsThreshold), std::begin(groupLastPadsThreshold));
 
-  return DataProcessorSpec{
-    "tpc-factorize-idc",
+  DataProcessorSpec spec{
+    fmt::format("tpc-factorize-idc-{:02}", lane).data(),
     inputSpecs,
     outputSpecs,
     AlgorithmSpec{adaptFromTask<TPCFactorizeIDCSpec>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, compression, debug, senddebug)},
     Options{{"ccdb-uri", VariantType::String, "http://ccdb-test.cern.ch:8080", {"URI for the CCDB access."}},
             {"update-not-grouping-parameter", VariantType::Bool, false, {"Do NOT Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
-}
 
-o2::framework::WorkflowSpec getTPCFactorizeIDCSpec(const unsigned int inlanes, const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, const IDCDeltaCompression compression, const bool debug = false, const bool senddebug = false)
-{
-  WorkflowSpec pipelineTemplate{getTPCFactorizeIDCSpec(crus, timeframes, timeframesDeltaIDC, compression, debug, senddebug)};
-
-  const unsigned int nSubspecs = inlanes * crus.size();
-  std::vector<unsigned int> subspecsInd(nSubspecs);
-  for (int lane = 0; lane < inlanes; ++lane) {
-    for (int cru = 0; cru < crus.size(); ++cru) {
-      subspecsInd[lane + cru * inlanes] = cru + lane * CRU::MaxCRU;
-    }
-  }
-
-  WorkflowSpec pipelines = parallelPipeline(
-    pipelineTemplate, inlanes, [size = nSubspecs]() { return size; }, [&subspecsInd](size_t index) { return subspecsInd[index]; });
-  return pipelines;
+  spec.rank = lane;
+  return spec;
 }
 
 } // namespace o2::tpc

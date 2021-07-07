@@ -73,5 +73,6 @@
 #pragma link C++ class o2::tpc::dEdxHistos + ;
 #pragma link C++ class o2::calibration::TimeSlot < o2::tpc::dEdxHistos> + ;
 #pragma link C++ class o2::tpc::CalibMIP + ;
+#pragma link C++ enum o2::tpc::AveragingMethod;
 
 #endif

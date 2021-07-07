@@ -66,6 +66,8 @@ BOOST_AUTO_TEST_CASE(IDCFourierTransformAggregator_test)
   for (int iType = 0; iType < 2; ++iType) {
     const bool fft = iType == 0 ? false : true;
     FtType::setFFT(fft);
+    FtType::setNThreads(2);
+
     FtType idcFourierTransform{rangeIDC, tfs, nFourierCoeff};
     const auto intervalsPerTF = getIntegrationIntervalsPerTF(integrationIntervals, tfs);
     idcFourierTransform.setIDCs(get1DIDCs(intervalsPerTF), intervalsPerTF);

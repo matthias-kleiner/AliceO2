@@ -53,7 +53,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
 
   void run(o2::framework::ProcessingContext& pc) final
   {
-    LOGP(info, "averaging and grouping IDCs for one TF for CRUs {} to {} using {} threads", mCRUs.front(), mCRUs.back(), mIDCs.begin()->second.getNThreads());
+    LOGP(info, "averaging and grouping IDCs for TF {} for CRUs {} to {} using {} threads", getCurrentTF(pc), mCRUs.front(), mCRUs.back(), mIDCs.begin()->second.getNThreads());
 
     for (int i = 0; i < mCRUs.size(); ++i) {
       const DataRef ref = pc.inputs().getByPos(i);
@@ -67,7 +67,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
     }
 
     if (mDebug) {
-      TFile fOut(fmt::format("IDCGroup_{}_tf_{}.root", mLane, o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(pc.inputs().getByPos(0))->tfCounter).data(), "RECREATE");
+      TFile fOut(fmt::format("IDCGroup_{}_tf_{}.root", mLane, getCurrentTF(pc)).data(), "RECREATE");
       for (int i = 0; i < mCRUs.size(); ++i) {
         const DataRef ref = pc.inputs().getByPos(i);
         auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
@@ -107,6 +107,9 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   std::unordered_map<unsigned int, IDCAverageGroup> mIDCs{};                        ///< object for averaging and grouping of the IDCs
   std::unordered_map<unsigned int, std::deque<std::vector<float>>> mBuffer1DIDCs{}; ///< buffer for 1D-IDCs. The buffered 1D-IDCs for n TFs will be send to the EPNs for synchronous reco. Zero initialized to avoid empty first TFs!
   std::vector<float> mOneDIDCs{};
+
+  /// \return returns TF of current processed data
+  uint32_t getCurrentTF(o2::framework::ProcessingContext& pc) const { return o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(pc.inputs().getByPos(0))->tfCounter; }
 
   void sendOutput(DataAllocator& output, const uint32_t cru)
   {

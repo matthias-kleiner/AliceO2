@@ -18,7 +18,29 @@
 
 #if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
 #include <omp.h>
+#else
+static inline int omp_get_thread_num() { return 0; }
 #endif
+
+template <class Type>
+o2::tpc::IDCFourierTransform<Type>::~IDCFourierTransform()
+{
+  for (int thread = 0; thread < sNThreads; ++thread) {
+    fftwf_free(mVal1DIDCs[thread]);
+    fftwf_free(mCoefficients[thread]);
+  }
+  fftwf_destroy_plan(mFFTWPlan);
+}
+
+template <class Type>
+void o2::tpc::IDCFourierTransform<Type>::initFFTW3Members()
+{
+  for (int thread = 0; thread < sNThreads; ++thread) {
+    mVal1DIDCs[thread] = fftwf_alloc_real(this->mRangeIDC);
+    mCoefficients[thread] = fftwf_alloc_complex(getNMaxCoefficients());
+  }
+  mFFTWPlan = fftwf_plan_dft_r2c_1d(this->mRangeIDC, mVal1DIDCs.front(), mCoefficients.front(), FFTW_ESTIMATE);
+}
 
 template <class Type>
 void o2::tpc::IDCFourierTransform<Type>::calcFourierCoefficientsNaive()
@@ -74,6 +96,7 @@ void o2::tpc::IDCFourierTransform<Type>::calcFourierCoefficientsNaive(const o2::
 template <class Type>
 void o2::tpc::IDCFourierTransform<Type>::calcFourierCoefficientsFFTW3(const o2::tpc::Side side)
 {
+  // for FFTW and OMP see: https://stackoverflow.com/questions/15012054/fftw-plan-creation-using-openmp
   // check if IDCs are present for current side
   if (this->getNIDCs(side) == 0) {
     LOGP(warning, "no 1D-IDCs found!");
@@ -82,29 +105,26 @@ void o2::tpc::IDCFourierTransform<Type>::calcFourierCoefficientsFFTW3(const o2::
   }
 
   const std::vector<unsigned int> offsetIndex = this->getLastIntervals(side);
+  const std::vector<float>& idcOneExpanded{this->getExpandedIDCOne(side)}; // 1D-IDC values which will be used for the FFT
 
-  // for FFTW and OMP see: https://stackoverflow.com/questions/15012054/fftw-plan-creation-using-openmp
-#pragma omp parallel num_threads(sNThreads)
-  {
-    const std::vector<float>& idcOneExpanded{this->getExpandedIDCOne(side)}; // 1D-IDC values which will be used for the FFT
-    fftwf_plan fftwPlan = nullptr;
-    float* val1DIDCs = fftwf_alloc_real(this->mRangeIDC);
-    fftwf_complex* coefficients = fftwf_alloc_complex(getNMaxCoefficients());
-
-#pragma omp critical(make_plan)
-    fftwPlan = fftwf_plan_dft_r2c_1d(this->mRangeIDC, val1DIDCs, coefficients, FFTW_ESTIMATE);
-#pragma omp for
+  if constexpr (std::is_same_v<Type, IDCFTType::IDCFourierTransformBaseAggregator>) {
+#pragma omp parallel for num_threads(sNThreads)
     for (unsigned int interval = 0; interval < this->getNIntervals(); ++interval) {
-      std::memcpy(val1DIDCs, &idcOneExpanded[offsetIndex[interval]], this->mRangeIDC * sizeof(float)); // copy IDCs to avoid seg fault when using SIMD instructions
-      fftwf_execute_dft_r2c(fftwPlan, val1DIDCs, coefficients);
-      std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + mFourierCoefficients.getIndex(interval, 0))), coefficients, mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float)); // store coefficients
+      fftwLoop(idcOneExpanded, offsetIndex, interval, side, omp_get_thread_num());
     }
-    // free memory
-    fftwf_free(coefficients);
-    fftwf_free(val1DIDCs);
-    fftwf_destroy_plan(fftwPlan);
+  } else {
+    fftwLoop(idcOneExpanded, offsetIndex, 0, side, 0);
   }
+
   normalizeCoefficients(side);
+}
+
+template <class Type>
+inline void o2::tpc::IDCFourierTransform<Type>::fftwLoop(const std::vector<float>& idcOneExpanded, const std::vector<unsigned int>& offsetIndex, const unsigned int interval, const o2::tpc::Side side, const unsigned int thread)
+{
+  std::memcpy(mVal1DIDCs[thread], &idcOneExpanded[offsetIndex[interval]], this->mRangeIDC * sizeof(float));                                                                                                     // copy IDCs to avoid seg fault when using SIMD instructions
+  fftwf_execute_dft_r2c(mFFTWPlan, mVal1DIDCs[thread], mCoefficients[thread]);                                                                                                                                  // perform ft
+  std::memcpy(&(*(mFourierCoefficients.mFourierCoefficients[side].begin() + mFourierCoefficients.getIndex(interval, 0))), mCoefficients[thread], mFourierCoefficients.getNCoefficientsPerTF() * sizeof(float)); // store coefficients
 }
 
 template <class Type>

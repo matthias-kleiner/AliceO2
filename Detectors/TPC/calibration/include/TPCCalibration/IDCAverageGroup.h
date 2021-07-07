@@ -20,6 +20,7 @@
 #include "TPCCalibration/IDCGroup.h"
 #include "Rtypes.h"
 #include "TPCBase/Sector.h"
+#include "TPCCalibration/RobustAverage.h"
 
 namespace o2::utils
 {
@@ -54,8 +55,7 @@ class IDCAverageGroup
   /// \param groupLastPadsThreshold minimum number of pads in pad direction for the last group in pad direction
   /// \param region region of the TPC
   /// \param sigma maximum accepted standard deviation for filtering outliers: sigma*stdev
-  IDCAverageGroup(const unsigned char groupPads = 4, const unsigned char groupRows = 4, const unsigned char groupLastRowsThreshold = 2, const unsigned char groupLastPadsThreshold = 2, const unsigned int region = 0, const Sector sector = Sector{0}, const float sigma = 3)
-    : mIDCsGrouped{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, region}, mSector{sector}, mSigma{sigma} {}
+  IDCAverageGroup(const unsigned char groupPads = 4, const unsigned char groupRows = 4, const unsigned char groupLastRowsThreshold = 2, const unsigned char groupLastPadsThreshold = 2, const unsigned int region = 0, const Sector sector = Sector{0}, const float sigma = 3);
 
   /// set the IDCs which will be averaged and grouped
   /// \param idcs vector containing the IDCs
@@ -149,11 +149,12 @@ class IDCAverageGroup
   static void createDebugTreeForAllCRUs(const char* nameFile, const char* filename);
 
  private:
-  inline static int sNThreads{1};      ///< number of threads which are used during the calculations
-  std::vector<float> mIDCsUngrouped{}; ///< integrated ungrouped IDC values per pad
-  IDCGroup mIDCsGrouped{};             ///< grouped and averaged IDC values
-  const Sector mSector{};              ///< sector of averaged and grouped IDCs (used for debugging)
-  const float mSigma{};                ///< sigma cut for outlier filtering
+  inline static int sNThreads{1};            ///< number of threads which are used during the calculations
+  std::vector<float> mIDCsUngrouped{};       ///< integrated ungrouped IDC values per pad
+  IDCGroup mIDCsGrouped{};                   ///< grouped and averaged IDC values
+  const Sector mSector{};                    ///< sector of averaged and grouped IDCs (used for debugging)
+  const float mSigma{};                      ///< sigma cut for outlier filtering
+  std::vector<RobustAverage> mRobustAverage; ///<! object for averaging (each thread will get his one object)
 
   /// \return returns index to data from ungrouped pad and row
   /// \param ulrow ungrouped local row in region

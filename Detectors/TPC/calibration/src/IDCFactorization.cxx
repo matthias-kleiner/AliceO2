@@ -318,9 +318,10 @@ void o2::tpc::IDCFactorization::calcIDCZero()
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
+    const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
       for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
-        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
+        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + factorIndexGlob;
         mIDCZero.fillValueIDCZero(mIDCs[cru][timeframe][idcs], cruTmp.side(), indexGlob % nIDCsSide);
       }
     }
@@ -343,13 +344,15 @@ void o2::tpc::IDCFactorization::calcIDCOne()
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
+    const auto factorIDCOne = crusPerSide * mNIDCsPerCRU[region];
+    const auto side = cruTmp.side();
+    const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
     unsigned int integrationIntervallast = 0;
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
       for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
         const unsigned int integrationInterval = idcs / mNIDCsPerCRU[region] + integrationIntervallast;
-        const auto side = cruTmp.side();
-        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
-        mIDCOne.mIDCOne[side][integrationInterval] += mIDCs[cru][timeframe][idcs] / (crusPerSide * mNIDCsPerCRU[region] * mIDCZero.mIDCZero[side][indexGlob % nIDCsSide]);
+        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + factorIndexGlob;
+        mIDCOne.mIDCOne[side][integrationInterval] += mIDCs[cru][timeframe][idcs] / (factorIDCOne * mIDCZero.mIDCZero[side][indexGlob % nIDCsSide]);
       }
       integrationIntervallast += mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
     }
@@ -369,6 +372,8 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
   for (unsigned int cru = 0; cru < mIDCs.size(); ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
+    const auto side = cruTmp.side();
+    const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
     unsigned int integrationIntervallast = 0;
     unsigned int integrationIntervallastLocal = 0;
     unsigned int lastChunk = 0;
@@ -383,8 +388,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const unsigned int intervallocal = idcs / mNIDCsPerCRU[region];
         const unsigned int integrationIntervalGlobal = intervallocal + integrationIntervallast;
         const unsigned int integrationIntervalLocal = intervallocal + integrationIntervallastLocal;
-        const auto side = cruTmp.side();
-        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + mRegionOffs[region] + mNIDCsPerSector * cruTmp.sector();
+        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + factorIndexGlob;
         const unsigned int indexGlobMod = indexGlob % nIDCsSide;
         const auto idcZero = mIDCZero.mIDCZero[side][indexGlobMod];
         const auto idcOne = mIDCOne.mIDCOne[side][integrationIntervalGlobal];
@@ -406,6 +410,9 @@ float o2::tpc::IDCFactorization::getIDCValUngrouped(const unsigned int sector, c
   unsigned int timeFrame = 0;
   unsigned int interval = 0;
   getTF(region, integrationInterval, timeFrame, interval);
+  if(mIDCs[sector * Mapper::NREGIONS + region][timeFrame].empty()){
+    return 0.f;
+  }
   return mIDCs[sector * Mapper::NREGIONS + region][timeFrame][interval * mNIDCsPerCRU[region] + mOffsRow[region][getGroupedRow(region, urow)] + getGroupedPad(region, urow, upad)];
 }
 

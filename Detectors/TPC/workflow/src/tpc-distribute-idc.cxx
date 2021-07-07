@@ -37,6 +37,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
     {"timeframes", VariantType::Int, 2000, {"Number of TFs which will be aggregated per aggregation interval."}},
     {"firstTF", VariantType::Int, 0, {"First time frame index."}},
+    {"load-from-file", VariantType::Bool, false, {"load average and grouped IDCs from IDCGroup.root file."}},
     {"output-lanes", VariantType::Int, 1, {"Number of parallel pipelines which will be used in the factorization device."}}};
 
   std::swap(workflowOptions, options);
@@ -56,10 +57,11 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto timeframes = static_cast<unsigned int>(config.options().get<int>("timeframes"));
   const auto outlanes = static_cast<unsigned int>(config.options().get<int>("output-lanes"));
   const auto firstTF = static_cast<unsigned int>(config.options().get<int>("firstTF"));
+  const auto loadFromFile = config.options().get<bool>("load-from-file");
 
   const auto first = tpcCRUs.begin();
   const auto last = std::min(tpcCRUs.end(), first + nCRUs);
   const std::vector<uint32_t> rangeCRUs(first, last);
-  WorkflowSpec workflow{getTPCDistributeIDCSpec(rangeCRUs, timeframes, outlanes, firstTF)};
+  WorkflowSpec workflow{getTPCDistributeIDCSpec(rangeCRUs, timeframes, outlanes, firstTF, loadFromFile)};
   return workflow;
 }
