@@ -82,6 +82,9 @@ class IDCAverageGroup
   /// \param outName name of the object in the output file
   void dumpToFile(const char* outFileName = "IDCAverageGroup.root", const char* outName = "IDCAverageGroup") const;
 
+  /// load ungrouped and grouped IDCs from File
+  bool setFromFile(const char* fileName = "IDCAverageGroup.root", const char* name = "IDCAverageGroup");
+
   /// draw ungrouped IDCs
   /// \param integrationInterval integration interval for which the IDCs will be drawn
   /// \param filename name of the output file. If empty the canvas is drawn.

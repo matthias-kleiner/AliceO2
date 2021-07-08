@@ -105,6 +105,22 @@ void o2::tpc::IDCAverageGroup::dumpToFile(const char* outFileName, const char* o
   fOut.Close();
 }
 
+bool o2::tpc::IDCAverageGroup::setFromFile(const char* fileName, const char* name)
+{
+  TFile inpf(fileName, "READ");
+  IDCAverageGroup* idcAverageGroupTmp{nullptr};
+  idcAverageGroupTmp = reinterpret_cast<IDCAverageGroup*>(inpf.GetObjectChecked(name, IDCAverageGroup::Class()));
+
+  if (!idcAverageGroupTmp) {
+    LOGP(ERROR, "Failed to load {} from {}", name, inpf.GetName());
+    return false;
+  }
+  setIDCs(idcAverageGroupTmp->getIDCsUngrouped());
+
+  delete idcAverageGroupTmp;
+  return true;
+}
+
 void o2::tpc::IDCAverageGroup::drawUngroupedIDCs(const unsigned int integrationInterval, const std::string filename) const
 {
   const auto coords = o2::tpc::painter::getPadCoordinatesSector();

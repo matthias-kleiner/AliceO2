@@ -56,6 +56,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"groupRows", VariantType::String, "5,5,5,5,4,4,4,4,3,3", {"number of pads in row direction which will be grouped per region"}},
     {"groupLastRowsThreshold", VariantType::String, "3,3,3,3,2,2,2,2,2,2", {"set threshold in row direction for merging the last group to the previous group per region"}},
     {"groupLastPadsThreshold", VariantType::String, "3,3,3,3,2,2,2,2,1,1", {"set threshold in pad direction for merging the last group to the previous group per region"}},
+    {"load-from-file", VariantType::Bool, false, {"load average and grouped IDCs from IDCGroup.root file."}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g. 'TPCIDCGroupParam.Method=0;')"}}};
 
   std::swap(workflowOptions, options);
@@ -79,6 +80,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto minIDCsPerTF = static_cast<unsigned int>(config.options().get<int>("minIDCsPerTF"));
   const auto sigma = config.options().get<float>("sigma");
   TPCAverageGroupIDCDevice::setMinIDCsPerTF(minIDCsPerTF);
+  const auto loadFromFile = config.options().get<bool>("load-from-file");
 
   const std::string sgroupPads = config.options().get<std::string>("groupPads");
   const std::string sgroupRows = config.options().get<std::string>("groupRows");
@@ -153,7 +155,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     }
     const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
     const std::vector<uint32_t> rangeCRUs(first, last);
-    workflow.emplace_back(timePipeline(getTPCAverageGroupIDCSpec(ilane, rangeCRUs, rangeIDC, sigma, debug), time_lanes));
+    workflow.emplace_back(timePipeline(getTPCAverageGroupIDCSpec(ilane, rangeCRUs, rangeIDC, sigma, debug, loadFromFile), time_lanes));
   }
 
   return workflow;

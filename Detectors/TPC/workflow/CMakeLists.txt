@@ -118,9 +118,11 @@ o2_add_executable(idc-to-vector
                   COMPONENT_NAME tpc
                   SOURCES src/tpc-idc-to-vector.cxx
                   PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
+
 o2_add_executable(calib-dedx
                   COMPONENT_NAME tpc
                   SOURCES src/tpc-calib-dEdx.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TPCWorkflow)
 
 o2_add_executable(idc-test-ft
                   COMPONENT_NAME tpc

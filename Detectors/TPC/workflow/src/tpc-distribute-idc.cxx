@@ -38,7 +38,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"timeframes", VariantType::Int, 2000, {"Number of TFs which will be aggregated per aggregation interval."}},
     {"firstTF", VariantType::Int, 0, {"First time frame index."}},
     {"load-from-file", VariantType::Bool, false, {"load average and grouped IDCs from IDCGroup.root file."}},
-    {"output-lanes", VariantType::Int, 1, {"Number of parallel pipelines which will be used in the factorization device."}}};
+    {"output-lanes", VariantType::Int, 2, {"Number of parallel pipelines which will be used in the factorization device."}}};
 
   std::swap(workflowOptions, options);
 }

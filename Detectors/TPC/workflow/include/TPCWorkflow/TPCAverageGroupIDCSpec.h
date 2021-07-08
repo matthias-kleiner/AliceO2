@@ -19,6 +19,7 @@
 
 #include <vector>
 #include <deque>
+#include <algorithm>
 #include <fmt/format.h>
 #include "Framework/Task.h"
 #include "Framework/ControlService.h"
@@ -28,6 +29,8 @@
 #include "TPCCalibration/IDCAverageGroup.h"
 #include "TPCWorkflow/TPCIntegrateIDCSpec.h"
 #include "TPCCalibration/IDCGroupingParameter.h"
+
+#include "TKey.h"
 
 using namespace o2::framework;
 using o2::header::gDataOriginTPC;
@@ -39,8 +42,8 @@ namespace o2::tpc
 class TPCAverageGroupIDCDevice : public o2::framework::Task
 {
  public:
-  TPCAverageGroupIDCDevice(const int lane, const std::vector<uint32_t>& crus, const unsigned int rangeIDC, const float sigma, const bool debug = false)
-    : mLane{lane}, mCRUs{crus}, mRangeIDC{rangeIDC}, mDebug{debug}, mOneDIDCs(rangeIDC)
+  TPCAverageGroupIDCDevice(const int lane, const std::vector<uint32_t>& crus, const unsigned int rangeIDC, const float sigma, const bool debug = false, const bool loadFromFile = false)
+    : mLane{lane}, mCRUs{crus}, mRangeIDC{rangeIDC}, mDebug{debug}, mLoadFromFile{loadFromFile}, mOneDIDCs(rangeIDC)
   {
     auto& paramIDCGroup = ParameterIDCGroup::Instance();
     for (const auto& cru : mCRUs) {
@@ -51,19 +54,51 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
     }
   }
 
+  void init(o2::framework::InitContext& ic) final
+  {
+    if (mLoadFromFile) {
+      const char* fName = "IDCGroup.root";
+      TFile fInp(fName, "READ");
+      for (TObject* keyAsObj : *fInp.GetListOfKeys()) {
+        const auto key = dynamic_cast<TKey*>(keyAsObj);
+        const char* name = key->GetName();
+        LOGP(info, "Key name: {} Type: {}", name, key->GetClassName());
+
+        if (std::strcmp(o2::tpc::IDCAverageGroup::Class()->GetName(), key->GetClassName()) != 0) {
+          LOGP(info, "skipping object. wrong class.");
+          continue;
+        }
+        IDCAverageGroup* idcavg = (IDCAverageGroup*)fInp.Get(name);
+        unsigned int cru = idcavg->getSector() * Mapper::NREGIONS + idcavg->getRegion();
+        // check cru
+        if (std::find(mCRUs.begin(), mCRUs.end(), cru) != mCRUs.end()) {
+          mIDCs[cru].setFromFile(fName, name);
+          mIDCs[cru].processIDCs();
+        }
+        delete idcavg;
+      }
+    }
+  }
+
   void run(o2::framework::ProcessingContext& pc) final
   {
     LOGP(info, "averaging and grouping IDCs for TF {} for CRUs {} to {} using {} threads", getCurrentTF(pc), mCRUs.front(), mCRUs.back(), mIDCs.begin()->second.getNThreads());
 
-    for (int i = 0; i < mCRUs.size(); ++i) {
-      const DataRef ref = pc.inputs().getByPos(i);
-      auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
-      const int cru = tpcCRUHeader->subSpecification >> 7;
-      mIDCs[cru].setIDCs(pc.inputs().get<std::vector<float>>(ref));
-      mIDCs[cru].processIDCs();
+    if (!mLoadFromFile) {
+      for (int i = 0; i < mCRUs.size(); ++i) {
+        const DataRef ref = pc.inputs().getByPos(i);
+        auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
+        const int cru = tpcCRUHeader->subSpecification >> 7;
+        mIDCs[cru].setIDCs(pc.inputs().get<std::vector<float>>(ref));
+        mIDCs[cru].processIDCs();
 
-      // send the output for one CRU for one TF
-      sendOutput(pc.outputs(), cru);
+        // send the output for one CRU for one TF
+        sendOutput(pc.outputs(), cru);
+      }
+    } else {
+      for (int i = 0; i < mCRUs.size(); ++i) {
+        sendOutput(pc.outputs(), mCRUs[i]);
+      }
     }
 
     if (mDebug) {
@@ -104,9 +139,10 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   const std::vector<uint32_t> mCRUs{};                                              ///< CRUs to process in this instance
   const unsigned int mRangeIDC{};                                                   ///< number of IDCs used for the calculation of fourier coefficients
   const bool mDebug{};                                                              ///< dump IDCs to tree for debugging
+  const bool mLoadFromFile{};                                                       ///< load ungrouped IDCs from file
+  std::vector<float> mOneDIDCs{};                                                   ///< 1D-IDCs which will be send to the EPNs
   std::unordered_map<unsigned int, IDCAverageGroup> mIDCs{};                        ///< object for averaging and grouping of the IDCs
   std::unordered_map<unsigned int, std::deque<std::vector<float>>> mBuffer1DIDCs{}; ///< buffer for 1D-IDCs. The buffered 1D-IDCs for n TFs will be send to the EPNs for synchronous reco. Zero initialized to avoid empty first TFs!
-  std::vector<float> mOneDIDCs{};
 
   /// \return returns TF of current processed data
   uint32_t getCurrentTF(o2::framework::ProcessingContext& pc) const { return o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(pc.inputs().getByPos(0))->tfCounter; }
@@ -145,7 +181,7 @@ class TPCAverageGroupIDCDevice : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane, const std::vector<uint32_t>& crus, const unsigned int rangeIDC, const float sigma, const bool debug)
+DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane, const std::vector<uint32_t>& crus, const unsigned int rangeIDC, const float sigma, const bool debug, const bool loadFromFile)
 {
   std::vector<OutputSpec> outputSpecs;
   std::vector<InputSpec> inputSpecs;
@@ -154,7 +190,9 @@ DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane, const std::vector<u
 
   for (const auto& cru : crus) {
     const header::DataHeader::SubSpecificationType subSpec{cru << 7};
-    inputSpecs.emplace_back(InputSpec{"idcs", gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(TPCIntegrateIDCDevice::IDCFormat::Sim), subSpec, Lifetime::Timeframe});
+    if (!loadFromFile) {
+      inputSpecs.emplace_back(InputSpec{"idcs", gDataOriginTPC, TPCIntegrateIDCDevice::getDataDescription(TPCIntegrateIDCDevice::IDCFormat::Sim), subSpec, Lifetime::Timeframe});
+    }
     outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescriptionIDCGroup(), subSpec});
     outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescription1DIDC(), subSpec});
     outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCAverageGroupIDCDevice::getDataDescription1DIDCEPN(), subSpec});
@@ -165,7 +203,7 @@ DataProcessorSpec getTPCAverageGroupIDCSpec(const int ilane, const std::vector<u
     id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCAverageGroupIDCDevice>(ilane, crus, rangeIDC, sigma, debug)},
+    AlgorithmSpec{adaptFromTask<TPCAverageGroupIDCDevice>(ilane, crus, rangeIDC, sigma, debug, loadFromFile)},
   }; // end DataProcessorSpec
 }
 

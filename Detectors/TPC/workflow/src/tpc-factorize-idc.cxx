@@ -44,7 +44,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"sendOutput", VariantType::Bool, false, {"send IDC0, IDC1, IDCDelta, fourier coefficients (for debugging)"}},
     {"crus", VariantType::String, cruDefault.c_str(), {"List of CRUs, comma separated ranges, e.g. 0-3,7,9-15"}},
     {"compression", VariantType::Int, 1, {"compression of DeltaIDC: 0 -> No, 1 -> Medium (data compression ratio 2), 2 -> High (data compression ratio ~6)"}},
-    {"input-lanes", VariantType::Int, 1, {"Number of parallel pipelines which were set in the TPCDistributeIDCSpec device."}},
+    {"input-lanes", VariantType::Int, 2, {"Number of parallel pipelines which were set in the TPCDistributeIDCSpec device."}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings (e.g. for pp 50kHz: 'TPCIDCCompressionParam.MaxIDCDeltaValue=15;')"}}};
 
   std::swap(workflowOptions, options);

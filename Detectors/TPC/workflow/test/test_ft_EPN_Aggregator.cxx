@@ -49,7 +49,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"use-naive-fft", VariantType::Bool, false, {"using naive fourier transform (true) or FFTW (false)"}},
     {"seed", VariantType::Int, 0, {"Seed for the random IDC generator."}},
     {"only-idc-gen", VariantType::Bool, false, {"Start only the IDC generator device"}},
-    {"slow-gen", VariantType::Bool, false, {"slow generation of IDCs by setting one IDC value per pad"}},
+    {"fast-gen", VariantType::Bool, false, {"fast generation of IDCs by setting fixed IDC value"}},
     {"debug", VariantType::Bool, false, {"create debug for FT"}},
     {"idc-gen-lanes", VariantType::Int, 1, {"number of parallel lanes for generation of IDCs"}},
     {"idc-gen-time-lanes", VariantType::Int, 1, {"number of parallel lanes for generation of IDCs"}},
@@ -77,7 +77,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
 
   const bool fft = config.options().get<bool>("use-naive-fft");
   const bool onlyIDCGen = config.options().get<bool>("only-idc-gen");
-  const bool slowgen = config.options().get<bool>("slow-gen");
+  const bool fastgen = config.options().get<bool>("fast-gen");
   const bool debugFT = config.options().get<bool>("debug");
   const float sigma = 5;
   const unsigned int firstTF = 0;
@@ -86,7 +86,6 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   gRandom->SetSeed(seed);
 
   WorkflowSpec workflow;
-
   for (int ilane = 0; ilane < idcgenlanes; ++ilane) {
     const auto crusPerLane = nCRUs / idcgenlanes + ((nCRUs % idcgenlanes) != 0);
     const auto first = tpcCRUs.begin() + ilane * crusPerLane;
@@ -95,16 +94,14 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
     }
     const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
     const std::vector<uint32_t> rangeCRUs(first, last);
-    workflow.emplace_back(timePipeline(generateIDCsCRU(ilane, timeframes, rangeCRUs, slowgen), idcgentimelanes));
+    workflow.emplace_back(timePipeline(generateIDCsCRU(ilane, timeframes, rangeCRUs, fastgen), idcgentimelanes));
   }
 
   if (onlyIDCGen == true) {
     return workflow;
   }
 
-  // auto workflow = WorkflowSpec{generateIDCsCRU(timeframes, crus, slowgen), getTPCAverageGroupIDCSpec(0, crus, iondrifttime, sigma, debugFT), getTPCFourierTransformEPNSpec(crus, iondrifttime, nFourierCoefficients, debugFT), getTPCDistributeIDCSpec(crus, timeframes, nLanes, firstTF, loadFromFile), ftAggregatorIDC(nFourierCoefficients, iondrifttime, timeframes, debugFT, crus), receiveFourierCoeffEPN(timeframes, nFourierCoefficients), compare_EPN_AGG()};
-  auto workflowTmp = WorkflowSpec{getTPCAverageGroupIDCSpec(0, crus, iondrifttime, sigma, debugFT), getTPCFourierTransformEPNSpec(crus, iondrifttime, nFourierCoefficients, debugFT), getTPCDistributeIDCSpec(crus, timeframes, nLanes, firstTF, loadFromFile), ftAggregatorIDC(nFourierCoefficients, iondrifttime, timeframes, debugFT, crus), receiveFourierCoeffEPN(timeframes, nFourierCoefficients), compare_EPN_AGG()};
-
+  auto workflowTmp = WorkflowSpec{getTPCAverageGroupIDCSpec(0, crus, iondrifttime, sigma, debugFT, false), getTPCFourierTransformEPNSpec(crus, iondrifttime, nFourierCoefficients, debugFT), getTPCDistributeIDCSpec(crus, timeframes, nLanes, firstTF, loadFromFile), ftAggregatorIDC(nFourierCoefficients, iondrifttime, timeframes, debugFT, crus), receiveFourierCoeffEPN(timeframes, nFourierCoefficients), compare_EPN_AGG()};
   for (auto& spec : workflowTmp) {
     workflow.emplace_back(spec);
   }
@@ -116,7 +113,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   return workflow;
 }
 
-DataProcessorSpec generateIDCsCRU(int lane, const unsigned int maxTFs, const std::vector<uint32_t>& crus, const bool slowgen)
+DataProcessorSpec generateIDCsCRU(int lane, const unsigned int maxTFs, const std::vector<uint32_t>& crus, const bool fastgen)
 {
   // generate random IDCs per CRU
   const int nOrbitsPerTF = 128; // number of orbits per TF
@@ -135,7 +132,7 @@ DataProcessorSpec generateIDCsCRU(int lane, const unsigned int maxTFs, const std
     Inputs{},
     outputSpecs,
     AlgorithmSpec{
-      [maxTFs, slowgen, nIDCs, cruStart = crus.front(), cruEnde = crus.back()](ProcessingContext& ctx) {
+      [maxTFs, fastgen, nIDCs, cruStart = crus.front(), cruEnde = crus.back()](ProcessingContext& ctx) {
         const auto tf = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ctx.inputs().getByPos(0))->tfCounter;
 
         for (uint32_t icru = cruStart; icru <= cruEnde; ++icru) {
@@ -145,7 +142,7 @@ DataProcessorSpec generateIDCsCRU(int lane, const unsigned int maxTFs, const std
           const unsigned int nTotIDCs = (nIDCs + additionalInterval) * nPads;
 
           // generate random IDCs per CRU
-          if (slowgen) {
+          if (!fastgen) {
             o2::pmr::vector<float> idcs;
             idcs.reserve(nTotIDCs);
             for (int i = 0; i < nTotIDCs; ++i) {
