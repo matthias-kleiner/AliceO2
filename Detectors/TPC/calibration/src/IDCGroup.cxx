@@ -11,12 +11,9 @@
 
 #include "TPCCalibration/IDCGroup.h"
 #include "CommonUtils/TreeStreamRedirector.h"
-#include "TPCBase/Painter.h"
+#include "TPCCalibration/IDCDrawHelper.h"
 #include "TPCBase/Mapper.h"
-#include "TH2Poly.h"
 #include "TFile.h"
-#include "TCanvas.h"
-#include "TLatex.h"
 #include <numeric>
 
 void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
@@ -40,41 +37,14 @@ void o2::tpc::IDCGroup::dumpToTree(const char* outname) const
 
 void o2::tpc::IDCGroup::draw(const unsigned int integrationInterval, const std::string filename) const
 {
-  const auto coords = o2::tpc::painter::getPadCoordinatesSector();
-  TH2Poly* poly = o2::tpc::painter::makeSectorHist("hSector", "Sector;local #it{x} (cm);local #it{y} (cm); #it{IDC}");
-  poly->SetContour(255);
-  poly->SetTitle(nullptr);
-  poly->GetYaxis()->SetTickSize(0.002f);
-  poly->GetYaxis()->SetTitleOffset(0.7f);
-  poly->GetZaxis()->SetTitleOffset(1.3f);
-  poly->SetStats(0);
+  std::function<float(const unsigned int, const unsigned int, const unsigned int, const unsigned int)> idcFunc = [this, integrationInterval](const unsigned int, const unsigned int region, const unsigned int irow, const unsigned int pad) {
+   return  (*this)(getGroupedRow(irow), getGroupedPad(pad, irow), integrationInterval);
+  };
 
-  TCanvas* can = new TCanvas("can", "can", 2000, 1400);
-  can->SetRightMargin(0.14f);
-  can->SetLeftMargin(0.06f);
-  can->SetTopMargin(0.04f);
-
-  TLatex lat;
-  lat.SetTextFont(63);
-  lat.SetTextSize(2);
-
-  poly->Draw("colz");
-  for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[mRegion]; ++irow) {
-    for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[mRegion][irow]; ++ipad) {
-      const auto padNum = getGlobalPadNumber(irow, ipad);
-      const auto coordinate = coords[padNum];
-      const float yPos = -0.5f * (coordinate.yVals[0] + coordinate.yVals[2]); // local coordinate system is mirrored
-      const float xPos = 0.5f * (coordinate.xVals[0] + coordinate.xVals[2]);
-      poly->Fill(xPos, yPos, (*this)(getGroupedRow(irow), getGroupedPad(ipad, irow), integrationInterval));
-      lat.SetTextAlign(12);
-      lat.DrawLatex(xPos, yPos, Form("%i", ipad));
-    }
-  }
-  if (!filename.empty()) {
-    can->SaveAs(filename.data());
-    delete poly;
-    delete can;
-  }
+  IDCDrawHelper::IDCDraw drawFun;
+  drawFun.mIDCFunc = idcFunc;
+  const std::string zAxisTitle = IDCDrawHelper::getZAxisTitle(IDCType::IDC);
+  IDCDrawHelper::drawSector(drawFun, mRegion, mRegion + 1, 0, zAxisTitle, filename);
 }
 
 void o2::tpc::IDCGroup::dumpToFile(const char* outFileName, const char* outName) const

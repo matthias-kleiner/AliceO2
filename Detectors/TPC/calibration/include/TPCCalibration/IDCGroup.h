@@ -78,6 +78,9 @@ class IDCGroup : public IDCGroupHelperRegion
   /// \return returns grouped and averaged IDC values using move semantics
   auto getData() && { return std::move(mIDCsGrouped); }
 
+  /// directly setting grouped IDC values
+  void setData(const std::vector<float>& idcs) { mIDCsGrouped = idcs; }
+
   /// \return returns number of stored integration intervals
   unsigned int getNIntegrationIntervals() const { return mIDCsGrouped.size() / getNIDCsPerIntegrationInterval(); }
 

@@ -43,7 +43,10 @@
 #pragma link C++ struct o2::tpc::ParameterIDCGroup;
 #pragma link C++ struct o2::tpc::ParameterIDCCompression;
 #pragma link C++ class o2::tpc::IDCAverageGroup +;
-#pragma link C++ class o2::tpc::IDCFactorization +;
+#pragma link C++ class o2::tpc::IDCFactorization<o2::tpc::IDCGroupHelperSector> +;
+#pragma link C++ class o2::tpc::IDCFactorization<o2::tpc::IDCGroupHelperRegion> +;
+#pragma link C++ class o2::tpc::IDCFactorizationBase<o2::tpc::IDCGroupHelperSector> +;
+#pragma link C++ class o2::tpc::IDCFactorizationBase<o2::tpc::IDCGroupHelperRegion> +;
 #pragma link C++ struct o2::tpc::IDCDelta<float> +;
 #pragma link C++ struct o2::tpc::IDCDelta<short> +;
 #pragma link C++ struct o2::tpc::IDCDelta<char> +;
@@ -73,5 +76,4 @@
 #pragma link C++ class o2::calibration::TimeSlot < o2::tpc::dEdxHistos> + ;
 #pragma link C++ class o2::tpc::CalibMIP + ;
 #pragma link C++ enum o2::tpc::AveragingMethod;
-
 #endif

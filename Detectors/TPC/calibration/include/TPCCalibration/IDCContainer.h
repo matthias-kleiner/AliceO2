@@ -36,6 +36,12 @@ enum class IDCType { IDC = 0,     ///< integrated and grouped IDCs
                      IDCDelta = 3 ///< IDCDelta: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
 };
 
+/// IDC Delta IDC Compression types
+enum class IDCDeltaCompression { NO = 0,     ///< no compression using floats
+                                 MEDIUM = 1, ///< medium compression using short (data compression ratio 2 when stored in CCDB)
+                                 HIGH = 2    ///< high compression using char (data compression ratio ~5.5 when stored in CCDB)
+};
+
 /// struct containing the IDC delta values
 template <typename DataT>
 struct IDCDeltaContainer {
@@ -156,7 +162,7 @@ class IDCDeltaCompressionHelper
     IDCDelta<DataT> idcCompressed{};
     compress(idcDeltaUncompressed, idcCompressed, o2::tpc::Side::A);
     compress(idcDeltaUncompressed, idcCompressed, o2::tpc::Side::C);
-    return std::move(idcCompressed);
+    return idcCompressed;
   }
 
  private:
@@ -206,9 +212,25 @@ struct IDCZero {
   /// \param index index in the storage
   float getValueIDCZero(const o2::tpc::Side side, const unsigned int index) const { return mIDCZero[side][index]; }
 
-  /// set all values back to 0
+  /// clear values
+  void clear()
+  {
+    clear(Side::A);
+    clear(Side::C);
+  }
+
   /// \param side side of the TPC
-  void reset(const o2::tpc::Side side) { std::fill(mIDCZero[side].begin(), mIDCZero[side].end(), 0.f); }
+  void clear(const o2::tpc::Side side) { mIDCZero[side].clear(); }
+
+  /// resize vector
+  void resize(const unsigned int size)
+  {
+    resize(Side::A, size);
+    resize(Side::C, size);
+  }
+
+  /// returns false if both sides containes values. returns true if one side is empty
+  bool empty() const { return mIDCZero[Side::A].empty() + mIDCZero[Side::A].empty(); }
 
   /// resize vector
   /// \param side side of the TPC
@@ -231,9 +253,22 @@ struct IDCOne {
   /// \param index index in the storage
   float getValueIDCOne(const o2::tpc::Side side, const unsigned int index) const { return mIDCOne[side][index]; }
 
-  /// set all values back to 0
+  /// clear values
+  void clear()
+  {
+    clear(Side::A);
+    clear(Side::C);
+  }
+
   /// \param side side of the TPC
-  void reset(const o2::tpc::Side side) { std::fill(mIDCOne[side].begin(), mIDCOne[side].end(), 0.f); }
+  void clear(const o2::tpc::Side side) { mIDCOne[side].clear(); }
+
+  /// resize vector
+  void resize(const unsigned int size)
+  {
+    resize(Side::A, size);
+    resize(Side::C, size);
+  }
 
   /// resize vector
   /// \param side side of the TPC

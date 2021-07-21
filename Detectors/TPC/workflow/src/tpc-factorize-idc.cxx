@@ -68,7 +68,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto debug = config.options().get<bool>("debug");
   const auto sendOutput = config.options().get<bool>("sendOutput");
   const auto nthreadsFactorization = static_cast<unsigned long>(config.options().get<int>("nthreads-IDC-factorization"));
-  IDCFactorization::setNThreads(nthreadsFactorization);
+  IDCFactorization<IDCGroupHelperSector>::setNThreads(nthreadsFactorization);
   const auto nLanes = static_cast<unsigned int>(config.options().get<int>("input-lanes"));
 
   const int compressionTmp = config.options().get<int>("compression");

@@ -113,6 +113,7 @@ BOOST_AUTO_TEST_CASE(IDCFourierTransformEPN_test)
       const auto intervalsPerTF = getIntegrationIntervalsPerTF(integrationIntervals, tfs);
       idcFourierTransform.setIDCs(get1DIDCs(intervalsPerTF));
       idcFourierTransform.calcFourierCoefficients();
+
       for (unsigned int iSide = 0; iSide < o2::tpc::SIDES; ++iSide) {
         const o2::tpc::Side side = iSide == 0 ? Side::A : Side::C;
         const std::vector<unsigned int> offsetIndex = idcFourierTransform.getLastIntervals(side);

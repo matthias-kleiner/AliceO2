@@ -107,18 +107,18 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   static constexpr header::DataDescription getDataDescriptionIDCDelta() { return header::DataDescription{"IDCDELTA"}; }
 
  private:
-  const std::vector<uint32_t> mCRUs{};              ///< CRUs to process in this instance
-  int mProcessedTFs{0};                             ///< number of processed time frames to keep track of when the writing to CCDB will be done
-  IDCFactorization mIDCFactorization{};             ///< object aggregating the IDCs and performing the factorization of the IDCs
-  const IDCDeltaCompression mCompressionDeltaIDC{}; ///< compression type for IDC Delta
-  const bool mDebug{false};                         ///< dump IDCs to tree for debugging
-  const bool mSendOutDebug{false};                  ///< flag if the output will be send (for debugging)
-  o2::ccdb::CcdbApi mDBapi;                         ///< API for storing the IDCs in the CCDB
-  std::map<std::string, std::string> mMetadata;     ///< meta data of the stored object in CCDB
-  bool mWriteToDB{};                                ///< flag if writing to CCDB will be done
-  std::array<uint32_t, 2> mTFRange{};               ///< storing of first and last TF used when setting the validity of the objects when writing to CCDB
-  bool mUpdateGroupingPar{true};                    ///< flag to set if grouping parameters should be updated or not
-  int mLaneId{0};                                   ///< the id of the current process within the parallel pipeline
+  const std::vector<uint32_t> mCRUs{};                        ///< CRUs to process in this instance
+  int mProcessedTFs{0};                                       ///< number of processed time frames to keep track of when the writing to CCDB will be done
+  IDCFactorization<IDCGroupHelperSector> mIDCFactorization;   ///< object aggregating the IDCs and performing the factorization of the IDCs
+  const IDCDeltaCompression mCompressionDeltaIDC{};           ///< compression type for IDC Delta
+  const bool mDebug{false};                                   ///< dump IDCs to tree for debugging
+  const bool mSendOutDebug{false};                            ///< flag if the output will be send (for debugging)
+  o2::ccdb::CcdbApi mDBapi;                                   ///< API for storing the IDCs in the CCDB
+  std::map<std::string, std::string> mMetadata;               ///< meta data of the stored object in CCDB
+  bool mWriteToDB{};                                          ///< flag if writing to CCDB will be done
+  std::array<uint32_t, 2> mTFRange{};                         ///< storing of first and last TF used when setting the validity of the objects when writing to CCDB
+  bool mUpdateGroupingPar{true};                              ///< flag to set if grouping parameters should be updated or not
+  int mLaneId{0};                                             ///< the id of the current process within the parallel pipeline
 
   /// \return returns TF of current processed data
   uint32_t getCurrentTF(o2::framework::ProcessingContext& pc) const { return o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(pc.inputs().getFirstValid(true))->tfCounter; }

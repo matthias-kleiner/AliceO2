@@ -25,6 +25,12 @@
 namespace o2::tpc
 {
 
+namespace IDCFTType
+{
+class IDCFourierTransformBaseEPN;        /// dummy class for templating IDCFourierTransformBase class
+class IDCFourierTransformBaseAggregator; /// dummy class for templating IDCFourierTransformBase class
+} // namespace IDCFTType
+
 template <class Type>
 class IDCFourierTransformBase;
 
