@@ -18,7 +18,7 @@
 #define TPCdEdxCalibrationSplines_H
 
 #include "FlatObject.h"
-#include "Spline2D.h"
+#include "Spline.h"
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) // code invisible on GPU and in the standalone compilation
 #include "Rtypes.h"                                       // for ClassDefNV
@@ -69,7 +69,7 @@ namespace gpu
 class TPCdEdxCalibrationSplines : public FlatObject
 {
  public:
-  typedef Spline2D<float, 1> SplineType;
+  typedef Spline<float, 3, 1> SplineType;
 
   /// _____________  Constructors / destructors __________________________
 
@@ -87,7 +87,7 @@ class TPCdEdxCalibrationSplines : public FlatObject
   /// Assignment operator
   TPCdEdxCalibrationSplines& operator=(const TPCdEdxCalibrationSplines&);
 
-  void recreate(int nKnotsU1[], int nKnotsU2[]);
+  void recreate(const int nKnots[]);
 #else
   /// Disable constructors for the GPU implementation
 
@@ -134,36 +134,40 @@ class TPCdEdxCalibrationSplines : public FlatObject
     return FSplines;
   };
 
-  /// \param splineInd index of the spline (region)
-  /// \param angleZ local dip angle: z angle - dz/dx
+  /// \param region index of the spline (region)
+  /// \param tanTheta local dip angle: z angle - dz/dx
+  /// \param sinPhi track parameter sinphi
   /// \param z drift length
   /// \return returns the spline (correction) value for qMax
-  GPUd() float interpolateqMax(const int splineInd, const float angleZ, const float z) const
+  GPUd() float interpolateqMax(const int region, const float tanTheta, const float sinPhi, const float z) const
   {
-    return mCalibSplinesqMax[splineInd].interpolate(angleZ, z);
+    const float x[FDimX] = {z, tanTheta, sinPhi};
+    return mCalibSplinesqMax[region].interpolate(x);
   };
 
-  /// \param splineInd index of the spline (region)
-  /// \param angleZ local dip angle: z angle - dz/dx
+  /// \param region index of the spline (region)
+  /// \param tanTheta local dip angle: z angle - dz/dx
+  /// \param sinPhi track parameter sinphi
   /// \param z drift length
   /// \return returns the spline (correction) value for qMax
-  GPUd() float interpolateqTot(const int splineInd, const float angleZ, const float z) const
+  GPUd() float interpolateqTot(const int region, const float tanTheta, const float sinPhi, const float z) const
   {
-    return mCalibSplinesqTot[splineInd].interpolate(angleZ, z);
+    const float x[FDimX] = {z, tanTheta, sinPhi};
+    return mCalibSplinesqTot[region].interpolate(x);
   };
 
-  /// \param splineInd index of the spline (region)
+  /// \param region index of the spline (region)
   /// \return returns the spline for qMax
-  GPUd() SplineType& getSplineqMax(const int splineInd)
+  GPUd() SplineType& getSplineqMax(const int region)
   {
-    return mCalibSplinesqMax[splineInd];
+    return mCalibSplinesqMax[region];
   };
 
-  /// \param splineInd index of the spline (region)
+  /// \param region index of the spline (region)
   /// \return returns the spline for qTot
-  GPUd() SplineType& getSplineqTot(const int splineInd)
+  GPUd() SplineType& getSplineqTot(const int region)
   {
-    return mCalibSplinesqTot[splineInd];
+    return mCalibSplinesqTot[region];
   };
 
     /// _______________  IO   ________________________
@@ -177,6 +181,7 @@ class TPCdEdxCalibrationSplines : public FlatObject
 
  private:
   constexpr static unsigned int FSplines = 10; ///< number of splines stored for each type
+  constexpr static int FDimX = 3;              ///< dimensionality of the splines
   SplineType mCalibSplinesqMax[FSplines];      ///< spline objects storage for the splines for qMax
   SplineType mCalibSplinesqTot[FSplines];      ///< spline objects storage for the splines for qTot
 
@@ -195,20 +200,22 @@ inline void TPCdEdxCalibrationSplines::setSplinesFromFile(TFile& inpf)
 
   for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
     std::string splinename = fmt::format("spline_qMax_region{}", ireg);
-    o2::gpu::Spline2D<float, 1>* splineTmpqMax = o2::gpu::Spline2D<float, 1>::readFromFile(inpf, splinename.data());
+    SplineType* splineTmpqMax = SplineType::readFromFile(inpf, splinename.data());
     mCalibSplinesqMax[ireg] = *splineTmpqMax;
     buffSize = alignSize(buffSize, mCalibSplinesqMax[ireg].getBufferAlignmentBytes());
     offsets1[ireg] = buffSize;
     buffSize += mCalibSplinesqMax[ireg].getFlatBufferSize();
+    delete splineTmpqMax;
   }
 
   for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
     std::string splinename = fmt::format("spline_qTot_region{}", ireg);
-    o2::gpu::Spline2D<float, 1>* splineTmpqTot = o2::gpu::Spline2D<float, 1>::readFromFile(inpf, splinename.data());
+    SplineType* splineTmpqTot = SplineType::readFromFile(inpf, splinename.data());
     mCalibSplinesqTot[ireg] = *splineTmpqTot;
     buffSize = alignSize(buffSize, mCalibSplinesqTot[ireg].getBufferAlignmentBytes());
     offsets2[ireg] = buffSize;
     buffSize += mCalibSplinesqTot[ireg].getFlatBufferSize();
+    delete splineTmpqTot;
   }
 
   FlatObject::finishConstruction(buffSize);

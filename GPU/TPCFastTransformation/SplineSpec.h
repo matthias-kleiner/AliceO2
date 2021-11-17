@@ -129,7 +129,7 @@ class SplineContainer : public FlatObject
   GPUd() size_t getGridOffset(int dimX) const { return mGrid[dimX].getFlatBufferPtr() - mFlatBufferPtr; }
 
   /// Set X range
-  void setXrange(const DataT xMin[/* mXdim */], const DataT xMax[/* mXdim */]);
+  GPUd() void setXrange(const DataT xMin[/* mXdim */], const DataT xMax[/* mXdim */]);
 
   /// Print method
   void print() const;
@@ -219,8 +219,7 @@ GPUdi() int SplineContainer<DataT>::getKnotIndex(const int iKnot[/* mXdim */]) c
 }
 
 template <typename DataT>
-GPUdi() void SplineContainer<DataT>::
-  setXrange(const DataT xMin[/* mXdim */], const DataT xMax[/* mXdim */])
+GPUdi() void SplineContainer<DataT>::setXrange(const DataT xMin[/* mXdim */], const DataT xMax[/* mXdim */])
 {
   /// Set X range
   for (int i = 0; i < mXdim; i++) {
@@ -321,7 +320,7 @@ class SplineSpec<DataT, XdimT, YdimT, 0> : public SplineContainer<DataT>
     }
     //now start with the interpolation loop:
 
-    auto maxInterpolations = (1 << (2 * maxXdim - 2)) * maxYdim;
+    constexpr auto maxInterpolations = (1 << (2 * maxXdim - 2)) * maxYdim;
 
     DataT S0[maxInterpolations];
     DataT D0[maxInterpolations];

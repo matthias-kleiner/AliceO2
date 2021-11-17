@@ -57,23 +57,22 @@ TPCdEdxCalibrationSplines& TPCdEdxCalibrationSplines::operator=(const TPCdEdxCal
   return *this;
 }
 
-void TPCdEdxCalibrationSplines::recreate(int nKnotsU1[], int nKnotsU2[])
+void TPCdEdxCalibrationSplines::recreate(const int nKnots[])
 {
   /// Default constructor
-
   FlatObject::startConstruction();
 
   int buffSize = 0;
   int offsets1[FSplines];
   int offsets2[FSplines];
   for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqMax[i].recreate(nKnotsU1[i], nKnotsU2[i]);
+    mCalibSplinesqMax[i].recreate(nKnots);
     buffSize = alignSize(buffSize, mCalibSplinesqMax[i].getBufferAlignmentBytes());
     offsets1[i] = buffSize;
     buffSize += mCalibSplinesqMax[i].getFlatBufferSize();
   }
   for (unsigned int i = 0; i < FSplines; i++) {
-    mCalibSplinesqTot[i].recreate(nKnotsU1[i], nKnotsU2[i]);
+    mCalibSplinesqTot[i].recreate(nKnots);
     buffSize = alignSize(buffSize, mCalibSplinesqTot[i].getBufferAlignmentBytes());
     offsets2[i] = buffSize;
     buffSize += mCalibSplinesqTot[i].getFlatBufferSize();
@@ -184,13 +183,20 @@ void TPCdEdxCalibrationSplines::setDefaultSplines()
   int offsets1[FSplines];
   int offsets2[FSplines];
 
-  auto defaultFnd2D = [&](double x1, double x2, double f[]) {
+  auto defaultF = [&](const double x[], double f[]) {
     f[0] = 1.f;
   };
+  double xMin[FDimX]{};
+  double xMax[FDimX]{};
+
+  for (int iDimX = 0; iDimX < FDimX; ++iDimX) {
+    xMin[iDimX] = 0;
+    xMax[iDimX] = 1;
+  }
 
   for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
-    o2::gpu::Spline2D<float, 1> splineTmpqMax;
-    splineTmpqMax.approximateFunction(0., 1., 0., 1., defaultFnd2D);
+    SplineType splineTmpqMax;
+    splineTmpqMax.approximateFunction(xMin, xMax, defaultF);
     mCalibSplinesqMax[ireg] = splineTmpqMax;
     buffSize = alignSize(buffSize, mCalibSplinesqMax[ireg].getBufferAlignmentBytes());
     offsets1[ireg] = buffSize;
@@ -198,8 +204,8 @@ void TPCdEdxCalibrationSplines::setDefaultSplines()
   }
 
   for (unsigned int ireg = 0; ireg < FSplines; ++ireg) {
-    o2::gpu::Spline2D<float, 1> splineTmpqTot;
-    splineTmpqTot.approximateFunction(0., 1., 0., 1., defaultFnd2D);
+    SplineType splineTmpqTot;
+    splineTmpqTot.approximateFunction(xMin, xMax, defaultF);
     mCalibSplinesqTot[ireg] = splineTmpqTot;
     buffSize = alignSize(buffSize, mCalibSplinesqTot[ireg].getBufferAlignmentBytes());
     offsets2[ireg] = buffSize;

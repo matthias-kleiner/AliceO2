@@ -120,16 +120,17 @@ GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, unsigned
     snp2 = GPUCA_MAX_SIN_PHI_LOW;
   }
   const float tgl2 = trackTgl * trackTgl;
-  float factor = CAMath::Sqrt((1 - snp2) / (1 + tgl2));
-  factor /= param.tpcGeometry.PadHeight(padRow);
-  qtot *= factor;
-  qmax *= factor;
 
   const float sec2 = 1.f / (1.f - snp2);
   // angleZ local dip angle: z angle - dz/dx (cm/cm)
   float angleZ = CAMath::Sqrt(tgl2 * sec2);
-  if (angleZ > 3) {
-    angleZ = 3;
+  if (angleZ > 2) {
+    angleZ = 2;
+  }
+
+  float snp = CAMath::Abs(trackSnp);
+  if (snp > 0.95f) {
+    snp = 0.95f;
   }
 
   const int region = param.tpcGeometry.GetRegion(padRow);
@@ -137,8 +138,8 @@ GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, unsigned
 
   // get the correction for qMax and qTot from the splines for given angle and drift length
   auto splines = calib.dEdxSplines;
-  const float qMaxCorr = splines->interpolateqMax(region, angleZ, z);
-  const float qTotCorr = splines->interpolateqTot(region, angleZ, z);
+  const float qMaxCorr = splines->interpolateqMax(region, angleZ, snp, z);
+  const float qTotCorr = splines->interpolateqTot(region, angleZ, snp, z);
   qmax /= qMaxCorr;
   qtot /= qTotCorr;
 
