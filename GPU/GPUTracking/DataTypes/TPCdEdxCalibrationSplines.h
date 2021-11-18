@@ -124,6 +124,9 @@ class TPCdEdxCalibrationSplines : public FlatObject
   /// sets the splines from an input file
   void setSplinesFromFile(TFile& inpf);
 
+  /// sets maximum TanTheta and maximum snp from file
+  void setRangesFromFile(TFile& inpf);
+
   /// set default splines: the return value of the splines will be 1 (no correction will be applied)
   void setDefaultSplines();
 #endif
@@ -133,6 +136,12 @@ class TPCdEdxCalibrationSplines : public FlatObject
   {
     return FSplines;
   };
+
+  /// returns the maximum TanTheta for which the splines are valid
+  GPUd() float getMaxTanTheta() const { return mMaxTanTheta; };
+
+  /// returns the maximum SinPhi for which the splines are valid
+  GPUd() float getMaxSinPhi() const { return mMaxSinPhi; };
 
   /// \param region index of the spline (region)
   /// \param tanTheta local dip angle: z angle - dz/dx
@@ -184,6 +193,8 @@ class TPCdEdxCalibrationSplines : public FlatObject
   constexpr static int FDimX = 3;              ///< dimensionality of the splines
   SplineType mCalibSplinesqMax[FSplines];      ///< spline objects storage for the splines for qMax
   SplineType mCalibSplinesqTot[FSplines];      ///< spline objects storage for the splines for qTot
+  float mMaxTanTheta{2.f};                     ///< max tanTheta for which the correction is stored
+  float mMaxSinPhi{0.99f};                     ///< max snp for which the correction is stored
 
   ClassDefNV(TPCdEdxCalibrationSplines, 1);
 };

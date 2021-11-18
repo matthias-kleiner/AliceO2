@@ -41,6 +41,7 @@ TPCdEdxCalibrationSplines::TPCdEdxCalibrationSplines(const char* dEdxSplinesFile
 {
   TFile dEdxFile(dEdxSplinesFile);
   setSplinesFromFile(dEdxFile);
+  setRangesFromFile(dEdxFile);
 }
 
 TPCdEdxCalibrationSplines::TPCdEdxCalibrationSplines(const TPCdEdxCalibrationSplines& obj)
@@ -221,4 +222,21 @@ void TPCdEdxCalibrationSplines::setDefaultSplines()
     mCalibSplinesqTot[i].moveBufferTo(mFlatBufferPtr + offsets2[i]);
   }
 }
+
+inline void TPCdEdxCalibrationSplines::setRangesFromFile(TFile& inpf)
+{
+  std::vector<float>* tanThetaMax = nullptr;
+  std::vector<float>* sinPhiMax = nullptr;
+  inpf.GetObject("tanThetaMax", tanThetaMax);
+  inpf.GetObject("sinPhiMax", sinPhiMax);
+  if (tanThetaMax) {
+    mMaxTanTheta = (*tanThetaMax).front();
+    delete tanThetaMax;
+  }
+  if (sinPhiMax) {
+    mMaxSinPhi = (*sinPhiMax).front();
+    delete sinPhiMax;
+  }
+}
+
 #endif
