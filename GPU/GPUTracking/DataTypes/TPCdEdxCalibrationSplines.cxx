@@ -105,6 +105,8 @@ void TPCdEdxCalibrationSplines::cloneFromObject(const TPCdEdxCalibrationSplines&
     char* buffer = FlatObject::relocatePointer(oldFlatBufferPtr, mFlatBufferPtr, obj.mCalibSplinesqTot[i].getFlatBufferPtr());
     mCalibSplinesqTot[i].cloneFromObject(obj.mCalibSplinesqTot[i], buffer);
   }
+  mMaxTanTheta = obj.mMaxTanTheta;
+  mMaxSinPhi = obj.mMaxSinPhi;
 }
 
 void TPCdEdxCalibrationSplines::moveBufferTo(char* newFlatBufferPtr)

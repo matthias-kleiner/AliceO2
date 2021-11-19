@@ -116,10 +116,6 @@ class TPCdEdxCalibrationSplines : public FlatObject
   void setFutureBufferAddress(char* futureFlatBufferPtr);
 
   /// ______________
-
-  /// Gives pointer to a spline
-  GPUd() const SplineType& getSpline(int chargeType, int region) const;
-
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
   /// sets the splines from an input file
   void setSplinesFromFile(TFile& inpf);
