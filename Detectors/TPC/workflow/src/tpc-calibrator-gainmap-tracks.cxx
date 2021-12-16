@@ -31,8 +31,7 @@ void customize(std::vector<o2::framework::CompletionPolicy>& policies)
 void customize(std::vector<ConfigParamSpec>& workflowOptions)
 {
   std::vector<ConfigParamSpec> options{
-    {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}}
-  };
+    {"configFile", VariantType::String, "", {"configuration file for configurable parameters"}}};
 
   std::swap(workflowOptions, options);
 }
