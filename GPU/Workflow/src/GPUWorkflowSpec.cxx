@@ -214,6 +214,11 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
     }
     mConfig->configProcessing.createO2Output = mSpecConfig.outputTracks ? 2 : 0; // Skip GPU-formatted output if QA is not requested
 
+    // set the grid
+    ParameterSpaceChargeGPU::NRVertices = mConfParam->gridSCR;
+    ParameterSpaceChargeGPU::NZVertices = mConfParam->gridSCZ;
+    ParameterSpaceChargeGPU::NPhiVertices = mConfParam->gridSCPhi;
+
     // Create and forward data objects for TPC transformation, material LUT, ...
     if (mConfParam->transformationFile.size()) {
       mFastTransform = nullptr;
@@ -221,6 +226,16 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
       mConfig->configCalib.fastTransform = TPCFastTransform::loadFromFile(mConfParam->transformationFile.c_str());
     } else {
       mFastTransform = std::move(TPCFastTransformHelperO2::instance()->create(0));
+
+      if (mConfParam->transformationSCFile.size()) {
+        LOG(info) << "Reading TPC space charge corrections from file " << mConfParam->transformationSCFile;
+        LOG(info) << "Setting grid with n vertices in z: " << ParameterSpaceChargeGPU::NZVertices;
+        LOG(info) << "Setting grid with n vertices in r: " << ParameterSpaceChargeGPU::NRVertices;
+        LOG(info) << "Setting grid with n vertices in phi: " << ParameterSpaceChargeGPU::NPhiVertices;
+        TFile fInp(mConfParam->transformationSCFile.data(), "READ");
+        mFastTransform->setSlowTPCSCCorrection(fInp);
+      }
+
       mConfig->configCalib.fastTransform = mFastTransform.get();
     }
     if (mConfig->configCalib.fastTransform == nullptr) {
@@ -612,12 +627,12 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   const auto& holdData = TPCTrackingDigitsPreCheck::runPrecheck(&ptrs, mConfig.get());
 
   // check for updates of TPC calibration objects
-  fetchCalibsCCDBTPC(pc);
+  // fetchCalibsCCDBTPC(pc);
 
   int retVal = mTracker->RunTracking(&ptrs, &outputRegions);
 
   // setting TPC calibration objects
-  storeUpdatedCalibsTPCPtrs();
+  // storeUpdatedCalibsTPCPtrs();
 
   mTracker->Clear(false);
 
@@ -760,18 +775,18 @@ Inputs GPURecoWorkflowSpec::inputs()
   Inputs inputs;
   if (mSpecConfig.outputTracks) {
     // loading calibration objects from the CCDB
-    inputs.emplace_back("tpcgain", gDataOriginTPC, "PADGAINFULL", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalPadGainFull)));
-    inputs.emplace_back("tpcgainresidual", gDataOriginTPC, "PADGAINRESIDUAL", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalPadGainResidual)));
-    inputs.emplace_back("tpctimegain", gDataOriginTPC, "TIMEGAIN", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalTimeGain)));
-    inputs.emplace_back("tpctopologygain", gDataOriginTPC, "TOPOLOGYGAIN", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalTopologyGain)));
-    inputs.emplace_back("tpcthreshold", gDataOriginTPC, "PADTHRESHOLD", 0, Lifetime::Condition, ccdbParamSpec("TPC/Config/FEEPad"));
+    // inputs.emplace_back("tpcgain", gDataOriginTPC, "PADGAINFULL", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalPadGainFull)));
+    // inputs.emplace_back("tpcgainresidual", gDataOriginTPC, "PADGAINRESIDUAL", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalPadGainResidual)));
+    // inputs.emplace_back("tpctimegain", gDataOriginTPC, "TIMEGAIN", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalTimeGain)));
+    // inputs.emplace_back("tpctopologygain", gDataOriginTPC, "TOPOLOGYGAIN", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalTopologyGain)));
+    // inputs.emplace_back("tpcthreshold", gDataOriginTPC, "PADTHRESHOLD", 0, Lifetime::Condition, ccdbParamSpec("TPC/Config/FEEPad"));
   }
   if (mSpecConfig.decompressTPC) {
     inputs.emplace_back(InputSpec{"input", ConcreteDataTypeMatcher{gDataOriginTPC, mSpecConfig.decompressTPCFromROOT ? o2::header::DataDescription("COMPCLUSTERS") : o2::header::DataDescription("COMPCLUSTERSFLAT")}, Lifetime::Timeframe});
   } else if (mSpecConfig.caClusterer) {
     // if the output type are tracks, then the input spec for the gain map is already defined
     if (!mSpecConfig.outputTracks) {
-      inputs.emplace_back("tpcgain", gDataOriginTPC, "PADGAINFULL", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalPadGainFull)));
+      // inputs.emplace_back("tpcgain", gDataOriginTPC, "PADGAINFULL", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalPadGainFull)));
     }
 
     // We accept digits and MC labels also if we run on ZS Raw data, since they are needed for MC label propagation

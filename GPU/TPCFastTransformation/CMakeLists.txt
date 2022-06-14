@@ -23,8 +23,13 @@ set(SRCS
     ChebyshevFit1D.cxx
     TPCFastTransformGeo.cxx
     TPCFastSpaceChargeCorrection.cxx
+    TPCSlowSpaceChargeCorrection.cxx
     TPCFastSpaceChargeCorrectionMap.cxx
     TPCFastTransform.cxx
+    TriCubic.cxx
+    DataContainer3D.cxx
+    RegularGrid3D.cxx
+    Vector.cxx
 )
 
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
@@ -55,7 +60,7 @@ if(${ALIGPU_BUILD_TYPE} STREQUAL "O2")
                  PUBLIC_LINK_LIBRARIES O2::GPUCommon
                                        O2::GPUUtils
                                        Vc::Vc
-                                       ROOT::Core ROOT::Matrix ROOT::Tree ROOT::Gpad
+                                       ROOT::Core ROOT::Matrix ROOT::Tree ROOT::Gpad ROOT::Minuit
                              )
 
   o2_target_root_dictionary(${MODULE}

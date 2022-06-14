@@ -20,6 +20,7 @@
 #include "FlatObject.h"
 #include "TPCFastTransformGeo.h"
 #include "TPCFastSpaceChargeCorrection.h"
+#include "TPCSlowSpaceChargeCorrection.h"
 #include "GPUCommonMath.h"
 
 #if !defined(GPUCA_GPUCODE)
@@ -129,7 +130,7 @@ class TPCFastTransform : public FlatObject
   /// Transforms raw TPC coordinates to local XYZ withing a slice
   /// taking calibration + alignment into account.
   ///
-  GPUd() void Transform(int slice, int row, float pad, float time, float& x, float& y, float& z, float vertexTime = 0) const;
+  GPUd() void Transform(int slice, int row, float pad, float time, float& x, float& y, float& z, float vertexTime = 0, bool applyCorr = true) const;
 
   /// Transformation in the time frame
   GPUd() void TransformInTimeFrame(int slice, int row, float pad, float time, float& x, float& y, float& z, float maxTimeBin) const;
@@ -204,6 +205,18 @@ class TPCFastTransform : public FlatObject
 
   static TPCFastTransform* loadFromFile(std::string inpFName = "", std::string name = "");
 
+  void setSlowTPCSCCorrection(TFile& inpf)
+  {
+    mCorrectionSlow.initFromFile<double>(inpf);
+    std::cout << "done: " << std::endl;
+    mUseSlow = true;
+  }
+
+  const auto& getCorrectionSlow() const
+  {
+    return mCorrectionSlow;
+  }
+
 #endif // !GPUCA_GPUCODE
 
   /// Print method
@@ -229,6 +242,8 @@ class TPCFastTransform : public FlatObject
   /// is pointed to the corresponding part of this->mFlatBufferPtr
   ///
   TPCFastSpaceChargeCorrection mCorrection;
+  TPCSlowSpaceChargeCorrection mCorrectionSlow;
+  bool mUseSlow = false;
 
   bool mApplyCorrection; // flag for applying correction
 
@@ -351,7 +366,7 @@ GPUdi() void TPCFastTransform::getTOFcorrection(int slice, int /*row*/, float x,
   dz = sideC ? dv : -dv;
 }
 
-GPUdi() void TPCFastTransform::Transform(int slice, int row, float pad, float time, float& x, float& y, float& z, float vertexTime) const
+GPUdi() void TPCFastTransform::Transform(int slice, int row, float pad, float time, float& x, float& y, float& z, float vertexTime, bool applyCorr) const
 {
   /// _______________ The main method: cluster transformation _______________________
   ///
@@ -368,9 +383,48 @@ GPUdi() void TPCFastTransform::Transform(int slice, int row, float pad, float ti
   float u = 0, v = 0;
   convPadTimeToUV(slice, row, pad, time, u, v, vertexTime);
 
-  if (mApplyCorrection) {
-    float dx, du, dv;
-    mCorrection.getCorrection(slice, row, u, v, dx, du, dv);
+  if (mApplyCorrection && applyCorr) {
+    float dx{};
+    float du{};
+    float dv{};
+
+    if (!mUseSlow) {
+      mCorrection.getCorrection(slice, row, u, v, dx, du, dv);
+      // std::cout << "    " << std::endl;
+      // std::cout << "dx: " << dx << std::endl;
+      // std::cout << "du: " << du << std::endl;
+      // std::cout << "dv: " << dv << std::endl;
+    } else {
+      float lx, ly, lz;
+      Transform(slice, row, pad, time, lx, ly, lz, 0, false);
+      float gx, gy, gz;
+      getGeometry().convLocalToGlobal(slice, lx, ly, lz, gx, gy, gz);
+
+      float gdC[3] = {0, 0, 0};
+      const bool side = slice < getGeometry().getNumberOfSlicesA() ? 0 : 1;
+      mCorrectionSlow.getCorrections(gx, gy, gz, side, gdC[0], gdC[1], gdC[2]);
+
+      float ldxC, ldyC, ldzC;
+      getGeometry().convGlobalToLocal(slice, gdC[0], gdC[1], gdC[2], ldxC, ldyC, ldzC);
+
+      if (slice >= 18) {
+        ldyC = -ldyC; // mirror for c-Side
+      } else {
+        ldzC = -ldzC; // mirror z for A-Side (why?)
+      }
+      // std::cout << "gdC[0]: " << gdC[0] << std::endl;
+      // std::cout << "gdC[1]: " << gdC[1] << std::endl;
+      // std::cout << "gdC[2]: " << gdC[2] << std::endl;
+      //
+      // std::cout << "ldxC: " << ldxC << std::endl;
+      // std::cout << "ldyC: " << ldyC << std::endl;
+      // std::cout << "ldzC: " << ldzC << std::endl;
+      //
+      // std::cout << "row: " << row << std::endl;
+      // std::cout << "pad: " << pad << std::endl;
+      // std::cout << "time: " << time << std::endl;
+    }
+
     x += dx;
     u += du;
     v += dv;
