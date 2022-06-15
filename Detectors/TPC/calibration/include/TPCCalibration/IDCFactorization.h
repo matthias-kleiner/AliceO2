@@ -25,10 +25,6 @@
 #include "TPCCalibration/IDCGroupHelperSector.h"
 #include "DataFormatsTPC/Defs.h"
 
-#if (defined(WITH_OPENMP) || defined(_OPENMP)) && !defined(__CLING__)
-#include <omp.h>
-#endif
-
 namespace o2::tpc
 {
 
@@ -308,9 +304,6 @@ class IDCFactorization : public IDCGroupHelperSector
 
   /// \return returns number of TFs for given chunk
   unsigned int getNTFsPerChunk(const unsigned int chunk) const;
-
-  /// \return returns the median of a vector
-  float getMedian(std::vector<float>& values);
 
   /// helper function for drawing
   void drawPadFlagMap(const bool type, const Sector sector, const std::string filename, const PadFlags flag) const;

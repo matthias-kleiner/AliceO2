@@ -13,9 +13,14 @@
 #include "CommonUtils/TreeStreamRedirector.h"
 #include "Framework/Logger.h"
 #include "TPCCalibration/IDCDrawHelper.h"
+#include "TPCCalibration/RobustAverage.h"
 #include "TFile.h"
 #include "TPCBase/CalDet.h"
 #include <functional>
+
+#if (defined(WITH_OPENMP) || defined(_OPENMP))
+#include <omp.h>
+#endif
 
 o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned char, Mapper::NREGIONS>& groupPads, const std::array<unsigned char, Mapper::NREGIONS>& groupRows, const std::array<unsigned char, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned char, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int groupNotnPadsSectorEdges, const unsigned int timeFrames, const unsigned int timeframesDeltaIDC, const std::vector<uint32_t>& crus)
   : IDCGroupHelperSector{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupNotnPadsSectorEdges}, mTimeFrames{timeFrames}, mTimeFramesDeltaIDC{timeframesDeltaIDC}, mIDCDelta{timeFrames / timeframesDeltaIDC + (timeFrames % timeframesDeltaIDC != 0)}, mCRUs{crus}
@@ -144,7 +149,7 @@ void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
       for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
         const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + factorIndexGlob;
-        if (norm && mIDCs[cru][timeframe][idcs] > 0) {
+        if (norm && mIDCs[cru][timeframe][idcs] != -1) {
           mIDCs[cru][timeframe][idcs] *= Mapper::INVPADAREA[region];
         }
         mIDCZero.fillValueIDCZero(mIDCs[cru][timeframe][idcs], side, indexGlob);
@@ -277,10 +282,8 @@ void o2::tpc::IDCFactorization::calcIDCOne(const std::vector<float>& idcsData, c
       }
     }
 
-    if (idcZeroVal > 0 && idcsData[idcs] >= 0) {
-      idcOneTmp[integrationInterval] += idcsData[idcs] / idcZeroVal;
-      ++weights[integrationInterval];
-    }
+    idcOneTmp[integrationInterval] += (idcZeroVal == 0) ? idcsData[idcs] : idcsData[idcs] / idcZeroVal;
+    ++weights[integrationInterval];
   }
 }
 
@@ -319,7 +322,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const auto idcZero = mIDCZero.mIDCZero[side][indexGlob];
         const auto idcOne = mIDCOne.mIDCOne[side][integrationIntervalGlobal];
         const auto mult = idcZero * idcOne;
-        auto val = (mult > 0 && mIDCs[cru][timeframe][idcs] > 0) ? mIDCs[cru][timeframe][idcs] / mult - 1 : 0;
+        auto val = (mult != 0) ? mIDCs[cru][timeframe][idcs] / mult - 1 : 0;
         if (!mInputGrouped && mPadFlagsMap) {
           const o2::tpc::PadFlags flag = mPadFlagsMap->getCalArray(cru).getValue(localPad);
           if ((flag & PadFlags::flagSkip) == PadFlags::flagSkip) {
@@ -337,16 +340,6 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
   }
 }
 
-float o2::tpc::IDCFactorization::getMedian(std::vector<float>& values)
-{
-  if (values.empty()) {
-    return 0;
-  }
-  size_t n = values.size() / 2;
-  std::nth_element(values.begin(), values.begin() + n, values.end());
-  return values[n];
-}
-
 void o2::tpc::IDCFactorization::createStatusMap()
 {
   const static auto& paramIDCGroup = ParameterIDCGroup::Instance();
@@ -358,16 +351,17 @@ void o2::tpc::IDCFactorization::createStatusMap()
     const Side side = cruTmp.side();
     const int region = cruTmp.region();
     const int sector = cruTmp.sector();
-    std::vector<float> idcsRow;
     const auto maxValues = Mapper::PADSPERROW[region].back();
-    idcsRow.reserve(maxValues);
+    o2::tpc::RobustAverage average(maxValues);
+
     for (unsigned int lrow = 0; lrow < Mapper::ROWSPERREGION[region]; ++lrow) {
 
       // loop over pads in row in the first iteration and calculate median at the end
       // in the second iteration check if the IDC value is to far away from the median
       for (int iter = 0; iter < 2; ++iter) {
         const unsigned int integrationInterval = 0;
-        const float median = (iter == 1) ? getMedian(idcsRow) : 0;
+        const float median = (iter == 1) ? average.getMedian() : 0;
+        const float stdDev = (iter == 1) ? average.getStdDev() : 0;
         // loop over pad row and calculate mean of IDC0
         for (unsigned int pad = 0; pad < Mapper::PADSPERROW[region][lrow]; ++pad) {
           const auto index = getIndexUngrouped(sector, region, lrow, pad, integrationInterval);
@@ -375,27 +369,24 @@ void o2::tpc::IDCFactorization::createStatusMap()
 
           if (iter == 0) {
             // exclude dead pads
-            if (idcZeroVal > 0) {
-              idcsRow.emplace_back(idcZeroVal);
+            if (idcZeroVal != -1) {
+              average.addValue(idcZeroVal);
             }
           } else {
-            if (idcZeroVal <= 0) {
-              const unsigned int padInRegion = Mapper::OFFSETCRULOCAL[region][lrow] + pad;
-              const o2::tpc::PadFlags flag = o2::tpc::PadFlags::flagDeadPad | o2::tpc::PadFlags::flagSkip | mPadFlagsMap->getCalArray(cru).getValue(padInRegion);
-              mPadFlagsMap->getCalArray(cru).setValue(padInRegion, flag);
-            } else if (idcZeroVal > paramIDCGroup.maxIDC0Median * median) {
-              const unsigned int padInRegion = Mapper::OFFSETCRULOCAL[region][lrow] + pad;
-              const o2::tpc::PadFlags flag = o2::tpc::PadFlags::flagHighPad | o2::tpc::PadFlags::flagSkip | mPadFlagsMap->getCalArray(cru).getValue(padInRegion);
-              mPadFlagsMap->getCalArray(cru).setValue(padInRegion, flag);
-            } else if (idcZeroVal < paramIDCGroup.minIDC0Median * median) {
-              const unsigned int padInRegion = Mapper::OFFSETCRULOCAL[region][lrow] + pad;
-              const o2::tpc::PadFlags flag = o2::tpc::PadFlags::flagLowPad | o2::tpc::PadFlags::flagSkip | mPadFlagsMap->getCalArray(cru).getValue(padInRegion);
-              mPadFlagsMap->getCalArray(cru).setValue(padInRegion, flag);
+            const unsigned int padInRegion = Mapper::OFFSETCRULOCAL[region][lrow] + pad;
+            o2::tpc::PadFlags flag = o2::tpc::PadFlags::flagGoodPad;
+            if (idcZeroVal == -1) {
+              flag = o2::tpc::PadFlags::flagDeadPad | o2::tpc::PadFlags::flagSkip | mPadFlagsMap->getCalArray(cru).getValue(padInRegion);
+            } else if (idcZeroVal > median + stdDev * paramIDCGroup.maxIDC0Median) {
+              flag = o2::tpc::PadFlags::flagHighPad | o2::tpc::PadFlags::flagSkip | mPadFlagsMap->getCalArray(cru).getValue(padInRegion);
+            } else if (idcZeroVal < median - stdDev * paramIDCGroup.minIDC0Median) {
+              flag = o2::tpc::PadFlags::flagLowPad | o2::tpc::PadFlags::flagSkip | mPadFlagsMap->getCalArray(cru).getValue(padInRegion);
             }
+            mPadFlagsMap->getCalArray(cru).setValue(padInRegion, flag);
           }
         } // loop over pads in row
       }   // end iteration
-      idcsRow.clear();
+      average.clear();
     }
   }
 }
