@@ -68,6 +68,8 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
   void init(o2::framework::InitContext& ic) final
   {
+    mCheckMissingData = ic.options().get<bool>("check-for-missing-data");
+
     if (mLoadFromFile) {
       TFile fInp("IDCGroup.root", "READ");
       for (TObject* keyAsObj : *fInp.GetListOfKeys()) {
@@ -145,7 +147,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
         const auto descr = tpcCRUHeader->dataDescription;
         if (TPCFLPIDCDevice<TPCFLPIDCDeviceGroup>::getDataDescriptionIDCGroup() == descr) {
           mIDCs[currentBuffer][cru][relTF] = pc.inputs().get<pmr::vector<float>>(ref);
-          LOGP(info, "receiving IDCs for CRU: {} of size {}", cru, mIDCs[currentBuffer][cru][relTF].size());
+          // LOGP(info, "receiving IDCs for CRU: {} of size {}", cru, mIDCs[currentBuffer][cru][relTF].size());
         }
       }
     }
@@ -153,7 +155,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
     LOGP(info, "number of received CRUs for current TF: {}    Needed a total number of processed CRUs of: {}   Current TF: {}", mProcessedCRU[currentBuffer][relTF], mCRUs.size(), tf);
 
     // check number of processed CRUs for previous TFs. If CRUs are missing for them, they are probably lost/not received
-    if (relTF == mTimeFrames - 1) {
+    if (mCheckMissingData && (relTF == mTimeFrames - 1)) {
       for (int iTF = relTF - 1; iTF >= 0; --iTF) {
         LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
         if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {
@@ -210,6 +212,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
   /// return data description for aggregated IDCs
   static constexpr header::DataDescription getDataDescriptionIDC() { return header::DataDescription{"IDCAGG"}; }
+  static constexpr header::DataDescription getDataDescriptionIDCRelTF() { return header::DataDescription{"IDCRELTF"}; }
 
  private:
   std::vector<uint32_t> mCRUs{};                                                                                                                                                                         ///< CRUs to process in this instance
@@ -225,11 +228,14 @@ class TPCDistributeIDCSpec : public o2::framework::Task
   std::array<long, 2> mTFEnd{};                                                                                                                                                                          ///< storing of last TF for buffer interval
   unsigned int mCurrentOutLane{0};                                                                                                                                                                       ///< index for keeping track of the current output lane
   bool mBuffer{false};                                                                                                                                                                                   ///< buffer index
+  bool mCheckMissingData{false};                                                                                                                                                                         ///< perform check for missing data
   const std::vector<InputSpec> mFilter = {{"idcsgroup", ConcreteDataTypeMatcher{o2::header::gDataOriginTPC, TPCFLPIDCDevice<TPCFLPIDCDeviceGroup>::getDataDescriptionIDCGroup()}, Lifetime::Timeframe}}; ///< filter for looping over input data
 
   void sendOutput(o2::framework::ProcessingContext& pc, const unsigned int currentOutLane, const bool currentBuffer, const unsigned int relTF)
   {
     // send output data for one TF for all CRUs
+    pc.outputs().snapshot(Output{gDataOriginTPC, getDataDescriptionIDCRelTF(), header::DataHeader::SubSpecificationType{currentOutLane}}, relTF);
+
     if (!mLoadFromFile) {
       for (unsigned int i = 0; i < mCRUs.size(); ++i) {
         pc.outputs().adoptContainer(Output{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), header::DataHeader::SubSpecificationType{mCRUs[i] + currentOutLane * CRU::MaxCRU}}, std::move(mIDCs[currentBuffer][mCRUs[i]][relTF]));
@@ -242,7 +248,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
   }
 };
 
-DataProcessorSpec getTPCDistributeIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int outlanes, const int firstTF, const bool loadFromFile)
+DataProcessorSpec getTPCDistributeIDCSpec(const int ilane, const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int outlanes, const int firstTF, const bool loadFromFile)
 {
   std::vector<InputSpec> inputSpecs;
   if (!loadFromFile) {
@@ -254,15 +260,21 @@ DataProcessorSpec getTPCDistributeIDCSpec(const std::vector<uint32_t>& crus, con
   for (unsigned int lane = 0; lane < outlanes; ++lane) {
     for (const auto cru : crus) {
       const header::DataHeader::SubSpecificationType subSpec{cru + lane * CRU::MaxCRU};
-      outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), subSpec});
+      outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), subSpec}, Lifetime::Sporadic);
     }
+    const header::DataHeader::SubSpecificationType subSpecRelTF{static_cast<unsigned int>(lane)};
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDCRelTF(), subSpecRelTF}, Lifetime::Sporadic);
   }
 
-  return DataProcessorSpec{
-    "tpc-distribute-idc",
+  const auto id = fmt::format("tpc-distribute-idc-{:02}", ilane);
+  DataProcessorSpec spec{
+    id.data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCDistributeIDCSpec>(crus, timeframes, outlanes, loadFromFile, firstTF)}};
+    AlgorithmSpec{adaptFromTask<TPCDistributeIDCSpec>(crus, timeframes, outlanes, loadFromFile, firstTF)},
+    Options{{"check-for-missing-data", VariantType::Bool, false, {"Perform check if all data is received."}}}}; // end DataProcessorSpec
+  spec.rank = ilane;
+  return spec;
 }
 
 } // namespace o2::tpc

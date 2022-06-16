@@ -30,6 +30,7 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"firstTF", VariantType::Int, -1, {"First time frame index. (if set to -1 the first TF will be automatically detected. Values < -1 are setting an offset for skipping the first TFs)"}},
     {"load-from-file", VariantType::Bool, false, {"load average and grouped IDCs from IDCGroup.root file."}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings"}},
+    {"lanes", VariantType::Int, 1, {"Number of lanes of this device (CRUs are splitted per line)"}},
     {"output-lanes", VariantType::Int, 2, {"Number of parallel pipelines which will be used in the factorization device."}}};
 
   std::swap(workflowOptions, options);
@@ -49,12 +50,21 @@ WorkflowSpec defineDataProcessing(ConfigContext const& config)
   const auto nCRUs = tpcCRUs.size();
   const auto timeframes = static_cast<unsigned int>(config.options().get<int>("timeframes"));
   const auto outlanes = static_cast<unsigned int>(config.options().get<int>("output-lanes"));
+  const auto nLanes = static_cast<unsigned int>(config.options().get<int>("lanes"));
   const auto firstTF = static_cast<unsigned int>(config.options().get<int>("firstTF"));
   const auto loadFromFile = config.options().get<bool>("load-from-file");
 
-  const auto first = tpcCRUs.begin();
-  const auto last = std::min(tpcCRUs.end(), first + nCRUs);
-  const std::vector<uint32_t> rangeCRUs(first, last);
-  WorkflowSpec workflow{getTPCDistributeIDCSpec(rangeCRUs, timeframes, outlanes, firstTF, loadFromFile)};
+  const auto crusPerLane = nCRUs / nLanes + ((nCRUs % nLanes) != 0);
+  WorkflowSpec workflow;
+  for (int ilane = 0; ilane < nLanes; ++ilane) {
+    const auto first = tpcCRUs.begin() + ilane * crusPerLane;
+    if (first >= tpcCRUs.end()) {
+      break;
+    }
+    const auto last = std::min(tpcCRUs.end(), first + crusPerLane);
+    const std::vector<uint32_t> rangeCRUs(first, last);
+    workflow.emplace_back(getTPCDistributeIDCSpec(ilane, rangeCRUs, timeframes, outlanes, firstTF, loadFromFile));
+  }
+
   return workflow;
 }

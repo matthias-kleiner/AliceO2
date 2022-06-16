@@ -116,14 +116,14 @@ DataProcessorSpec getTPCFourierTransformAggregatorSpec(const unsigned int timefr
   outputSpecs.emplace_back(ConcreteDataTypeMatcher{o2::calibration::Utils::gDataOriginCDBWrapper, TPCFourierTransformAggregatorSpec::getDataDescriptionCCDBFourier()}, Lifetime::Sporadic);
 
   if (senddebug) {
-    outputSpecs.emplace_back(ConcreteDataTypeMatcher{gDataOriginTPC, TPCFourierTransformAggregatorSpec::getDataDescriptionFourier()});
+    outputSpecs.emplace_back(ConcreteDataTypeMatcher{gDataOriginTPC, TPCFourierTransformAggregatorSpec::getDataDescriptionFourier()}, Lifetime::Sporadic);
   }
 
   std::vector<InputSpec> inputSpecs;
-  inputSpecs.emplace_back(InputSpec{"idconeA", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionIDC1(), header::DataHeader::SubSpecificationType{Side::A}, Lifetime::Timeframe});
-  inputSpecs.emplace_back(InputSpec{"idconeC", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionIDC1(), header::DataHeader::SubSpecificationType{Side::C}, Lifetime::Timeframe});
-  inputSpecs.emplace_back(InputSpec{"tsccdb", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionTimeStamp(), Lifetime::Timeframe});
-  inputSpecs.emplace_back(InputSpec{"intervals", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionIntervals(), Lifetime::Timeframe});
+  inputSpecs.emplace_back(InputSpec{"idconeA", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionIDC1(), header::DataHeader::SubSpecificationType{Side::A}, Lifetime::Sporadic});
+  inputSpecs.emplace_back(InputSpec{"idconeC", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionIDC1(), header::DataHeader::SubSpecificationType{Side::C}, Lifetime::Sporadic});
+  inputSpecs.emplace_back(InputSpec{"tsccdb", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionTimeStamp(), Lifetime::Sporadic});
+  inputSpecs.emplace_back(InputSpec{"intervals", gDataOriginTPC, TPCFactorizeIDCSpec<>::getDataDescriptionIntervals(), Lifetime::Sporadic});
 
   return DataProcessorSpec{
     "tpc-aggregator-ft",
