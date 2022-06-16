@@ -98,7 +98,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   {
     // store precise timestamp for look up later
     if (mUsePrecisetimeStamp && pc.inputs().isValid("orbitreset")) {
-      mOrbitResetTime[processing_helpers::getCreationTime(pc)] = processing_helpers::getTimeStamp(pc) / 1000;
+      mCreationTime[processing_helpers::getCreationTime(pc)] = processing_helpers::getTimeStamp(pc) / 1000;
       if (pc.inputs().countValidInputs() == 1) {
         return;
       }
@@ -214,7 +214,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   int mLaneId{0};                                                                                                                                                   ///< the id of the current process within the parallel pipeline
   std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;                                                                                                                   ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
   int mLanesDistribute{1};                                                                                                                                          ///< number of lanes used in the DistributeIDC device
-  std::unordered_map<uint32_t, uint32_t> mOrbitResetTime{};                                                                                                         ///< map to store the orbit reset time for precise time stamp
+  std::unordered_map<uint32_t, uint32_t> mCreationTime{};                                                                                                           ///< map to store the orbit reset time for precise time stamp
   const std::vector<InputSpec> mFilter = {{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC()}, Lifetime::Timeframe}}; ///< filter for looping over input data
 
   /// \return returns first TF for validity range when storing to CCDB
@@ -230,7 +230,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   auto getFirstTimeStampDeltaIDC(const unsigned int iChunk) const { return mTimeStampRangeIDCDelta[iChunk]; }
 
   /// \return returns the current timestamp
-  auto getTimeStamp(o2::framework::ProcessingContext& pc) { return mUsePrecisetimeStamp ? mOrbitResetTime[processing_helpers::getCreationTime(pc)] : processing_helpers::getCreationTime(pc); }
+  auto getTimeStamp(o2::framework::ProcessingContext& pc) { return mUsePrecisetimeStamp ? mCreationTime[processing_helpers::getCreationTime(pc)] : processing_helpers::getCreationTime(pc); }
 
   /// check if current tf will be used to set the time stamp range
   bool findTimeStamp(o2::framework::ProcessingContext& pc)
@@ -382,7 +382,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
 
     // reseting aggregated IDCs. This is done for safety, but if all data is received in the next aggregation interval it isnt necessary... remove it?
     mIDCFactorization.reset();
-    mOrbitResetTime.clear();
+    mCreationTime.clear();
   }
 };
 
