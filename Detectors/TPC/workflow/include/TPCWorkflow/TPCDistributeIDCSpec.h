@@ -125,6 +125,24 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
     if (relTF >= mProcessedCRU[currentBuffer].size()) {
       LOGP(fatal, "Skipping tf {}: relative tf {} is larger than size of buffer: {}", tf, relTF, mProcessedCRU[currentBuffer].size());
+
+      // check number of processed CRUs for previous TFs. If CRUs are missing for them, they are probably lost/not received
+      if (mCheckMissingData && (relTF == mTimeFrames - 1)) {
+        for (int iTF = relTF - 1; iTF >= 0; --iTF) {
+          LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
+          if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {
+            LOGP(warning, "CRUs for TF: {} are missing!", iTF);
+
+            // find actuall CRUs
+            for (auto& it : mProcessedCRUs[currentBuffer][iTF]) {
+              if (!it.second) {
+                LOGP(warning, "Couldnt find data for CRU {} possibly not received!", it.first);
+              }
+            }
+          }
+        }
+      }
+
       return;
     }
 
@@ -153,23 +171,6 @@ class TPCDistributeIDCSpec : public o2::framework::Task
     }
 
     LOGP(info, "number of received CRUs for current TF: {}    Needed a total number of processed CRUs of: {}   Current TF: {}", mProcessedCRU[currentBuffer][relTF], mCRUs.size(), tf);
-
-    // check number of processed CRUs for previous TFs. If CRUs are missing for them, they are probably lost/not received
-    if (mCheckMissingData && (relTF == mTimeFrames - 1)) {
-      for (int iTF = relTF - 1; iTF >= 0; --iTF) {
-        LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
-        if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {
-          LOGP(warning, "CRUs for TF: {} are missing!", iTF);
-
-          // find actuall CRUs
-          for (auto& it : mProcessedCRUs[currentBuffer][iTF]) {
-            if (!it.second) {
-              LOGP(warning, "Couldnt find data for CRU {} possibly not received!", it.first);
-            }
-          }
-        }
-      }
-    }
 
     // check if all CRUs for current TF are already aggregated and send data
     if ((mProcessedCRU[currentBuffer][relTF] == mCRUs.size() || mLoadFromFile) && !mDataSent[currentBuffer][relTF]) {
