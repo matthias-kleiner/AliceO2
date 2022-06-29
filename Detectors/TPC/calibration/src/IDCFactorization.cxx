@@ -243,7 +243,7 @@ void o2::tpc::IDCFactorization::calcIDCOne()
     const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
     unsigned int integrationIntervalOffset = 0;
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
-      calcIDCOne(mIDCs[cru][timeframe], mNIDCsPerCRU[region], integrationIntervalOffset, factorIndexGlob, cru, idcOneSafe[side][ithread], weightsSafe[side][ithread], &mIDCZero, mInputGrouped ? nullptr : mPadFlagsMap.get());
+      calcIDCOne(mIDCs[cru][timeframe], mNIDCsPerCRU[region], integrationIntervalOffset, factorIndexGlob, cru, idcOneSafe[side][ithread], weightsSafe[side][ithread], &mIDCZero, mInputGrouped ? nullptr : mPadFlagsMap.get(), mUsePadStatusMap);
       integrationIntervalOffset += mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
     }
   }
@@ -265,7 +265,7 @@ void o2::tpc::IDCFactorization::calcIDCOne()
   }
 }
 
-void o2::tpc::IDCFactorization::calcIDCOne(const std::vector<float>& idcsData, const int idcsPerCRU, const int integrationIntervalOffset, const unsigned int indexOffset, const CRU cru, std::vector<float>& idcOneTmp, std::vector<unsigned int>& weights, const IDCZero* idcZero, const CalDet<PadFlags>* flagMap)
+void o2::tpc::IDCFactorization::calcIDCOne(const std::vector<float>& idcsData, const int idcsPerCRU, const int integrationIntervalOffset, const unsigned int indexOffset, const CRU cru, std::vector<float>& idcOneTmp, std::vector<unsigned int>& weights, const IDCZero* idcZero, const CalDet<PadFlags>* flagMap, const bool usePadStatusMap)
 {
   const Side side = cru.side();
   for (unsigned int idcs = 0; idcs < idcsData.size(); ++idcs) {
@@ -275,7 +275,7 @@ void o2::tpc::IDCFactorization::calcIDCOne(const std::vector<float>& idcsData, c
     const auto idcZeroVal = idcZero ? idcZero->mIDCZero[side][indexGlob] : 1;
 
     // check pad in case of input is not grouped
-    if (flagMap) {
+    if (usePadStatusMap && flagMap) {
       const o2::tpc::PadFlags flag = flagMap->getCalArray(cru).getValue(localPad);
       if ((flag & PadFlags::flagSkip) == PadFlags::flagSkip) {
         continue;
@@ -323,7 +323,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const auto idcOne = mIDCOne.mIDCOne[side][integrationIntervalGlobal];
         const auto mult = idcZero * idcOne;
         auto val = (mult != 0) ? mIDCs[cru][timeframe][idcs] / mult - 1 : 0;
-        if (!mInputGrouped && mPadFlagsMap) {
+        if (mUsePadStatusMap && !mInputGrouped && mPadFlagsMap) {
           const o2::tpc::PadFlags flag = mPadFlagsMap->getCalArray(cru).getValue(localPad);
           if ((flag & PadFlags::flagSkip) == PadFlags::flagSkip) {
             val = 0;
@@ -421,17 +421,40 @@ void o2::tpc::IDCFactorization::getTF(const unsigned int region, unsigned int in
 
 void o2::tpc::IDCFactorization::factorizeIDCs(const bool norm)
 {
+  using timer = std::chrono::high_resolution_clock;
+
   LOGP(info, "Using {} threads for factorization of IDCs", sNThreads);
   LOGP(info, "Calculating IDC0");
+
+  auto start = timer::now();
   calcIDCZero(norm);
+  auto stop = timer::now();
+  std::chrono::duration<float> time = stop - start;
+  LOGP(info, "IDCZero time: {}", time.count());
+
   if (!mInputGrouped) {
     LOGP(info, "Creating pad status map");
+    start = timer::now();
     createStatusMap();
+    stop = timer::now();
+    time = stop - start;
+    LOGP(info, "Pad-by-pad status map time: {}", time.count());
   }
   LOGP(info, "Calculating IDC1");
+  start = timer::now();
   calcIDCOne();
+  stop = timer::now();
+  time = stop - start;
+  LOGP(info, "IDC1 time: {}", time.count());
+
   LOGP(info, "Calculating IDCDelta");
+  start = timer::now();
   calcIDCDelta();
+  stop = timer::now();
+  time = stop - start;
+  LOGP(info, "IDCDelta time: {}", time.count());
+
+  LOGP(info, "Factorization done");
 }
 
 unsigned long o2::tpc::IDCFactorization::getNIntegrationIntervals(const unsigned int chunk, const int cru) const

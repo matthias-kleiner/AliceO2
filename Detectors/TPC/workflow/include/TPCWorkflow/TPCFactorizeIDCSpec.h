@@ -82,6 +82,8 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   {
     mLaneId = ic.services().get<const o2::framework::DeviceSpec>().rank;
     mUpdateGroupingPar = mLaneId == 0 ? !(ic.options().get<bool>("update-not-grouping-parameter")) : false;
+    mIDCFactorization.setUsePadStatusMap(ic.options().get<bool>("enablePadStatusMap"));
+
     mLanesDistribute = ic.options().get<int>("lanesDistribute");
 
     const std::string refGainMapFile = ic.options().get<std::string>("gainMapFile");
@@ -381,8 +383,10 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     }
 
     // reseting aggregated IDCs. This is done for safety, but if all data is received in the next aggregation interval it isnt necessary... remove it?
+    LOGP(info, "Everything done! Clearing memory...");
     mIDCFactorization.reset();
     mCreationTime.clear();
+    LOGP(info, "Everything cleared. Waiting for new data to arrive.");
   }
 };
 
@@ -444,6 +448,7 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint3
     AlgorithmSpec{adaptFromTask<TPCFactorizeIDCSpec<Type>>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, compression, debug, senddebug, usePrecisetimeStamp, sendOutputFFT, sendCCDB)},
     Options{{"gainMapFile", VariantType::String, "", {"file to reference gain map, which will be used for correcting the cluster charge"}},
             {"lanesDistribute", VariantType::Int, 1, {"Number of lanes which were used in the DistributeIDC device."}},
+            {"enablePadStatusMap", VariantType::Bool, false, {"Enabling the usage of the pad-by-pad status map during factorization."}},
             {"update-not-grouping-parameter", VariantType::Bool, false, {"Do NOT Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
   spec.rank = lane;
   return spec;

@@ -127,7 +127,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
       LOGP(warning, "Skipping tf {}: relative tf {} is larger than size of buffer: {}", tf, relTF, mProcessedCRU[currentBuffer].size());
 
       // check number of processed CRUs for previous TFs. If CRUs are missing for them, they are probably lost/not received
-      if (mCheckMissingData && (relTF == mTimeFrames - 1)) {
+      if (mCheckMissingData) {
         for (int iTF = relTF - 1; iTF >= 0; --iTF) {
           LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
           if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {

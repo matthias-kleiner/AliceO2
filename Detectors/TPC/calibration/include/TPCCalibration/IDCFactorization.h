@@ -68,7 +68,7 @@ class IDCFactorization : public IDCGroupHelperSector
   void calcIDCDelta();
 
   /// calculate I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-  static void calcIDCOne(const std::vector<float>& idcsData, const int idcsPerCRU, const int integrationIntervalOffset, const unsigned int indexOffset, const CRU cru, std::vector<float>& idcOneTmp, std::vector<unsigned int>& weights, const IDCZero* idcZero, const CalDet<PadFlags>* flagMap = nullptr);
+  static void calcIDCOne(const std::vector<float>& idcsData, const int idcsPerCRU, const int integrationIntervalOffset, const unsigned int indexOffset, const CRU cru, std::vector<float>& idcOneTmp, std::vector<unsigned int>& weights, const IDCZero* idcZero, const CalDet<PadFlags>* flagMap = nullptr, const bool usePadStatusMap = false);
 
   /// \return returns the stored grouped and integrated IDC
   /// \param sector sector
@@ -263,6 +263,12 @@ class IDCFactorization : public IDCGroupHelperSector
   /// setting a map containing status flags for each pad
   void setPadFlagMap(const CalDet<PadFlags>& flagmap);
 
+  /// setting the usage of the pad-by-pad status map during the factorization of the IDCs
+  void setUsePadStatusMap(const bool usePadStatusMap) { mUsePadStatusMap = usePadStatusMap; }
+
+  /// \return returns whether the pad-by-pad status map will be used during the factorization of the IDCs
+  bool getUsePadStatusMap() const { return mUsePadStatusMap; }
+
   /// writing the pad status map to file
   /// \param outFile output file name
   /// \param mapName output name of the object
@@ -285,6 +291,7 @@ class IDCFactorization : public IDCGroupHelperSector
   std::unique_ptr<CalDet<float>> mGainMap;                          ///<! static Gain map object used for filling missing IDC_0 values
   std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;                   ///< status flag for each pad (i.e. if the pad is dead)
   bool mInputGrouped{false};                                        ///< flag which is set to true if the input IDCs are grouped (checked via the grouping parameters from the constructor)
+  bool mUsePadStatusMap{false};                                     ///< flag for using the pad-by-pad status map during the factorization of the IDCs
   const std::vector<uint32_t> mCRUs{};                              ///< CRUs to process in this instance
 
   /// helper function for drawing IDCDelta
