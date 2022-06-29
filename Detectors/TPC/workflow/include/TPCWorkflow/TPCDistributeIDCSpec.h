@@ -128,7 +128,8 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
       // check number of processed CRUs for previous TFs. If CRUs are missing for them, they are probably lost/not received
       if (mCheckMissingData) {
-        for (int iTF = relTF - 1; iTF >= 0; --iTF) {
+        // for (int iTF = mProcessedCRU[currentBuffer].size() - 1; iTF >= 0; --iTF) {
+        for (int iTF = 0; iTF < mProcessedCRU[currentBuffer].size(); ++iTF) {
           LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
           if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {
             LOGP(warning, "CRUs for TF: {} are missing!", iTF);
