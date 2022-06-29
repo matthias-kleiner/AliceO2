@@ -85,6 +85,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     mIDCFactorization.setUsePadStatusMap(ic.options().get<bool>("enablePadStatusMap"));
 
     mLanesDistribute = ic.options().get<int>("lanesDistribute");
+    mTFsMessaged = ic.options().get<int>("nTFsMessaged");
 
     const std::string refGainMapFile = ic.options().get<std::string>("gainMapFile");
     if (!refGainMapFile.empty()) {
@@ -157,7 +158,9 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     }
     ++mProcessedTFs;
 
-    LOGP(info, "aggregated TFs: {}", mProcessedTFs);
+    if (!(currTF % mTFsMessaged)) {
+      LOGP(info, "aggregated TFs: {}", mProcessedTFs);
+    }
 
     if (mProcessedTFs == mLanesDistribute * mIDCFactorization.getNTimeframes()) {
       mProcessedTFs = 0; // reset processed TFs for next aggregation interval
@@ -216,6 +219,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   int mLaneId{0};                                                                                                                                                   ///< the id of the current process within the parallel pipeline
   std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;                                                                                                                   ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
   int mLanesDistribute{1};                                                                                                                                          ///< number of lanes used in the DistributeIDC device
+  unsigned int mTFsMessaged{10};                                                                                                                                    ///< send info messages only every mTFsMessaged
   std::unordered_map<uint32_t, uint32_t> mCreationTime{};                                                                                                           ///< map to store the orbit reset time for precise time stamp
   const std::vector<InputSpec> mFilter = {{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC()}, Lifetime::Timeframe}}; ///< filter for looping over input data
 
@@ -448,6 +452,7 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint3
     AlgorithmSpec{adaptFromTask<TPCFactorizeIDCSpec<Type>>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, compression, debug, senddebug, usePrecisetimeStamp, sendOutputFFT, sendCCDB)},
     Options{{"gainMapFile", VariantType::String, "", {"file to reference gain map, which will be used for correcting the cluster charge"}},
             {"lanesDistribute", VariantType::Int, 1, {"Number of lanes which were used in the DistributeIDC device."}},
+            {"nTFsMessaged", VariantType::Int, 50, {"Send messages only every nTFs."}},
             {"enablePadStatusMap", VariantType::Bool, false, {"Enabling the usage of the pad-by-pad status map during factorization."}},
             {"update-not-grouping-parameter", VariantType::Bool, false, {"Do NOT Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
   spec.rank = lane;
