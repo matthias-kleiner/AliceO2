@@ -85,7 +85,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     mIDCFactorization.setUsePadStatusMap(ic.options().get<bool>("enablePadStatusMap"));
 
     mLanesDistribute = ic.options().get<int>("lanesDistribute");
-    mTFsMessaged = ic.options().get<int>("nTFsMessaged");
+    mTFsMessaged = ic.options().get<int>("nTFsMessage");
 
     const std::string refGainMapFile = ic.options().get<std::string>("gainMapFile");
     if (!refGainMapFile.empty()) {
@@ -268,6 +268,8 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
 
   void sendOutput(DataAllocator& output)
   {
+    using timer = std::chrono::high_resolution_clock;
+
     if (mSendOutDebug) {
       sendOutputDebug(output);
     }
@@ -286,20 +288,32 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     if (mSendOutCCDB) {
       LOGP(info, "Writing IDCs to CCDB");
 
+      auto start = timer::now();
       o2::ccdb::CcdbObjectInfo ccdbInfoIDC0(CDBTypeMap.at(CDBType::CalIDC0), std::string{}, std::string{}, std::map<std::string, std::string>{}, timeStampStart, timeStampEnd);
       auto imageIDC0 = o2::ccdb::CcdbApi::createObjectImage(&mIDCFactorization.getIDCZero(), &ccdbInfoIDC0);
       LOGP(info, "Sending object {} / {} of size {} bytes, valid for {} : {} ", ccdbInfoIDC0.getPath(), ccdbInfoIDC0.getFileName(), imageIDC0->size(), ccdbInfoIDC0.getStartValidityTimestamp(), ccdbInfoIDC0.getEndValidityTimestamp());
       output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBPayload, getDataDescriptionCCDBIDC0(), 0}, *imageIDC0.get());
       output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBWrapper, getDataDescriptionCCDBIDC0(), 0}, ccdbInfoIDC0);
+      auto stop = timer::now();
+      std::chrono::duration<float> time = stop - start;
+      float totalTime = time.count();
+      LOGP(info, "IDCZero CCDB time: {}", time.count());
 
+      start = timer::now();
       o2::ccdb::CcdbObjectInfo ccdbInfoIDC1(CDBTypeMap.at(CDBType::CalIDC1), std::string{}, std::string{}, std::map<std::string, std::string>{}, timeStampStart, timeStampEnd);
       auto imageIDC1 = o2::ccdb::CcdbApi::createObjectImage(&mIDCFactorization.getIDCOne(), &ccdbInfoIDC1);
       LOGP(info, "Sending object {} / {} of size {} bytes, valid for {} : {} ", ccdbInfoIDC1.getPath(), ccdbInfoIDC1.getFileName(), imageIDC1->size(), ccdbInfoIDC1.getStartValidityTimestamp(), ccdbInfoIDC1.getEndValidityTimestamp());
       output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBPayload, getDataDescriptionCCDBIDC1(), 0}, *imageIDC1.get());
       output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBWrapper, getDataDescriptionCCDBIDC1(), 0}, ccdbInfoIDC1);
+      stop = timer::now();
+      time = stop - start;
+      LOGP(info, "IDC1 CCDB time: {}", time.count());
+      totalTime += time.count();
 
       auto padStatusMap = mIDCFactorization.getPadStatusMap();
       if (padStatusMap) {
+        start = timer::now();
+
         // store map in case it is nullptr
         if (!mPadFlagsMap) {
           mPadFlagsMap = std::move(padStatusMap);
@@ -323,14 +337,27 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
             LOGP(info, "Pad status map written to CCDB");
           }
         }
+        stop = timer::now();
+        time = stop - start;
+        LOGP(info, "Pad status map CCDB time: {}", time.count());
+        totalTime += time.count();
       }
 
+      start = timer::now();
       for (unsigned int iChunk = 0; iChunk < mIDCFactorization.getNChunks(); ++iChunk) {
         if constexpr (std::is_same_v<Type, TPCFactorizeIDCSpecGroup>) {
           // perform grouping of IDC Delta if necessary
+          auto startGrouping = timer::now();
           mIDCStruct.mIDCs.setIDCs(std::move(mIDCFactorization).getIDCDeltaUncompressed(iChunk));
           LOGP(info, "averaging and grouping DeltaIDCs for TFs {} - {} for CRUs {} to {} using {} threads", getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk), mCRUs.front(), mCRUs.back(), mIDCStruct.mIDCs.getNThreads());
-          mIDCStruct.mIDCs.processIDCs(mPadFlagsMap.get());
+
+          // perform averagiing and grouping
+          mIDCStruct.mIDCs.processIDCs(mIDCFactorization.getUsePadStatusMap() ? mPadFlagsMap.get() : nullptr);
+
+          auto stopGrouping = timer::now();
+          time = stopGrouping - startGrouping;
+          LOGP(info, "Averaging and grouping time: {}", time.count());
+
           if (mDebug) {
             mIDCStruct.mIDCs.dumpToFile(fmt::format("IDCDeltaAveraged_chunk{:02}_{:02}.root", iChunk, getFirstTFDeltaIDC(iChunk)).data());
           }
@@ -338,6 +365,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
 
         o2::ccdb::CcdbObjectInfo ccdbInfoIDCDelta(CDBTypeMap.at(CDBType::CalIDCDelta), std::string{}, std::string{}, std::map<std::string, std::string>{}, getFirstTimeStampDeltaIDC(iChunk), timeStampEnd);
 
+        auto startCCDBIDCDelta = timer::now();
         switch (mCompressionDeltaIDC) {
           case IDCDeltaCompression::MEDIUM:
           default: {
@@ -383,7 +411,15 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
             output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBWrapper, getDataDescriptionCCDBIDCDelta(), iChunk}, ccdbInfoIDCDelta);
             break;
         }
+        auto stopCCDBIDCDelta = timer::now();
+        time = stopCCDBIDCDelta - startCCDBIDCDelta;
+        LOGP(info, "Compression and CCDB object creation time: {}", time.count());
       }
+      stop = timer::now();
+      time = stop - start;
+      LOGP(info, "IDCDelta CCDB time: {}", time.count());
+      totalTime += time.count();
+      LOGP(info, "CCDB object creation done. Total time: {}", totalTime);
     }
 
     // reseting aggregated IDCs. This is done for safety, but if all data is received in the next aggregation interval it isnt necessary... remove it?
@@ -452,7 +488,7 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint3
     AlgorithmSpec{adaptFromTask<TPCFactorizeIDCSpec<Type>>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, compression, debug, senddebug, usePrecisetimeStamp, sendOutputFFT, sendCCDB)},
     Options{{"gainMapFile", VariantType::String, "", {"file to reference gain map, which will be used for correcting the cluster charge"}},
             {"lanesDistribute", VariantType::Int, 1, {"Number of lanes which were used in the DistributeIDC device."}},
-            {"nTFsMessaged", VariantType::Int, 50, {"Send messages only every nTFs."}},
+            {"nTFsMessage", VariantType::Int, 200, {"Send messages only every nTFs."}},
             {"enablePadStatusMap", VariantType::Bool, false, {"Enabling the usage of the pad-by-pad status map during factorization."}},
             {"update-not-grouping-parameter", VariantType::Bool, false, {"Do NOT Update/Writing grouping parameters to CCDB."}}}}; // end DataProcessorSpec
   spec.rank = lane;
