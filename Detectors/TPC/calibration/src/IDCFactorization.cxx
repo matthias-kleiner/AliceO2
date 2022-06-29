@@ -430,6 +430,7 @@ void o2::tpc::IDCFactorization::factorizeIDCs(const bool norm)
   calcIDCZero(norm);
   auto stop = timer::now();
   std::chrono::duration<float> time = stop - start;
+  float totalTime = time.count();
   LOGP(info, "IDCZero time: {}", time.count());
 
   if (!mInputGrouped) {
@@ -439,6 +440,7 @@ void o2::tpc::IDCFactorization::factorizeIDCs(const bool norm)
     stop = timer::now();
     time = stop - start;
     LOGP(info, "Pad-by-pad status map time: {}", time.count());
+    totalTime += time.count();
   }
   LOGP(info, "Calculating IDC1");
   start = timer::now();
@@ -446,6 +448,7 @@ void o2::tpc::IDCFactorization::factorizeIDCs(const bool norm)
   stop = timer::now();
   time = stop - start;
   LOGP(info, "IDC1 time: {}", time.count());
+  totalTime += time.count();
 
   LOGP(info, "Calculating IDCDelta");
   start = timer::now();
@@ -453,8 +456,9 @@ void o2::tpc::IDCFactorization::factorizeIDCs(const bool norm)
   stop = timer::now();
   time = stop - start;
   LOGP(info, "IDCDelta time: {}", time.count());
+  totalTime += time.count();
 
-  LOGP(info, "Factorization done");
+  LOGP(info, "Factorization done. Total time: {}", totalTime);
 }
 
 unsigned long o2::tpc::IDCFactorization::getNIntegrationIntervals(const unsigned int chunk, const int cru) const
