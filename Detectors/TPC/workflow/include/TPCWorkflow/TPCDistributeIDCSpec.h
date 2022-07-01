@@ -163,11 +163,8 @@ class TPCDistributeIDCSpec : public o2::framework::Task
         // count total number of processed CRUs for given TF
         ++mProcessedCRU[currentBuffer][relTF];
 
-        const auto descr = tpcCRUHeader->dataDescription;
-        if (TPCFLPIDCDevice<TPCFLPIDCDeviceGroup>::getDataDescriptionIDCGroup() == descr) {
-          mIDCs[currentBuffer][cru][relTF] = pc.inputs().get<pmr::vector<float>>(ref);
-          // LOGP(info, "receiving IDCs for CRU: {} of size {}", cru, mIDCs[currentBuffer][cru][relTF].size());
-        }
+        // storing IDCs
+        mIDCs[currentBuffer][cru][relTF] = pc.inputs().get<pmr::vector<float>>(ref);
       }
     }
 
