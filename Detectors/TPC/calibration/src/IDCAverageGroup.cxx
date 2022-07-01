@@ -107,7 +107,7 @@ float o2::tpc::IDCAverageGroup<Type>::normal_dist(const float x, const float sig
 }
 
 template <>
-void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupCRU>::processIDCs(const CalDet<PadFlags>* padStatusFlags)
+void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupCRU>::processIDCs(const CalDet<PadFlags>* padStatusFlags, const std::vector<uint32_t>&)
 {
   std::vector<IDCAverageGroupHelper<IDCAverageGroupCRU>> idcStruct(sNThreads, IDCAverageGroupHelper<IDCAverageGroupCRU>{this->mIDCsGrouped, this->mWeightsPad, this->mWeightsRow, this->mIDCsUngrouped, this->mRobustAverage, this->getCRU()});
 #pragma omp parallel for num_threads(sNThreads)
@@ -119,15 +119,17 @@ void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupCRU>::processIDCs(const Ca
 }
 
 template <>
-void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupTPC>::processIDCs(const CalDet<PadFlags>* padStatusFlags)
+void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupTPC>::processIDCs(const CalDet<PadFlags>* padStatusFlags, const std::vector<uint32_t>& crus)
 {
   std::vector<IDCAverageGroupHelper<IDCAverageGroupTPC>> idcStruct(sNThreads, IDCAverageGroupHelper<IDCAverageGroupTPC>{this->mIDCsGrouped, this->mWeightsPad, this->mWeightsRow, this->mIDCsUngrouped, this->mRobustAverage, this->mIDCGroupHelperSector});
   for (int thread = 0; thread < sNThreads; ++thread) {
     idcStruct[thread].setThreadNum(thread);
   }
 
+  const int cruEnd = crus.empty() ? CRU::MaxCRU : crus.size();
 #pragma omp parallel for num_threads(sNThreads)
-  for (unsigned int iCRU = 0; iCRU < CRU::MaxCRU; ++iCRU) {
+  for (unsigned int i = 0; i < cruEnd; ++i) {
+    const int iCRU = crus.empty() ? i : crus[i];
     const unsigned int threadNum = omp_get_thread_num();
     const CRU cru(iCRU);
     idcStruct[threadNum].setCRU(cru);

@@ -352,7 +352,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
           LOGP(info, "averaging and grouping DeltaIDCs for TFs {} - {} for CRUs {} to {} using {} threads", getFirstTFDeltaIDC(iChunk), getLastTFDeltaIDC(iChunk), mCRUs.front(), mCRUs.back(), mIDCStruct.mIDCs.getNThreads());
 
           // perform averagiing and grouping
-          mIDCStruct.mIDCs.processIDCs(mIDCFactorization.getUsePadStatusMap() ? mPadFlagsMap.get() : nullptr);
+          mIDCStruct.mIDCs.processIDCs(mIDCFactorization.getUsePadStatusMap() ? mPadFlagsMap.get() : nullptr, mCRUs);
 
           auto stopGrouping = timer::now();
           time = stopGrouping - startGrouping;
