@@ -24,33 +24,35 @@
 template <typename DataT>
 unsigned int o2::tpc::IDCCCDBHelper<DataT>::getNIntegrationIntervalsIDCDelta(const o2::tpc::Side side) const
 {
-  return (mIDCDelta && mHelperSector) ? mIDCDelta->getNIDCs(side) / (mHelperSector->getNIDCsPerSector() * SECTORSPERSIDE) : 0;
+  return (mIDCDelta[side] && mHelperSector[side]) ? mIDCDelta[side]->getNIDCs() / (mHelperSector[side]->getNIDCsPerSector() * SECTORSPERSIDE) : 0;
 }
 
 template <typename DataT>
 unsigned int o2::tpc::IDCCCDBHelper<DataT>::getNIntegrationIntervalsIDCOne(const o2::tpc::Side side) const
 {
-  return mIDCOne ? mIDCOne->getNIDCs(side) : 0;
+  return mIDCOne[side] ? mIDCOne[side]->getNIDCs() : 0;
 }
 
 template <typename DataT>
 float o2::tpc::IDCCCDBHelper<DataT>::getIDCZeroVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad) const
 {
   /// if the number of pads of the IDC0 corresponds to the number of pads of one TPC side, then no grouping was applied
-  return !mIDCZero ? -1 : mIDCZero->getNIDC0(Sector(sector).side()) == Mapper::getNumberOfPadsPerSide() ? mIDCZero->getValueIDCZero(Sector(sector).side(), getUngroupedIndexGlobal(sector, region, urow, upad, 0))
-                                                                                                        : mIDCZero->getValueIDCZero(Sector(sector).side(), mHelperSector->getIndexUngrouped(sector, region, urow, upad, 0));
+  const auto side = Sector(sector).side();
+  return !mIDCZero[side] ? -1 : (mIDCZero[side]->getNIDC0() == Mapper::getNumberOfPadsPerSide()) ? mIDCZero[side]->getValueIDCZero(getUngroupedIndexGlobal(sector, region, urow, upad, 0))
+                                                                                                 : mIDCZero[side]->getValueIDCZero(mHelperSector[side]->getIndexUngrouped(sector, region, urow, upad, 0));
 }
 
 template <typename DataT>
 float o2::tpc::IDCCCDBHelper<DataT>::getIDCDeltaVal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const
 {
-  return (!mIDCDelta || !mHelperSector) ? -1 : mIDCDelta->getValue(Sector(sector).side(), mHelperSector->getIndexUngrouped(sector, region, urow, upad, integrationInterval));
+  const auto side = Sector(sector).side();
+  return (!mIDCDelta[side] || !mHelperSector[side]) ? -1 : mIDCDelta[side]->getValue(mHelperSector[side]->getIndexUngrouped(sector, region, urow, upad, integrationInterval));
 }
 
 template <typename DataT>
 float o2::tpc::IDCCCDBHelper<DataT>::getIDCOneVal(const o2::tpc::Side side, const unsigned int integrationInterval) const
 {
-  return !mIDCOne ? -1 : mIDCOne->getValueIDCOne(side, integrationInterval);
+  return !mIDCOne[side] ? -1 : mIDCOne[side]->getValueIDCOne(integrationInterval);
 }
 
 template <typename DataT>
@@ -322,7 +324,7 @@ TCanvas* o2::tpc::IDCCCDBHelper<DataT>::drawIDCOneCanvas(TCanvas* outputCanvas, 
   hCside1D->SetTitleSize(0.05, "XY");
 
   if (integrationIntervals <= 0) {
-    integrationIntervals = std::min(mIDCOne->getNIDCs(Side::A), mIDCOne->getNIDCs(Side::C));
+    integrationIntervals = std::min(mIDCOne[Side::A]->getNIDCs(), mIDCOne[Side::C]->getNIDCs());
   }
 
   for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
@@ -355,20 +357,20 @@ TCanvas* o2::tpc::IDCCCDBHelper<DataT>::drawFourierCoeff(TCanvas* outputCanvas, 
 
   std::vector<TH1F*> histos;
 
-  for (int i = 0; i < mFourierCoeff->getNCoefficientsPerTF(); i++) {
+  for (int i = 0; i < mFourierCoeff[side]->getNCoefficientsPerTF(); i++) {
     histos.emplace_back(new TH1F(fmt::format("h_FourierCoeff{}_{}Side", i, (side == Side::A) ? "A" : "C").data(), fmt::format("1D distribution of Fourier Coefficient {} ({}-Side)", i, (side == Side::A) ? "A" : "C").data(), nbins1D, xMin1D, xMax1D));
     histos.back()->GetXaxis()->SetTitle(fmt::format("Fourier Coefficient {}", i).data());
     histos.back()->SetBit(TObject::kCanDelete);
   }
 
-  const auto& coeffs = mFourierCoeff->getFourierCoefficients(side);
-  const auto nCoeffPerTF = mFourierCoeff->getNCoefficientsPerTF();
+  const auto& coeffs = mFourierCoeff[side]->getFourierCoefficients();
+  const auto nCoeffPerTF = mFourierCoeff[side]->getNCoefficientsPerTF();
 
-  for (int i = 0; i < mFourierCoeff->getNCoefficients(side); i++) {
+  for (int i = 0; i < mFourierCoeff[side]->getNCoefficients(); i++) {
     histos.at(i % nCoeffPerTF)->Fill(coeffs.at(i));
   }
 
-  canv->DivideSquare(mFourierCoeff->getNCoefficientsPerTF());
+  canv->DivideSquare(mFourierCoeff[side]->getNCoefficientsPerTF());
 
   size_t pad = 1;
 
@@ -427,8 +429,8 @@ void o2::tpc::IDCCCDBHelper<DataT>::dumpToTree(const char* outFileName) const
       }
     }
   }
-  std::vector<float> idcOneA = !mIDCOne ? std::vector<float>() : mIDCOne->mIDCOne[Side::A];
-  std::vector<float> idcOneC = !mIDCOne ? std::vector<float>() : mIDCOne->mIDCOne[Side::C];
+  std::vector<float> idcOneA = !mIDCOne[Side::A] ? std::vector<float>() : mIDCOne[Side::A]->mIDCOne;
+  std::vector<float> idcOneC = !mIDCOne[Side::C] ? std::vector<float>() : mIDCOne[Side::C]->mIDCOne;
 
   pcstream << "tree"
            << "IDC.=" << idcs
@@ -444,6 +446,42 @@ void o2::tpc::IDCCCDBHelper<DataT>::dumpToTree(const char* outFileName) const
            << "gy.=" << vGlobalYPos
            << "sector.=" << sectorv
            << "\n";
+  pcstream.Close();
+}
+
+template <typename DataT>
+void o2::tpc::IDCCCDBHelper<DataT>::dumpToFourierCoeffToTree(const char* outFileName) const
+{
+  o2::utils::TreeStreamRedirector pcstream("fourierCoeff.root", "RECREATE");
+  pcstream.GetFile()->cd();
+
+  for (int iside = 0; iside < SIDES; ++iside) {
+    const Side side = (iside == 0) ? Side::A : Side::C;
+
+    if (!mFourierCoeff[side]) {
+      continue;
+    }
+
+    const int nTFs = mFourierCoeff[side]->getNCoefficients() / mFourierCoeff[side]->getNCoefficientsPerTF();
+    for (int iTF = 0; iTF < nTFs; ++iTF) {
+      std::vector<float> coeff;
+      std::vector<int> ind;
+      int coeffPerTF = mFourierCoeff[side]->getNCoefficientsPerTF();
+      for (int i = 0; i < coeffPerTF; ++i) {
+        const int index = mFourierCoeff[side]->getIndex(iTF, i);
+        coeff.emplace_back((*mFourierCoeff[side])(index));
+        ind.emplace_back(i);
+      }
+
+      pcstream << "tree"
+               << "iTF=" << iTF
+               << "index=" << ind
+               << "coeffPerTF=" << coeffPerTF
+               << "coeff.=" << coeff
+               << "side=" << iside
+               << "\n";
+    }
+  }
   pcstream.Close();
 }
 

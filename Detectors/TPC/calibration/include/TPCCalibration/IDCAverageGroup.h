@@ -86,8 +86,7 @@ class IDCAverageGroup : public IDCAverageGroupBase<Type>
 
   /// grouping and averaging of IDCs
   /// \param padStatusFlags pointer to map containing status flags for each pad to skip dead pads etc.
-  /// \param crus crus which will be processed (empty for all CRUs)
-  void processIDCs(const CalDet<PadFlags>* padStatusFlags = nullptr, const std::vector<uint32_t>& crus = std::vector<uint32_t>());
+  void processIDCs(const CalDet<PadFlags>* padStatusFlags = nullptr);
 
   /// draw plot with information about the performed grouping
   /// \param filename name of the output file. If empty the name is chosen automatically

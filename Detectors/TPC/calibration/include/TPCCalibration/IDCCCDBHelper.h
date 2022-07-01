@@ -64,19 +64,19 @@ class IDCCCDBHelper
   IDCCCDBHelper() = default;
 
   /// setting the IDCDelta class member
-  void setIDCDelta(IDCDelta<DataT>* idcDelta) { mIDCDelta = idcDelta; }
+  void setIDCDelta(IDCDelta<DataT>* idcDelta, const Side side) { mIDCDelta[side] = idcDelta; }
 
   /// setting the 0D-IDCs
-  void setIDCZero(IDCZero* idcZero) { mIDCZero = idcZero; }
+  void setIDCZero(IDCZero* idcZero, const Side side) { mIDCZero[side] = idcZero; }
 
   /// setting the 1D-IDCs
-  void setIDCOne(IDCOne* idcOne) { mIDCOne = idcOne; }
+  void setIDCOne(IDCOne* idcOne, const Side side) { mIDCOne[side] = idcOne; }
 
   /// setting the fourier coefficients
-  void setFourierCoeffs(FourierCoeff* fourier) { mFourierCoeff = fourier; }
+  void setFourierCoeffs(FourierCoeff* fourier, const Side side) { mFourierCoeff[side] = fourier; }
 
   /// setting the grouping parameters
-  void setGroupingParameter(IDCGroupHelperSector* helperSector) { mHelperSector = helperSector; }
+  void setGroupingParameter(IDCGroupHelperSector* helperSector, const Side side) { mHelperSector[side] = helperSector; }
 
   /// setting the pad status map which is used to filter out long term outliers
   void setPadStatusMap(CalDet<PadFlags>* map) { mPadFlagsMap = map; }
@@ -175,15 +175,19 @@ class IDCCCDBHelper
   /// \param outFileName name of the output file
   void dumpToTree(const char* outFileName = "IDCCCDBTree.root") const;
 
+  /// dumping the loaded fourier coefficients to a tree
+  /// \param outFileName name of the output file
+  void dumpToFourierCoeffToTree(const char* outFileName = "FourierCCDBTree.root") const;
+
   // TODO dump ICDelta to separate tree...
 
  private:
-  IDCZero* mIDCZero = nullptr;                   ///< 0D-IDCs: ///< I_0(r,\phi) = <I(r,\phi,t)>_t
-  IDCDelta<DataT>* mIDCDelta = nullptr;          ///< compressed or uncompressed Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
-  IDCOne* mIDCOne = nullptr;                     ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
-  IDCGroupHelperSector* mHelperSector = nullptr; ///< helper for accessing IDC0 and IDC-Delta
-  FourierCoeff* mFourierCoeff = nullptr;         ///< fourier coefficients of IDCOne
-  CalDet<PadFlags>* mPadFlagsMap = nullptr;      ///< status flag for each pad (i.e. if the pad is dead)
+  std::array<IDCZero*, SIDES> mIDCZero = {nullptr, nullptr};                   ///< 0D-IDCs: ///< I_0(r,\phi) = <I(r,\phi,t)>_t
+  std::array<IDCDelta<DataT>*, SIDES> mIDCDelta = {nullptr, nullptr};          ///< compressed or uncompressed Delta IDC: \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
+  std::array<IDCOne*, SIDES> mIDCOne = {nullptr, nullptr};                     ///< I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
+  std::array<IDCGroupHelperSector*, SIDES> mHelperSector = {nullptr, nullptr}; ///< helper for accessing IDC0 and IDC-Delta
+  std::array<FourierCoeff*, SIDES> mFourierCoeff = {nullptr, nullptr};         ///< fourier coefficients of IDCOne
+  CalDet<PadFlags>* mPadFlagsMap = nullptr;                                    ///< status flag for each pad (i.e. if the pad is dead)
 
   /// helper function for drawing IDCZero
   /// \param sector sector which will be drawn
@@ -213,7 +217,7 @@ class IDCCCDBHelper
   /// \param integrationInterval integration interval
   unsigned int getUngroupedIndexGlobal(const unsigned int sector, const unsigned int region, unsigned int urow, unsigned int upad, unsigned int integrationInterval) const;
 
-  ClassDefNV(IDCCCDBHelper, 2)
+  ClassDefNV(IDCCCDBHelper, 3)
 };
 
 } // namespace o2::tpc

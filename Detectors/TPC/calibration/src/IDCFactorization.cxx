@@ -23,8 +23,21 @@
 #endif
 
 o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned char, Mapper::NREGIONS>& groupPads, const std::array<unsigned char, Mapper::NREGIONS>& groupRows, const std::array<unsigned char, Mapper::NREGIONS>& groupLastRowsThreshold, const std::array<unsigned char, Mapper::NREGIONS>& groupLastPadsThreshold, const unsigned int groupNotnPadsSectorEdges, const unsigned int timeFrames, const unsigned int timeframesDeltaIDC, const std::vector<uint32_t>& crus)
-  : IDCGroupHelperSector{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupNotnPadsSectorEdges}, mTimeFrames{timeFrames}, mTimeFramesDeltaIDC{timeframesDeltaIDC}, mIDCDelta{timeFrames / timeframesDeltaIDC + (timeFrames % timeframesDeltaIDC != 0)}, mCRUs{crus}
+  : IDCGroupHelperSector{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupNotnPadsSectorEdges}, mTimeFrames{timeFrames}, mTimeFramesDeltaIDC{timeframesDeltaIDC}, mCRUs{crus}
 {
+
+  mSides = o2::tpc::IDCFactorization::getSides(crus);
+  if (mSides.size() == 1) {
+    mSideIndex[1] = 0;
+  }
+
+  for (int i = 0; i < mSides.size(); ++i) {
+    mIDCDelta.emplace_back(std::vector<IDCDelta<float>>{timeFrames / timeframesDeltaIDC + (timeFrames % timeframesDeltaIDC != 0)});
+  }
+
+  mIDCZero.resize(mSides.size());
+  mIDCOne.resize(mSides.size());
+
   for (auto& idc : mIDCs) {
     idc.resize(mTimeFrames);
   }
@@ -35,6 +48,23 @@ o2::tpc::IDCFactorization::IDCFactorization(const std::array<unsigned char, Mapp
       break;
     }
   }
+}
+
+std::vector<o2::tpc::Side> o2::tpc::IDCFactorization::getSides(const std::vector<uint32_t>& crus)
+{
+  std::unordered_map<o2::tpc::Side, bool> map;
+  for (auto cru : crus) {
+    map[CRU(cru).side()] = true;
+  }
+
+  std::vector<o2::tpc::Side> sides;
+  if (!(map.find(o2::tpc::Side::A) == map.end())) {
+    sides.emplace_back(o2::tpc::Side::A);
+  }
+  if (!(map.find(o2::tpc::Side::C) == map.end())) {
+    sides.emplace_back(o2::tpc::Side::C);
+  }
+  return sides;
 }
 
 void o2::tpc::IDCFactorization::dumpToFile(const char* outFileName, const char* outName) const
@@ -50,85 +80,89 @@ void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals, const char*
   o2::utils::TreeStreamRedirector pcstream(outFileName, "RECREATE");
   pcstream.GetFile()->cd();
 
-  if (integrationIntervals <= 0) {
-    integrationIntervals = static_cast<int>(getNIntegrationIntervals(mCRUs.front()));
-  }
+  for (auto side : mSides) {
+    if (integrationIntervals <= 0) {
+      integrationIntervals = static_cast<int>(getNIntegrationIntervals((side == Side::A) ? mCRUs.front() : mCRUs.back()));
+    }
 
-  std::vector<float> idcOneA = mIDCOne.mIDCOne[0];
-  std::vector<float> idcOneC = mIDCOne.mIDCOne[1];
-  for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
-    const unsigned int nIDCsSector = Mapper::getPadsInSector() * Mapper::NSECTORS;
-    std::vector<int> vRow(nIDCsSector);
-    std::vector<int> vPad(nIDCsSector);
-    std::vector<float> vXPos(nIDCsSector);
-    std::vector<float> vYPos(nIDCsSector);
-    std::vector<float> vGlobalXPos(nIDCsSector);
-    std::vector<float> vGlobalYPos(nIDCsSector);
-    std::vector<float> idcs(nIDCsSector);
-    std::vector<float> idcsZero(nIDCsSector);
-    std::vector<float> idcsDelta(nIDCsSector);
-    std::vector<float> idcsDeltaMedium(nIDCsSector);
-    std::vector<float> idcsDeltaHigh(nIDCsSector);
-    std::vector<unsigned int> sectorv(nIDCsSector);
+    std::vector<float> idcOne = getIDCOneVec(side);
+    for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
+      const unsigned int nIDCsSector = Mapper::getPadsInSector() * SECTORSPERSIDE;
+      std::vector<int> vRow(nIDCsSector);
+      std::vector<int> vPad(nIDCsSector);
+      std::vector<float> vXPos(nIDCsSector);
+      std::vector<float> vYPos(nIDCsSector);
+      std::vector<float> vGlobalXPos(nIDCsSector);
+      std::vector<float> vGlobalYPos(nIDCsSector);
+      std::vector<float> idcs(nIDCsSector);
+      std::vector<float> idcsZero(nIDCsSector);
+      std::vector<float> idcsDelta(nIDCsSector);
+      std::vector<float> idcsDeltaMedium(nIDCsSector);
+      std::vector<float> idcsDeltaHigh(nIDCsSector);
+      std::vector<unsigned int> sectorv(nIDCsSector);
 
-    unsigned int chunk = 0;
-    unsigned int localintegrationInterval = 0;
-    getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
-    const auto idcDeltaMedium = getIDCDeltaMediumCompressed(chunk);
-    const auto idcDeltaHigh = getIDCDeltaHighCompressed(chunk);
+      unsigned int chunk = 0;
+      unsigned int localintegrationInterval = 0;
+      getLocalIntegrationInterval(mCRUs.front(), integrationInterval, chunk, localintegrationInterval);
 
-    unsigned int index = 0;
-    for (unsigned int sector = 0; sector < Mapper::NSECTORS; ++sector) {
-      for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
-        for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
-          for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
-            const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
-            const auto padTmp = (sector < SECTORSPERSIDE) ? ipad : (Mapper::PADSPERROW[region][irow] - ipad - 1); // C-Side is mirrored
-            const auto& padPosLocal = mapper.padPos(padNum);
-            vRow[index] = padPosLocal.getRow();
-            vPad[index] = padPosLocal.getPad();
-            vXPos[index] = mapper.getPadCentre(padPosLocal).X();
-            vYPos[index] = mapper.getPadCentre(padPosLocal).Y();
-            const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[index], vYPos[index]), Sector(sector));
-            vGlobalXPos[index] = globalPos.X();
-            vGlobalYPos[index] = globalPos.Y();
-            idcs[index] = getIDCValUngrouped(sector, region, irow, padTmp, integrationInterval);
-            idcsZero[index] = getIDCZeroVal(sector, region, irow, padTmp);
-            idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, chunk, localintegrationInterval);
-            idcsDeltaMedium[index] = idcDeltaMedium.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
-            idcsDeltaHigh[index] = idcDeltaHigh.getValue(Sector(sector).side(), getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
-            sectorv[index++] = sector;
+      unsigned int index = 0;
+      const auto idcDeltaMedium = getIDCDeltaMediumCompressed(chunk, side);
+      const auto idcDeltaHigh = getIDCDeltaHighCompressed(chunk, side);
+
+      unsigned int sectorStart = (side == Side::A) ? 0 : SECTORSPERSIDE;
+      unsigned int sectorEnd = (side == Side::A) ? SECTORSPERSIDE : Mapper::NSECTORS;
+      for (unsigned int sector = sectorStart; sector < sectorEnd; ++sector) {
+        for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
+          for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
+            for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
+              const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
+              const auto padTmp = (side == Side::A) ? ipad : (Mapper::PADSPERROW[region][irow] - ipad - 1); // C-Side is mirrored
+              const auto& padPosLocal = mapper.padPos(padNum);
+              vRow[index] = padPosLocal.getRow();
+              vPad[index] = padPosLocal.getPad();
+              vXPos[index] = mapper.getPadCentre(padPosLocal).X();
+              vYPos[index] = mapper.getPadCentre(padPosLocal).Y();
+              const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[index], vYPos[index]), Sector(sector));
+              vGlobalXPos[index] = globalPos.X();
+              vGlobalYPos[index] = globalPos.Y();
+              idcs[index] = getIDCValUngrouped(sector, region, irow, padTmp, integrationInterval);
+              idcsZero[index] = getIDCZeroVal(sector, region, irow, padTmp);
+              idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, chunk, localintegrationInterval);
+              idcsDeltaMedium[index] = idcDeltaMedium.getValue(getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
+              idcsDeltaHigh[index] = idcDeltaHigh.getValue(getIndexUngrouped(sector, region, irow, padTmp, localintegrationInterval));
+              sectorv[index++] = sector;
+            }
           }
         }
       }
-    }
-    float idcOneATmp = idcOneA[integrationInterval];
-    float idcOneCTmp = idcOneC[integrationInterval];
-    unsigned int timeFrame = 0;
-    unsigned int interval = 0;
-    getTF(0, integrationInterval, timeFrame, interval);
 
-    pcstream << "tree"
-             << "integrationInterval=" << integrationInterval
-             << "localintervalinTF=" << interval
-             << "indexinchunk=" << localintegrationInterval
-             << "chunk=" << chunk
-             << "timeframe=" << timeFrame
-             << "IDC.=" << idcs
-             << "IDC0.=" << idcsZero
-             << "IDC1A=" << idcOneATmp
-             << "IDC1C=" << idcOneCTmp
-             << "IDCDeltaNoComp.=" << idcsDelta
-             << "IDCDeltaMediumComp.=" << idcsDeltaMedium
-             << "IDCDeltaHighComp.=" << idcsDeltaHigh
-             << "pad.=" << vPad
-             << "row.=" << vRow
-             << "lx.=" << vXPos
-             << "ly.=" << vYPos
-             << "gx.=" << vGlobalXPos
-             << "gy.=" << vGlobalYPos
-             << "sector.=" << sectorv
-             << "\n";
+      float idcOneTmp = idcOne[integrationInterval];
+      unsigned int timeFrame = 0;
+      unsigned int interval = 0;
+      getTF(0, integrationInterval, timeFrame, interval);
+
+      pcstream << "tree"
+               << "integrationInterval=" << integrationInterval
+               << "localintervalinTF=" << interval
+               << "indexinchunk=" << localintegrationInterval
+               << "chunk=" << chunk
+               << "timeframe=" << timeFrame
+               << "IDC.=" << idcs
+               << "IDC0.=" << idcsZero
+               << "IDC1=" << idcOneTmp
+               << "IDCDeltaNoComp.=" << idcsDelta
+               << "IDCDeltaMediumComp.=" << idcsDeltaMedium
+               << "IDCDeltaHighComp.=" << idcsDeltaHigh
+               << "pad.=" << vPad
+               << "row.=" << vRow
+               << "lx.=" << vXPos
+               << "ly.=" << vYPos
+               << "gx.=" << vGlobalXPos
+               << "gy.=" << vGlobalYPos
+               << "sector.=" << sectorv
+               << "side.=" << side
+               << "\n";
+    }
   }
   pcstream.Close();
 }
@@ -136,8 +170,10 @@ void o2::tpc::IDCFactorization::dumpToTree(int integrationIntervals, const char*
 void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * o2::tpc::SECTORSPERSIDE;
-  mIDCZero.clear();
-  mIDCZero.resize(nIDCsSide);
+  for (auto& idcZero : mIDCZero) {
+    idcZero.clear();
+    idcZero.resize(nIDCsSide);
+  }
 
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int cruInd = 0; cruInd < mCRUs.size(); ++cruInd) {
@@ -152,7 +188,7 @@ void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
         if (norm && mIDCs[cru][timeframe][idcs] != -1) {
           mIDCs[cru][timeframe][idcs] *= Mapper::INVPADAREA[region];
         }
-        mIDCZero.fillValueIDCZero(mIDCs[cru][timeframe][idcs], side, indexGlob);
+        mIDCZero[mSideIndex[side]].fillValueIDCZero(mIDCs[cru][timeframe][idcs], indexGlob);
       }
     }
   }
@@ -160,8 +196,9 @@ void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
   if (normFac == 0) {
     LOGP(error, "number of integraion intervals is zero! Skipping normalization of IDC0");
   } else {
-    std::transform(mIDCZero.mIDCZero[Side::A].begin(), mIDCZero.mIDCZero[Side::A].end(), mIDCZero.mIDCZero[Side::A].begin(), [normVal = normFac](auto& val) { return val / normVal; });
-    std::transform(mIDCZero.mIDCZero[Side::C].begin(), mIDCZero.mIDCZero[Side::C].end(), mIDCZero.mIDCZero[Side::C].begin(), [normVal = normFac](auto& val) { return val / normVal; });
+    for (auto& idcZero : mIDCZero) {
+      std::transform(idcZero.mIDCZero.begin(), idcZero.mIDCZero.end(), idcZero.mIDCZero.begin(), [normVal = normFac](auto& val) { return val / normVal; });
+    }
   }
 }
 
@@ -183,7 +220,7 @@ void o2::tpc::IDCFactorization::fillIDCZeroDeadPads()
       // loop over pad row and calculate mean of IDC0
       for (unsigned int pad = 0; pad < Mapper::PADSPERROW[region][lrow]; ++pad) {
         const auto index = getIndexUngrouped(sector, region, lrow, pad, integrationInterval);
-        const auto idcZeroVal = mIDCZero.mIDCZero[side][index];
+        const auto idcZeroVal = mIDCZero[mSideIndex[side]].mIDCZero[index];
         if (idcZeroVal > 0) {
           const auto globalPad = Mapper::getGlobalPadNumber(lrow, pad, region);
           const float gain = (mGainMap ? mGainMap->getValue(sector, globalPad) : 1);
@@ -200,7 +237,7 @@ void o2::tpc::IDCFactorization::fillIDCZeroDeadPads()
         const float gain = (mGainMap ? mGainMap->getValue(sector, globalPad) : 1);
         const float idcZero = gain * meanIDC0;
         const auto index = getIndexUngrouped(sector, region, lrow, pad, integrationInterval);
-        mIDCZero.setValueIDCZero(idcZero, side, index);
+        mIDCZero[mSideIndex[side]].setValueIDCZero(idcZero, index);
       }
       padTmp.clear();
     }
@@ -210,11 +247,13 @@ void o2::tpc::IDCFactorization::fillIDCZeroDeadPads()
 void o2::tpc::IDCFactorization::calcIDCOne()
 {
   const unsigned int integrationIntervals = getNIntegrationIntervals(mCRUs.front());
-  mIDCOne.clear();
-  mIDCOne.resize(integrationIntervals);
+  for (auto& idcOne : mIDCOne) {
+    idcOne.clear();
+    idcOne.resize(integrationIntervals);
+  }
 
-  std::array<std::vector<std::vector<float>>, SIDES> idcOneSafe;
-  std::array<std::vector<std::vector<unsigned int>>, SIDES> weightsSafe;
+  std::vector<std::vector<std::vector<float>>> idcOneSafe(mSides.size());
+  std::vector<std::vector<std::vector<unsigned int>>> weightsSafe(mSides.size());
 
   for (auto& vecSide : idcOneSafe) {
     vecSide.resize(sNThreads);
@@ -241,40 +280,42 @@ void o2::tpc::IDCFactorization::calcIDCOne()
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
     const auto side = cruTmp.side();
+    const unsigned int indexSide = mSideIndex[side];
+
     const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
     unsigned int integrationIntervalOffset = 0;
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
-      calcIDCOne(mIDCs[cru][timeframe], mNIDCsPerCRU[region], integrationIntervalOffset, factorIndexGlob, cru, idcOneSafe[side][ithread], weightsSafe[side][ithread], &mIDCZero, mInputGrouped ? nullptr : mPadFlagsMap.get(), mUsePadStatusMap);
+      calcIDCOne(mIDCs[cru][timeframe], mNIDCsPerCRU[region], integrationIntervalOffset, factorIndexGlob, cru, idcOneSafe[indexSide][ithread], weightsSafe[indexSide][ithread], &mIDCZero[indexSide], mInputGrouped ? nullptr : mPadFlagsMap.get(), mUsePadStatusMap);
       integrationIntervalOffset += mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
     }
   }
 
 #pragma omp parallel for num_threads(sNThreads)
-  for (int side = 0; side < SIDES; ++side) {
+  for (int side = 0; side < mSides.size(); ++side) {
+    const unsigned int indexSide = mSideIndex[side];
     for (int i = 1; i < sNThreads; ++i) {
-      std::transform(idcOneSafe[side].front().begin(), idcOneSafe[side].front().end(), idcOneSafe[side][i].begin(), idcOneSafe[side].front().begin(), std::plus<float>());
-      std::transform(weightsSafe[side].front().begin(), weightsSafe[side].front().end(), weightsSafe[side][i].begin(), weightsSafe[side].front().begin(), std::plus<unsigned int>());
+      std::transform(idcOneSafe[indexSide].front().begin(), idcOneSafe[indexSide].front().end(), idcOneSafe[indexSide][i].begin(), idcOneSafe[indexSide].front().begin(), std::plus<float>());
+      std::transform(weightsSafe[indexSide].front().begin(), weightsSafe[indexSide].front().end(), weightsSafe[indexSide][i].begin(), weightsSafe[indexSide].front().begin(), std::plus<unsigned int>());
     }
 
     // replace all 0 with 1 to avoid division by 0
-    std::replace(weightsSafe[side].front().begin(), weightsSafe[side].front().end(), 0, 1);
+    std::replace(weightsSafe[indexSide].front().begin(), weightsSafe[indexSide].front().end(), 0, 1);
 
     // move IDC1 to member
-    mIDCOne.mIDCOne[side] = std::move(idcOneSafe[side].front());
+    mIDCOne[indexSide].mIDCOne = std::move(idcOneSafe[indexSide].front());
 
     // normalize IDC1 to number of IDC values used
-    std::transform(mIDCOne.mIDCOne[side].begin(), mIDCOne.mIDCOne[side].end(), weightsSafe[side].front().begin(), mIDCOne.mIDCOne[side].begin(), std::divides<float>());
+    std::transform(mIDCOne[indexSide].mIDCOne.begin(), mIDCOne[indexSide].mIDCOne.end(), weightsSafe[side].front().begin(), mIDCOne[indexSide].mIDCOne.begin(), std::divides<float>());
   }
 }
 
 void o2::tpc::IDCFactorization::calcIDCOne(const std::vector<float>& idcsData, const int idcsPerCRU, const int integrationIntervalOffset, const unsigned int indexOffset, const CRU cru, std::vector<float>& idcOneTmp, std::vector<unsigned int>& weights, const IDCZero* idcZero, const CalDet<PadFlags>* flagMap, const bool usePadStatusMap)
 {
-  const Side side = cru.side();
   for (unsigned int idcs = 0; idcs < idcsData.size(); ++idcs) {
     const unsigned int integrationInterval = idcs / idcsPerCRU + integrationIntervalOffset;
     const unsigned int localPad = (idcs % idcsPerCRU);
     const unsigned int indexGlob = localPad + indexOffset;
-    const auto idcZeroVal = idcZero ? idcZero->mIDCZero[side][indexGlob] : 1;
+    const auto idcZeroVal = idcZero ? idcZero->mIDCZero[indexGlob] : 1;
 
     // check pad in case of input is not grouped
     if (usePadStatusMap && flagMap) {
@@ -292,10 +333,11 @@ void o2::tpc::IDCFactorization::calcIDCOne(const std::vector<float>& idcsData, c
 void o2::tpc::IDCFactorization::calcIDCDelta()
 {
   const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
-  for (unsigned int i = 0; i < getNChunks(); ++i) {
-    const auto idcsSide = nIDCsSide * getNIntegrationIntervals(i, mCRUs.front());
-    mIDCDelta[i].getIDCDelta(Side::A).resize(idcsSide);
-    mIDCDelta[i].getIDCDelta(Side::C).resize(idcsSide);
+  for (auto side : mSides) {
+    for (unsigned int i = 0; i < getNChunks(side); ++i) {
+      const auto idcsSide = nIDCsSide * getNIntegrationIntervals(i, mCRUs.front());
+      mIDCDelta[mSideIndex[side]][i].getIDCDelta().resize(idcsSide);
+    }
   }
 
 #pragma omp parallel for num_threads(sNThreads)
@@ -321,8 +363,8 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
         const unsigned int integrationIntervalLocal = intervallocal + integrationIntervallastLocal;
         const unsigned int localPad = idcs % mNIDCsPerCRU[region];
         const unsigned int indexGlob = localPad + factorIndexGlob;
-        const auto idcZero = mIDCZero.mIDCZero[side][indexGlob];
-        const auto idcOne = mIDCOne.mIDCOne[side][integrationIntervalGlobal];
+        const auto idcZero = mIDCZero[mSideIndex[side]].mIDCZero[indexGlob];
+        const auto idcOne = mIDCOne[mSideIndex[side]].mIDCOne[integrationIntervalGlobal];
         const auto mult = idcZero * idcOne;
         auto val = (mult != 0) ? mIDCs[cru][timeframe][idcs] / mult - 1 : 0;
         if (mUsePadStatusMap && !mInputGrouped && mPadFlagsMap) {
@@ -331,7 +373,7 @@ void o2::tpc::IDCFactorization::calcIDCDelta()
             val = 0;
           }
         }
-        mIDCDelta[chunk].setIDCDelta(side, indexGlob + integrationIntervalLocal * nIDCsSide, val);
+        mIDCDelta[mSideIndex[side]][chunk].setIDCDelta(indexGlob + integrationIntervalLocal * nIDCsSide, val);
       }
 
       const unsigned int intervals = mIDCs[cru][timeframe].size() / mNIDCsPerCRU[region];
@@ -367,7 +409,7 @@ void o2::tpc::IDCFactorization::createStatusMap()
         // loop over pad row and calculate mean of IDC0
         for (unsigned int pad = 0; pad < Mapper::PADSPERROW[region][lrow]; ++pad) {
           const auto index = getIndexUngrouped(sector, region, lrow, pad, integrationInterval);
-          const auto idcZeroVal = mIDCZero.mIDCZero[side][index];
+          const auto idcZeroVal = mIDCZero[mSideIndex[side]].mIDCZero[index];
 
           if (iter == 0) {
             // exclude dead pads
@@ -411,7 +453,7 @@ void o2::tpc::IDCFactorization::getTF(const unsigned int region, unsigned int in
   unsigned int nintervals = 0;
   unsigned int intervalTmp = 0;
   for (unsigned int tf = 0; tf < mTimeFrames; ++tf) {
-    nintervals += mIDCs[region][tf].size() / mNIDCsPerCRU[region];
+    nintervals += mIDCs[mCRUs.front()][tf].size() / mNIDCsPerCRU[region];
     if (integrationInterval < nintervals) {
       timeFrame = tf;
       interval = integrationInterval - intervalTmp;
@@ -482,15 +524,16 @@ unsigned long o2::tpc::IDCFactorization::getNIntegrationIntervals(const int cru)
   return sum / mNIDCsPerCRU[CRU(cru).region()];
 }
 
-void o2::tpc::IDCFactorization::getLocalIntegrationInterval(const unsigned int region, const unsigned int integrationInterval, unsigned int& chunk, unsigned int& localintegrationInterval) const
+void o2::tpc::IDCFactorization::getLocalIntegrationInterval(const unsigned int cru, const unsigned int integrationInterval, unsigned int& chunk, unsigned int& localintegrationInterval) const
 {
   unsigned int nintervals = 0;
   unsigned int nitervalsChunk = 0;
   unsigned int globalTF = 0;
-  for (unsigned int ichunk = 0; ichunk < getNChunks(); ++ichunk) {
+  const auto region = CRU(cru).region();
+  for (unsigned int ichunk = 0; ichunk < getNChunks(mSides.front()); ++ichunk) {
     const auto nTFsPerChunk = getNTFsPerChunk(ichunk);
     for (unsigned int tf = 0; tf < nTFsPerChunk; ++tf) {
-      nintervals += mIDCs[region][globalTF].size() / mNIDCsPerCRU[region];
+      nintervals += mIDCs[cru][globalTF].size() / mNIDCsPerCRU[region];
       if (integrationInterval < nintervals) {
         chunk = getChunk(globalTF);
         localintegrationInterval = integrationInterval - nitervalsChunk;
@@ -510,15 +553,17 @@ unsigned int o2::tpc::IDCFactorization::getChunk(const unsigned int timeframe) c
 unsigned int o2::tpc::IDCFactorization::getNTFsPerChunk(const unsigned int chunk) const
 {
   const unsigned int remain = mTimeFrames % mTimeFramesDeltaIDC;
-  return ((chunk == getNChunks() - 1) && remain) ? remain : mTimeFramesDeltaIDC;
+  return ((chunk == getNChunks(mSides.front()) - 1) && remain) ? remain : mTimeFramesDeltaIDC;
 }
 
-std::vector<unsigned int> o2::tpc::IDCFactorization::getIntegrationIntervalsPerTF(const unsigned int region) const
+std::vector<unsigned int> o2::tpc::IDCFactorization::getIntegrationIntervalsPerTF(const int cru) const
 {
+  const uint32_t cruTmp = (cru < 0) ? mCRUs.front() : cru;
+  const auto region = CRU(cruTmp).region();
   std::vector<unsigned int> integrationIntervalsPerTF;
   integrationIntervalsPerTF.reserve(mTimeFrames);
   for (unsigned int tf = 0; tf < mTimeFrames; ++tf) {
-    integrationIntervalsPerTF.emplace_back(mIDCs[region][tf].size() / mNIDCsPerCRU[region]);
+    integrationIntervalsPerTF.emplace_back(mIDCs[cruTmp][tf].size() / mNIDCsPerCRU[region]);
   }
   return integrationIntervalsPerTF;
 }
@@ -538,7 +583,7 @@ void o2::tpc::IDCFactorization::drawIDCDeltaHelper(const bool type, const Sector
 
   unsigned int chunk = 0;
   unsigned int localintegrationInterval = 0;
-  getLocalIntegrationInterval(0, integrationInterval, chunk, localintegrationInterval);
+  getLocalIntegrationInterval(mCRUs.front(), integrationInterval, chunk, localintegrationInterval);
   const std::string zAxisTitle = IDCDrawHelper::getZAxisTitle(IDCType::IDCDelta, compression);
 
   IDCDrawHelper::IDCDraw drawFun;
@@ -553,18 +598,18 @@ void o2::tpc::IDCFactorization::drawIDCDeltaHelper(const bool type, const Sector
       break;
     }
     case IDCDeltaCompression::MEDIUM: {
-      const auto idcDeltaMedium = this->getIDCDeltaMediumCompressed(chunk);
+      const auto idcDeltaMedium = this->getIDCDeltaMediumCompressed(chunk, sector.side());
       idcFunc = [this, &idcDeltaMedium, chunk, localintegrationInterval = localintegrationInterval](const unsigned int sector, const unsigned int region, const unsigned int irow, const unsigned int pad) {
-        return idcDeltaMedium.getValue(Sector(sector).side(), this->getIndexUngrouped(sector, region, irow, pad, localintegrationInterval));
+        return idcDeltaMedium.getValue(this->getIndexUngrouped(sector, region, irow, pad, localintegrationInterval));
       };
       drawFun.mIDCFunc = idcFunc;
       type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename, minZ, maxZ) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename, minZ, maxZ);
       break;
     }
     case IDCDeltaCompression::HIGH: {
-      const auto idcDeltaHigh = this->getIDCDeltaHighCompressed(chunk);
+      const auto idcDeltaHigh = this->getIDCDeltaHighCompressed(chunk, sector.side());
       idcFunc = [this, &idcDeltaHigh, chunk, localintegrationInterval](const unsigned int sector, const unsigned int region, const unsigned int irow, const unsigned int pad) {
-        return idcDeltaHigh.getValue(Sector(sector).side(), this->getIndexUngrouped(sector, region, irow, pad, localintegrationInterval));
+        return idcDeltaHigh.getValue(this->getIndexUngrouped(sector, region, irow, pad, localintegrationInterval));
       };
       drawFun.mIDCFunc = idcFunc;
       type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename, minZ, maxZ) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename, minZ, maxZ);
