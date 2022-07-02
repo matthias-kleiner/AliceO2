@@ -13,6 +13,7 @@
 #include "TPCCalibration/IDCDrawHelper.h"
 #include "TPCCalibration/IDCGroupHelperSector.h"
 #include "TPCCalibration/IDCContainer.h"
+#include "TPCBase/CalDet.h"
 #include "TPCBase/Mapper.h"
 #include "CommonUtils/TreeStreamRedirector.h"
 #include "TPCBase/Painter.h"
@@ -59,7 +60,7 @@ float o2::tpc::IDCCCDBHelper<DataT>::getIDCVal(const unsigned int sector, const 
 }
 
 template <typename DataT>
-void o2::tpc::IDCCCDBHelper<DataT>::drawIDCZeroHelper(const bool type, const o2::tpc::Sector sector, const std::string filename) const
+void o2::tpc::IDCCCDBHelper<DataT>::drawIDCZeroHelper(const bool type, const o2::tpc::Sector sector, const std::string filename, const float minZ, const float maxZ) const
 {
   std::function<float(const unsigned int, const unsigned int, const unsigned int, const unsigned int)> idcFunc = [this](const unsigned int sector, const unsigned int region, const unsigned int irow, const unsigned int pad) {
     return this->getIDCZeroVal(sector, region, irow, pad);
@@ -68,11 +69,11 @@ void o2::tpc::IDCCCDBHelper<DataT>::drawIDCZeroHelper(const bool type, const o2:
   IDCDrawHelper::IDCDraw drawFun;
   drawFun.mIDCFunc = idcFunc;
   const std::string zAxisTitle = IDCDrawHelper::getZAxisTitle(IDCType::IDCZero);
-  type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename);
+  type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename, minZ, maxZ) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename, minZ, maxZ);
 }
 
 template <typename DataT>
-void o2::tpc::IDCCCDBHelper<DataT>::drawIDCDeltaHelper(const bool type, const Sector sector, const unsigned int integrationInterval, const std::string filename) const
+void o2::tpc::IDCCCDBHelper<DataT>::drawIDCDeltaHelper(const bool type, const Sector sector, const unsigned int integrationInterval, const std::string filename, const float minZ, const float maxZ) const
 {
   std::function<float(const unsigned int, const unsigned int, const unsigned int, const unsigned int)> idcFunc = [this, integrationInterval](const unsigned int sector, const unsigned int region, const unsigned int irow, const unsigned int pad) {
     return this->getIDCDeltaVal(sector, region, irow, pad, integrationInterval);
@@ -81,11 +82,11 @@ void o2::tpc::IDCCCDBHelper<DataT>::drawIDCDeltaHelper(const bool type, const Se
   IDCDrawHelper::IDCDraw drawFun;
   drawFun.mIDCFunc = idcFunc;
   const std::string zAxisTitle = IDCDrawHelper::getZAxisTitle(IDCType::IDCDelta);
-  type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename);
+  type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename, minZ, maxZ) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename, minZ, maxZ);
 }
 
 template <typename DataT>
-void o2::tpc::IDCCCDBHelper<DataT>::drawIDCHelper(const bool type, const Sector sector, const unsigned int integrationInterval, const std::string filename) const
+void o2::tpc::IDCCCDBHelper<DataT>::drawIDCHelper(const bool type, const Sector sector, const unsigned int integrationInterval, const std::string filename, const float minZ, const float maxZ) const
 {
   std::function<float(const unsigned int, const unsigned int, const unsigned int, const unsigned int)> idcFunc = [this, integrationInterval](const unsigned int sector, const unsigned int region, const unsigned int irow, const unsigned int pad) {
     return this->getIDCVal(sector, region, irow, pad, integrationInterval);
@@ -94,6 +95,29 @@ void o2::tpc::IDCCCDBHelper<DataT>::drawIDCHelper(const bool type, const Sector 
   IDCDrawHelper::IDCDraw drawFun;
   drawFun.mIDCFunc = idcFunc;
   const std::string zAxisTitle = IDCDrawHelper::getZAxisTitle(IDCType::IDC);
+  type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename, minZ, maxZ) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename, minZ, maxZ);
+}
+
+template <typename DataT>
+void o2::tpc::IDCCCDBHelper<DataT>::drawPadFlagMap(const bool type, const Sector sector, const std::string filename, const PadFlags flag) const
+{
+  if (!mPadFlagsMap) {
+    LOGP(info, "Status map not set returning");
+  }
+
+  std::function<float(const unsigned int, const unsigned int, const unsigned int, const unsigned int)> idcFunc = [this, flag](const unsigned int sector, const unsigned int region, const unsigned int row, const unsigned int pad) {
+    const unsigned int padInRegion = Mapper::OFFSETCRULOCAL[region][row] + pad;
+    const auto flagDraw = mPadFlagsMap->getCalArray(region + sector * Mapper::NREGIONS).getValue(padInRegion);
+    if ((flagDraw & flag) == flag) {
+      return 1;
+    } else {
+      return 0;
+    }
+  };
+
+  IDCDrawHelper::IDCDraw drawFun;
+  drawFun.mIDCFunc = idcFunc;
+  const std::string zAxisTitle = "status flag";
   type ? IDCDrawHelper::drawSide(drawFun, sector.side(), zAxisTitle, filename) : IDCDrawHelper::drawSector(drawFun, 0, Mapper::NREGIONS, sector, zAxisTitle, filename);
 }
 
@@ -360,71 +384,66 @@ TCanvas* o2::tpc::IDCCCDBHelper<DataT>::drawFourierCoeff(TCanvas* outputCanvas, 
 }
 
 template <typename DataT>
-void o2::tpc::IDCCCDBHelper<DataT>::dumpToTree(int integrationIntervals, const char* outFileName) const
+void o2::tpc::IDCCCDBHelper<DataT>::dumpToTree(const char* outFileName) const
 {
   const Mapper& mapper = Mapper::instance();
   o2::utils::TreeStreamRedirector pcstream(outFileName, "RECREATE");
   pcstream.GetFile()->cd();
 
-  if (integrationIntervals <= 0) {
-    integrationIntervals = std::min(getNIntegrationIntervalsIDCDelta(Side::A), getNIntegrationIntervalsIDCDelta(Side::C));
-  }
+  const int integrationInterval = 0; //std::min(mIDCOne->getNIDCs(Side::A), mIDCOne->getNIDCs(Side::C));
 
-  for (unsigned int integrationInterval = 0; integrationInterval < integrationIntervals; ++integrationInterval) {
-    const unsigned int nIDCsSector = Mapper::getPadsInSector() * Mapper::NSECTORS;
-    std::vector<int> vRow(nIDCsSector);
-    std::vector<int> vPad(nIDCsSector);
-    std::vector<float> vXPos(nIDCsSector);
-    std::vector<float> vYPos(nIDCsSector);
-    std::vector<float> vGlobalXPos(nIDCsSector);
-    std::vector<float> vGlobalYPos(nIDCsSector);
-    std::vector<float> idcs(nIDCsSector);
-    std::vector<float> idcsZero(nIDCsSector);
-    std::vector<float> idcsDelta(nIDCsSector);
-    std::vector<unsigned int> sectorv(nIDCsSector);
+  const unsigned int nIDCsSector = Mapper::getPadsInSector() * Mapper::NSECTORS;
+  std::vector<int> vRow(nIDCsSector);
+  std::vector<int> vPad(nIDCsSector);
+  std::vector<float> vXPos(nIDCsSector);
+  std::vector<float> vYPos(nIDCsSector);
+  std::vector<float> vGlobalXPos(nIDCsSector);
+  std::vector<float> vGlobalYPos(nIDCsSector);
+  std::vector<float> idcs(nIDCsSector);
+  std::vector<float> idcsZero(nIDCsSector);
+  std::vector<float> idcsDelta(nIDCsSector);
+  std::vector<unsigned int> sectorv(nIDCsSector);
 
-    unsigned int index = 0;
-    for (unsigned int sector = 0; sector < Mapper::NSECTORS; ++sector) {
-      for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
-        for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
-          for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
-            const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
-            const auto padTmp = (sector < SECTORSPERSIDE) ? ipad : (Mapper::PADSPERROW[region][irow] - ipad - 1); // C-Side is mirrored
-            const auto& padPosLocal = mapper.padPos(padNum);
-            vRow[index] = padPosLocal.getRow();
-            vPad[index] = padPosLocal.getPad();
-            vXPos[index] = mapper.getPadCentre(padPosLocal).X();
-            vYPos[index] = mapper.getPadCentre(padPosLocal).Y();
-            const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[index], vYPos[index]), Sector(sector));
-            vGlobalXPos[index] = globalPos.X();
-            vGlobalYPos[index] = globalPos.Y();
-            idcs[index] = getIDCVal(sector, region, irow, padTmp, integrationInterval);
-            idcsZero[index] = getIDCZeroVal(sector, region, irow, padTmp);
-            idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, integrationInterval);
-            sectorv[index++] = sector;
-          }
+  unsigned int index = 0;
+  for (unsigned int sector = 0; sector < Mapper::NSECTORS; ++sector) {
+    for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
+      for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
+        for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
+          const auto padNum = Mapper::getGlobalPadNumber(irow, ipad, region);
+          const auto padTmp = (sector < SECTORSPERSIDE) ? ipad : (Mapper::PADSPERROW[region][irow] - ipad - 1); // C-Side is mirrored
+          const auto& padPosLocal = mapper.padPos(padNum);
+          vRow[index] = padPosLocal.getRow();
+          vPad[index] = padPosLocal.getPad();
+          vXPos[index] = mapper.getPadCentre(padPosLocal).X();
+          vYPos[index] = mapper.getPadCentre(padPosLocal).Y();
+          const GlobalPosition2D globalPos = mapper.LocalToGlobal(LocalPosition2D(vXPos[index], vYPos[index]), Sector(sector));
+          vGlobalXPos[index] = globalPos.X();
+          vGlobalYPos[index] = globalPos.Y();
+          idcs[index] = getIDCVal(sector, region, irow, padTmp, integrationInterval);
+          idcsZero[index] = getIDCZeroVal(sector, region, irow, padTmp);
+          idcsDelta[index] = getIDCDeltaVal(sector, region, irow, padTmp, integrationInterval);
+          sectorv[index++] = sector;
         }
       }
     }
-    float idcOneA = getIDCOneVal(Side::A, integrationInterval);
-    float idcOneC = getIDCOneVal(Side::C, integrationInterval);
-
-    pcstream << "tree"
-             << "integrationInterval=" << integrationInterval
-             << "IDC.=" << idcs
-             << "IDC0.=" << idcsZero
-             << "IDC1A=" << idcOneA
-             << "IDC1C=" << idcOneC
-             << "IDCDelta.=" << idcsDelta
-             << "pad.=" << vPad
-             << "row.=" << vRow
-             << "lx.=" << vXPos
-             << "ly.=" << vYPos
-             << "gx.=" << vGlobalXPos
-             << "gy.=" << vGlobalYPos
-             << "sector.=" << sectorv
-             << "\n";
   }
+  std::vector<float> idcOneA = !mIDCOne ? std::vector<float>() : mIDCOne->mIDCOne[Side::A];
+  std::vector<float> idcOneC = !mIDCOne ? std::vector<float>() : mIDCOne->mIDCOne[Side::C];
+
+  pcstream << "tree"
+           << "IDC.=" << idcs
+           << "IDC0.=" << idcsZero
+           << "IDC1A=" << idcOneA
+           << "IDC1C=" << idcOneC
+           << "IDCDelta.=" << idcsDelta
+           << "pad.=" << vPad
+           << "row.=" << vRow
+           << "lx.=" << vXPos
+           << "ly.=" << vYPos
+           << "gx.=" << vGlobalXPos
+           << "gy.=" << vGlobalYPos
+           << "sector.=" << sectorv
+           << "\n";
   pcstream.Close();
 }
 
