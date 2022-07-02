@@ -46,6 +46,13 @@ class TPCDistributeIDCSpec : public o2::framework::Task
   TPCDistributeIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int outlanes, const bool loadFromFile, const int firstTF)
     : mCRUs{crus}, mTimeFrames{timeframes}, mOutLanes{outlanes}, mLoadFromFile{loadFromFile}, mProcessedCRU{{std::vector<unsigned int>(timeframes), std::vector<unsigned int>(timeframes)}}, mDataSent{std::vector<bool>(timeframes), std::vector<bool>(timeframes)}, mTFStart{{firstTF, firstTF + timeframes}}, mTFEnd{{firstTF + timeframes - 1, mTFStart[1] + timeframes - 1}}
   {
+
+    // pre calculate data description for output
+    mDataDescrOut.reserve(mOutLanes);
+    for (int i = 0; i < mOutLanes; ++i) {
+      mDataDescrOut.emplace_back(getDataDescriptionIDC(i));
+    }
+
     // sort vector for binary_search
     std::sort(mCRUs.begin(), mCRUs.end());
 
@@ -119,7 +126,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
       return;
     }
 
-    const unsigned int currentOutLane = (tf > mTFEnd[mBuffer]) ? (mCurrentOutLane + 1) % mOutLanes : mCurrentOutLane;
+    const unsigned int currentOutLane = getOutLane(tf);
     const auto relTF = tf - mTFStart[currentBuffer];
     LOGP(info, "current TF: {}   relative TF: {}    current buffer: {}    current output lane: {}     mTFStart: {}", tf, relTF, currentBuffer, currentOutLane, mTFStart[currentBuffer]);
 
@@ -128,22 +135,8 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
       // check number of processed CRUs for previous TFs. If CRUs are missing for them, they are probably lost/not received
       if (mCheckMissingData) {
-        // for (int iTF = mProcessedCRU[currentBuffer].size() - 1; iTF >= 0; --iTF) {
-        for (int iTF = 0; iTF < mProcessedCRU[currentBuffer].size(); ++iTF) {
-          LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
-          if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {
-            LOGP(warning, "CRUs for TF: {} are missing!", iTF);
-
-            // find actuall CRUs
-            for (auto& it : mProcessedCRUs[currentBuffer][iTF]) {
-              if (!it.second) {
-                LOGP(warning, "Couldnt find data for CRU {} possibly not received!", it.first);
-              }
-            }
-          }
-        }
+        checkMissingData(currentBuffer);
       }
-
       return;
     }
 
@@ -180,27 +173,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
     if (mProcessedTFs[currentBuffer] == mTimeFrames) {
       LOGP(info, "All TFs {} for current buffer received. Clearing buffer", tf);
-
-      // resetting received CRUs
-      for (auto& crusMap : mProcessedCRUs[currentBuffer]) {
-        for (auto& it : crusMap) {
-          it.second = false;
-        }
-      }
-
-      mProcessedTFs[currentBuffer] = 0; // reset processed TFs for next aggregation interval
-      std::fill(mProcessedCRU[currentBuffer].begin(), mProcessedCRU[currentBuffer].end(), 0);
-      std::fill(mDataSent[currentBuffer].begin(), mDataSent[currentBuffer].end(), false);
-
-      // set integration range for next integration interval
-      mTFStart[mBuffer] = mTFEnd[!mBuffer] + 1;
-      mTFEnd[mBuffer] = mTFStart[mBuffer] + mTimeFrames - 1;
-
-      // switch buffer
-      mBuffer = !mBuffer;
-
-      // set output lane
-      mCurrentOutLane = ++mCurrentOutLane % mOutLanes;
+      clearBuffer(currentBuffer);
     }
   }
 
@@ -209,8 +182,15 @@ class TPCDistributeIDCSpec : public o2::framework::Task
     ec.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
 
-  /// return data description for aggregated IDCs
-  static constexpr header::DataDescription getDataDescriptionIDC() { return header::DataDescription{"IDCAGG"}; }
+  /// return data description for aggregated IDCs for given lane
+  static header::DataDescription getDataDescriptionIDC(const int lane)
+  {
+    const std::string name = fmt::format("IDCAGG{}", lane).data();
+    header::DataDescription description;
+    description.runtimeInit(name.substr(0, 16).c_str());
+    return description;
+  }
+
   static constexpr header::DataDescription getDataDescriptionIDCRelTF() { return header::DataDescription{"IDCRELTF"}; }
 
  private:
@@ -229,6 +209,7 @@ class TPCDistributeIDCSpec : public o2::framework::Task
   bool mBuffer{false};                                                                                                                                                                                   ///< buffer index
   bool mCheckMissingData{false};                                                                                                                                                                         ///< perform check for missing data
   const std::vector<InputSpec> mFilter = {{"idcsgroup", ConcreteDataTypeMatcher{o2::header::gDataOriginTPC, TPCFLPIDCDevice<TPCFLPIDCDeviceGroup>::getDataDescriptionIDCGroup()}, Lifetime::Timeframe}}; ///< filter for looping over input data
+  std::vector<header::DataDescription> mDataDescrOut{};
 
   void sendOutput(o2::framework::ProcessingContext& pc, const unsigned int currentOutLane, const bool currentBuffer, const unsigned int relTF)
   {
@@ -237,11 +218,55 @@ class TPCDistributeIDCSpec : public o2::framework::Task
 
     if (!mLoadFromFile) {
       for (unsigned int i = 0; i < mCRUs.size(); ++i) {
-        pc.outputs().adoptContainer(Output{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), header::DataHeader::SubSpecificationType{mCRUs[i] + currentOutLane * CRU::MaxCRU}}, std::move(mIDCs[currentBuffer][mCRUs[i]][relTF]));
+        pc.outputs().adoptContainer(Output{gDataOriginTPC, mDataDescrOut[currentOutLane], header::DataHeader::SubSpecificationType{mCRUs[i]}}, std::move(mIDCs[currentBuffer][mCRUs[i]][relTF]));
       }
     } else {
       for (unsigned int i = 0; i < mCRUs.size(); ++i) {
-        pc.outputs().snapshot(Output{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), header::DataHeader::SubSpecificationType{mCRUs[i] + currentOutLane * CRU::MaxCRU}}, mIDCs[currentBuffer][mCRUs[i]][relTF]);
+        pc.outputs().snapshot(Output{gDataOriginTPC, mDataDescrOut[currentOutLane], header::DataHeader::SubSpecificationType{mCRUs[i]}}, mIDCs[currentBuffer][mCRUs[i]][relTF]);
+      }
+    }
+  }
+
+  /// returns the output lane to which the data will be send
+  unsigned int getOutLane(const uint32_t tf) const { return (tf > mTFEnd[mBuffer]) ? (mCurrentOutLane + 1) % mOutLanes : mCurrentOutLane; }
+
+  void clearBuffer(const bool currentBuffer)
+  {
+    // resetting received CRUs
+    for (auto& crusMap : mProcessedCRUs[currentBuffer]) {
+      for (auto& it : crusMap) {
+        it.second = false;
+      }
+    }
+
+    mProcessedTFs[currentBuffer] = 0; // reset processed TFs for next aggregation interval
+    std::fill(mProcessedCRU[currentBuffer].begin(), mProcessedCRU[currentBuffer].end(), 0);
+    std::fill(mDataSent[currentBuffer].begin(), mDataSent[currentBuffer].end(), false);
+
+    // set integration range for next integration interval
+    mTFStart[mBuffer] = mTFEnd[!mBuffer] + 1;
+    mTFEnd[mBuffer] = mTFStart[mBuffer] + mTimeFrames - 1;
+
+    // switch buffer
+    mBuffer = !mBuffer;
+
+    // set output lane
+    mCurrentOutLane = ++mCurrentOutLane % mOutLanes;
+  }
+
+  void checkMissingData(const bool currentBuffer)
+  {
+    for (int iTF = 0; iTF < mProcessedCRU[currentBuffer].size(); ++iTF) {
+      LOGP(info, "Checking rel TF: {} for missing CRUs", iTF);
+      if (mProcessedCRU[currentBuffer][iTF] != mCRUs.size()) {
+        LOGP(warning, "CRUs for TF: {} are missing!", iTF);
+
+        // find actuall CRUs
+        for (auto& it : mProcessedCRUs[currentBuffer][iTF]) {
+          if (!it.second) {
+            LOGP(warning, "Couldnt find data for CRU {} possibly not received! Setting dummy values...", it.first);
+          }
+        }
       }
     }
   }
@@ -255,14 +280,11 @@ DataProcessorSpec getTPCDistributeIDCSpec(const int ilane, const std::vector<uin
   }
 
   std::vector<OutputSpec> outputSpecs;
-  outputSpecs.reserve((outlanes + 1) * crus.size());
+  outputSpecs.reserve(2 * outlanes);
   for (unsigned int lane = 0; lane < outlanes; ++lane) {
-    for (const auto cru : crus) {
-      const header::DataHeader::SubSpecificationType subSpec{cru + lane * CRU::MaxCRU};
-      outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), subSpec}, Lifetime::Sporadic);
-    }
-    const header::DataHeader::SubSpecificationType subSpecRelTF{static_cast<unsigned int>(lane)};
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDCRelTF(), subSpecRelTF}, Lifetime::Sporadic);
+    const header::DataHeader::SubSpecificationType subSpec{lane};
+    outputSpecs.emplace_back(ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(lane)}, Lifetime::Sporadic);
+    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDCRelTF(), subSpec}, Lifetime::Sporadic);
   }
 
   const auto id = fmt::format("tpc-distribute-idc-{:02}", ilane);

@@ -69,18 +69,17 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   template <bool IsEnabled = true, typename std::enable_if<(IsEnabled && (std::is_same<Type, TPCFactorizeIDCSpecNoGroup>::value)), int>::type = 0>
   TPCFactorizeIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned char, Mapper::NREGIONS> groupPads,
                       std::array<unsigned char, Mapper::NREGIONS> groupRows, std::array<unsigned char, Mapper::NREGIONS> groupLastRowsThreshold,
-                      std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int groupPadsSectorEdges, const IDCDeltaCompression compression, const bool debug, const bool senddebug, const bool usePrecisetimeStamp, const bool sendOutputFFT, const bool sendCCDB)
-    : mCRUs{crus}, mIDCFactorization{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, timeframes, timeframesDeltaIDC, crus}, mCompressionDeltaIDC{compression}, mDebug{debug}, mSendOutDebug{senddebug}, mUsePrecisetimeStamp{usePrecisetimeStamp}, mSendOutFFT{sendOutputFFT}, mSendOutCCDB{sendCCDB} {};
+                      std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int groupPadsSectorEdges, const IDCDeltaCompression compression, const bool debug, const bool senddebug, const bool usePrecisetimeStamp, const bool sendOutputFFT, const bool sendCCDB, const int lane)
+    : mCRUs{crus}, mIDCFactorization{groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, timeframes, timeframesDeltaIDC, crus}, mCompressionDeltaIDC{compression}, mDebug{debug}, mSendOutDebug{senddebug}, mUsePrecisetimeStamp{usePrecisetimeStamp}, mSendOutFFT{sendOutputFFT}, mSendOutCCDB{sendCCDB}, mLaneId{lane} {};
 
   template <bool IsEnabled = true, typename std::enable_if<(IsEnabled && (std::is_same<Type, TPCFactorizeIDCSpecGroup>::value)), int>::type = 0>
   TPCFactorizeIDCSpec(const std::vector<uint32_t>& crus, const unsigned int timeframes, const unsigned int timeframesDeltaIDC, std::array<unsigned char, Mapper::NREGIONS> groupPads,
                       std::array<unsigned char, Mapper::NREGIONS> groupRows, std::array<unsigned char, Mapper::NREGIONS> groupLastRowsThreshold,
-                      std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int groupPadsSectorEdges, const IDCDeltaCompression compression, const bool debug, const bool senddebug, const bool usePrecisetimeStamp, const bool sendOutputFFT, const bool sendCCDB)
-    : mCRUs{crus}, mIDCFactorization{std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, 0, timeframes, timeframesDeltaIDC, crus}, mIDCStruct{TPCFactorizeIDCStruct<TPCFactorizeIDCSpecGroup>(groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges)}, mCompressionDeltaIDC{compression}, mDebug{debug}, mSendOutDebug{senddebug}, mUsePrecisetimeStamp{usePrecisetimeStamp}, mSendOutFFT{sendOutputFFT}, mSendOutCCDB{sendCCDB} {};
+                      std::array<unsigned char, Mapper::NREGIONS> groupLastPadsThreshold, const unsigned int groupPadsSectorEdges, const IDCDeltaCompression compression, const bool debug, const bool senddebug, const bool usePrecisetimeStamp, const bool sendOutputFFT, const bool sendCCDB, const int lane)
+    : mCRUs{crus}, mIDCFactorization{std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, std::array<unsigned char, Mapper::NREGIONS>{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, 0, timeframes, timeframesDeltaIDC, crus}, mIDCStruct{TPCFactorizeIDCStruct<TPCFactorizeIDCSpecGroup>(groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges)}, mCompressionDeltaIDC{compression}, mDebug{debug}, mSendOutDebug{senddebug}, mUsePrecisetimeStamp{usePrecisetimeStamp}, mSendOutFFT{sendOutputFFT}, mSendOutCCDB{sendCCDB}, mLaneId{lane} {};
 
   void init(o2::framework::InitContext& ic) final
   {
-    mLaneId = ic.services().get<const o2::framework::DeviceSpec>().rank;
     mUpdateGroupingPar = mLaneId == 0 ? !(ic.options().get<bool>("update-not-grouping-parameter")) : false;
     mIDCFactorization.setUsePadStatusMap(ic.options().get<bool>("enablePadStatusMap"));
 
@@ -149,12 +148,8 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     const auto relTF = pc.inputs().get<unsigned int>("idcrelTF");
     for (auto& ref : InputRecordWalker(pc.inputs(), mFilter)) {
       auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
-      const auto descr = tpcCRUHeader->dataDescription;
-      if (TPCDistributeIDCSpec::getDataDescriptionIDC() == descr) {
-        const int cru = tpcCRUHeader->subSpecification - mLaneId * CRU::MaxCRU;
-        mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, relTF); // aggregate IDCs
-        // LOGP(info, "Received IDCs for CRU {} of size {} for relTF {}", cru, mIDCFactorization.getIDCs()[cru][relTF].size(), relTF);
-      }
+      const int cru = tpcCRUHeader->subSpecification;
+      mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, relTF); // aggregate IDCs
     }
     ++mProcessedTFs;
 
@@ -201,27 +196,27 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   static constexpr header::DataDescription getDataDescriptionCCDBIDCPadFlag() { return header::DataDescription{"TPC_CalibFlags"}; }
 
  private:
-  const std::vector<uint32_t> mCRUs{};                                                                                                                              ///< CRUs to process in this instance
-  int mProcessedTFs{0};                                                                                                                                             ///< number of processed time frames to keep track of when the writing to CCDB will be done
-  IDCFactorization mIDCFactorization;                                                                                                                               ///< object aggregating the IDCs and performing the factorization of the IDCs
-  TPCFactorizeIDCStruct<Type> mIDCStruct{};                                                                                                                         ///< object for averaging and grouping of the IDCs
-  const IDCDeltaCompression mCompressionDeltaIDC{};                                                                                                                 ///< compression type for IDC Delta
-  const bool mDebug{false};                                                                                                                                         ///< dump IDCs to tree for debugging
-  const bool mSendOutDebug{false};                                                                                                                                  ///< flag if the output will be send (for debugging)
-  const bool mUsePrecisetimeStamp{true};                                                                                                                            ///< use precise time stamp when writing to CCDB
-  const bool mSendOutFFT{false};                                                                                                                                    ///<  flag if the output will be send for the FFT
-  const bool mSendOutCCDB{false};                                                                                                                                   ///< sending the outputs for ccdb populator
-  uint32_t mTFFirst{};                                                                                                                                              ///< first TF of current aggregation interval
-  std::pair<uint64_t, uint64_t> mTimeStampCCDB{};                                                                                                                   ///< storing of first and last time stamp range used when setting the validity of the objects when writing to CCDB
-  std::vector<uint32_t> mTFRangeIDCDelta{};                                                                                                                         ///< tf range for storing IDCDelta
-  std::vector<uint64_t> mTimeStampRangeIDCDelta{};                                                                                                                  ///< time stamp range of IDCDelta
-  bool mUpdateGroupingPar{true};                                                                                                                                    ///< flag to set if grouping parameters should be updated or not
-  int mLaneId{0};                                                                                                                                                   ///< the id of the current process within the parallel pipeline
-  std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;                                                                                                                   ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
-  int mLanesDistribute{1};                                                                                                                                          ///< number of lanes used in the DistributeIDC device
-  unsigned int mTFsMessaged{10};                                                                                                                                    ///< send info messages only every mTFsMessaged
-  std::unordered_map<uint32_t, uint32_t> mCreationTime{};                                                                                                           ///< map to store the orbit reset time for precise time stamp
-  const std::vector<InputSpec> mFilter = {{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC()}, Lifetime::Timeframe}}; ///< filter for looping over input data
+  const std::vector<uint32_t> mCRUs{};                                                                                                                                     ///< CRUs to process in this instance
+  int mProcessedTFs{0};                                                                                                                                                    ///< number of processed time frames to keep track of when the writing to CCDB will be done
+  IDCFactorization mIDCFactorization;                                                                                                                                      ///< object aggregating the IDCs and performing the factorization of the IDCs
+  TPCFactorizeIDCStruct<Type> mIDCStruct{};                                                                                                                                ///< object for averaging and grouping of the IDCs
+  const IDCDeltaCompression mCompressionDeltaIDC{};                                                                                                                        ///< compression type for IDC Delta
+  const bool mDebug{false};                                                                                                                                                ///< dump IDCs to tree for debugging
+  const bool mSendOutDebug{false};                                                                                                                                         ///< flag if the output will be send (for debugging)
+  const bool mUsePrecisetimeStamp{true};                                                                                                                                   ///< use precise time stamp when writing to CCDB
+  const bool mSendOutFFT{false};                                                                                                                                           ///<  flag if the output will be send for the FFT
+  const bool mSendOutCCDB{false};                                                                                                                                          ///< sending the outputs for ccdb populator
+  uint32_t mTFFirst{};                                                                                                                                                     ///< first TF of current aggregation interval
+  std::pair<uint64_t, uint64_t> mTimeStampCCDB{};                                                                                                                          ///< storing of first and last time stamp range used when setting the validity of the objects when writing to CCDB
+  std::vector<uint32_t> mTFRangeIDCDelta{};                                                                                                                                ///< tf range for storing IDCDelta
+  std::vector<uint64_t> mTimeStampRangeIDCDelta{};                                                                                                                         ///< time stamp range of IDCDelta
+  bool mUpdateGroupingPar{true};                                                                                                                                           ///< flag to set if grouping parameters should be updated or not
+  const int mLaneId{0};                                                                                                                                                    ///< the id of the current process within the parallel pipeline
+  std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;                                                                                                                          ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
+  int mLanesDistribute{1};                                                                                                                                                 ///< number of lanes used in the DistributeIDC device
+  unsigned int mTFsMessaged{10};                                                                                                                                           ///< send info messages only every mTFsMessaged
+  std::unordered_map<uint32_t, uint32_t> mCreationTime{};                                                                                                                  ///< map to store the orbit reset time for precise time stamp
+  const std::vector<InputSpec> mFilter = {{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(mLaneId)}, Lifetime::Timeframe}}; ///< filter for looping over input data
 
   /// \return returns first TF for validity range when storing to CCDB
   uint32_t getFirstTF() const { return mTFFirst; }
@@ -460,10 +455,7 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint3
   }
 
   std::vector<InputSpec> inputSpecs;
-  inputSpecs.reserve(crus.size());
-  for (const auto& cru : crus) {
-    inputSpecs.emplace_back(InputSpec{"idcagg", gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(), header::DataHeader::SubSpecificationType{cru + lane * CRU::MaxCRU}, Lifetime::Sporadic});
-  }
+  inputSpecs.emplace_back(InputSpec{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(lane)}, Lifetime::Sporadic});
   inputSpecs.emplace_back(InputSpec{"idcrelTF", gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDCRelTF(), header::DataHeader::SubSpecificationType{static_cast<unsigned int>(lane)}, Lifetime::Sporadic});
 
   if (usePrecisetimeStamp) {
@@ -485,7 +477,7 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint3
     fmt::format("tpc-factorize-idc-{:02}", lane).data(),
     inputSpecs,
     outputSpecs,
-    AlgorithmSpec{adaptFromTask<TPCFactorizeIDCSpec<Type>>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, compression, debug, senddebug, usePrecisetimeStamp, sendOutputFFT, sendCCDB)},
+    AlgorithmSpec{adaptFromTask<TPCFactorizeIDCSpec<Type>>(crus, timeframes, timeframesDeltaIDC, groupPads, groupRows, groupLastRowsThreshold, groupLastPadsThreshold, groupPadsSectorEdges, compression, debug, senddebug, usePrecisetimeStamp, sendOutputFFT, sendCCDB, lane)},
     Options{{"gainMapFile", VariantType::String, "", {"file to reference gain map, which will be used for correcting the cluster charge"}},
             {"lanesDistribute", VariantType::Int, 1, {"Number of lanes which were used in the DistributeIDC device."}},
             {"nTFsMessage", VariantType::Int, 200, {"Send messages only every nTFs."}},
