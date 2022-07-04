@@ -226,6 +226,7 @@ class IDCFactorization : public IDCGroupHelperSector
   /// \param filename name of the output file. If empty the canvas is drawn.
   void drawPadStatusFlagsMapSector(const unsigned int sector, const PadFlags flag = PadFlags::flagSkip, const std::string filename = "PadStatusFlags_Sector.pdf") const { drawPadFlagMap(false, Sector(sector), filename, flag); }
 
+
   /// draw the status map for the flags (for debugging) for a full side
   /// \param side side which will be drawn
   /// \flag flag which will be drawn
