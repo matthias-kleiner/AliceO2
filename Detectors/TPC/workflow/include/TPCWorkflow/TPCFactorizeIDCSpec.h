@@ -158,7 +158,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     }
 
     if (!(mProcessedCRUs % mTFsMessaged)) {
-      LOGP(info, "mProcessedCRUs: {}   currTF: {}  for relTF: {}", mProcessedCRUs, currTF, relTF);
+      LOGP(info, "mProcessedTFs: {}   currTF: {}  for relTF: {}", mProcessedCRUs / mCRUs.size(), currTF, relTF);
     }
 
     if (mProcessedCRUs == mCRUs.size() * mIDCFactorization.getNTimeframes()) {
