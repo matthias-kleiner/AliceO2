@@ -61,7 +61,7 @@ class TPCFourierTransformAggregatorSpec : public o2::framework::Task
     if (mProcessedTimeStamp > timeStampsCCDB.front()) {
       LOGP(error, "Already processed a later time stamp {} then the received time stamp {}!", mProcessedTimeStamp, timeStampsCCDB.front());
     } else {
-      mProcessedTimeStamp = timeStampsCCDB.back();
+      mProcessedTimeStamp = timeStampsCCDB.front();
     }
 
     // TODO avoid copy

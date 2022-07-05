@@ -162,7 +162,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     }
 
     if (mProcessedCRUs == mCRUs.size() * mIDCFactorization.getNTimeframes()) {
-      mTimeStampCCDB.second = getTimeStamp(pc); // in milliseconds
+      mTimeStampCCDB.second = o2::ccdb::CcdbObjectInfo::INFINITE_TIMESTAMP;
       LOGP(info, "Setting timestamp validity to for writing to CCDB to {} for TF {}", mTimeStampCCDB.second, currTF);
 
       mProcessedCRUs = 0; // reset processed TFs for next aggregation interval
@@ -281,7 +281,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
       sendOutputDebug(output);
     }
     const auto timeStampStart = mTimeStampCCDB.first;
-    const auto timeStampEnd = (mTimeStampCCDB.second <= timeStampStart) ? timeStampStart + 1 : mTimeStampCCDB.second;
+    const auto timeStampEnd = mTimeStampCCDB.second;
 
     // sending output to FFT
     if (mSendOutFFT) {
