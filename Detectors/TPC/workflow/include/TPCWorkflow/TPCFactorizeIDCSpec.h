@@ -88,7 +88,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     mNDeltaIDCs = ic.options().get<int>("process-n-Delta-IDCs");
 
     mLanesDistribute = ic.options().get<int>("lanesDistribute");
-    mTFsMessaged = ic.options().get<int>("nTFsMessage");
+    mTFsMessaged = ic.options().get<int>("nTFsMessage") * mCRUs.size();
 
     const std::string refGainMapFile = ic.options().get<std::string>("gainMapFile");
     if (!refGainMapFile.empty()) {
@@ -111,8 +111,13 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
     }
 
     const auto currTF = processing_helpers::getCurrentTF(pc);
+    if (mTFStart == -1) {
+      mTFStart = currTF;
+    }
+    const auto relTF = currTF - mTFStart;
+
     // set the min range of TFs for first TF
-    if (mProcessedTFs == 0) {
+    if (mProcessedCRUs == 0) {
       mTFFirst = currTF;
       mTimeStampCCDB.first = getTimeStamp(pc); // in milliseconds
 
@@ -141,28 +146,26 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
       }
     }
 
-    if (mTFFirst + mIDCFactorization.getNTimeframes() - 1 == currTF) {
-      mTimeStampCCDB.second = getTimeStamp(pc); // in milliseconds
-      LOGP(info, "Setting timestamp validity to for writing to CCDB to {} for TF {}", mTimeStampCCDB.second, currTF);
-    }
-
     // check if current TF is in range of IDCDelta range
     findTimeStamp(pc);
 
-    const auto relTF = pc.inputs().get<unsigned int>("idcrelTF");
     for (auto& ref : InputRecordWalker(pc.inputs(), mFilter)) {
       auto const* tpcCRUHeader = o2::framework::DataRefUtils::getHeader<o2::header::DataHeader*>(ref);
       const int cru = tpcCRUHeader->subSpecification;
+      // LOGP(info, "getting data from CRU: {} for tf: {}", cru, currTF);
       mIDCFactorization.setIDCs(pc.inputs().get<std::vector<float>>(ref), cru, relTF); // aggregate IDCs
-    }
-    ++mProcessedTFs;
-
-    if (!(currTF % mTFsMessaged)) {
-      LOGP(info, "aggregated TFs: {}", mProcessedTFs);
+      ++mProcessedCRUs;
     }
 
-    if (mProcessedTFs == mLanesDistribute * mIDCFactorization.getNTimeframes()) {
-      mProcessedTFs = 0; // reset processed TFs for next aggregation interval
+    if (!(mProcessedCRUs % mTFsMessaged)) {
+      LOGP(info, "mProcessedCRUs: {}   currTF: {}  for relTF: {}", mProcessedCRUs, currTF, relTF);
+    }
+
+    if (mProcessedCRUs == mCRUs.size() * mIDCFactorization.getNTimeframes()) {
+      mTimeStampCCDB.second = getTimeStamp(pc); // in milliseconds
+      LOGP(info, "Setting timestamp validity to for writing to CCDB to {} for TF {}", mTimeStampCCDB.second, currTF);
+
+      mProcessedCRUs = 0; // reset processed TFs for next aggregation interval
       if constexpr (std::is_same_v<Type, TPCFactorizeIDCSpecGroup>) {
         mIDCFactorization.factorizeIDCs(true); // calculate DeltaIDC, 0D-IDC, 1D-IDC
       } else {
@@ -177,6 +180,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
 
       // storing to CCDB
       sendOutput(pc.outputs());
+      mTFStart = -1;
     }
   }
 
@@ -200,29 +204,30 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   static constexpr header::DataDescription getDataDescriptionCCDBIDCPadFlag() { return header::DataDescription{"TPC_CalibFlags"}; }
 
  private:
-  const std::vector<uint32_t> mCRUs{};                    ///< CRUs to process in this instance
-  int mProcessedTFs{0};                                   ///< number of processed time frames to keep track of when the writing to CCDB will be done
-  IDCFactorization mIDCFactorization;                     ///< object aggregating the IDCs and performing the factorization of the IDCs
-  TPCFactorizeIDCStruct<Type> mIDCStruct{};               ///< object for averaging and grouping of the IDCs
-  const IDCDeltaCompression mCompressionDeltaIDC{};       ///< compression type for IDC Delta
-  const bool mDebug{false};                               ///< dump IDCs to tree for debugging
-  const bool mSendOutDebug{false};                        ///< flag if the output will be send (for debugging)
-  const bool mUsePrecisetimeStamp{true};                  ///< use precise time stamp when writing to CCDB
-  const bool mSendOutFFT{false};                          ///<  flag if the output will be send for the FFT
-  const bool mSendOutCCDB{false};                         ///< sending the outputs for ccdb populator
-  uint32_t mTFFirst{};                                    ///< first TF of current aggregation interval
-  std::pair<uint64_t, uint64_t> mTimeStampCCDB{};         ///< storing of first and last time stamp range used when setting the validity of the objects when writing to CCDB
-  std::vector<uint32_t> mTFRangeIDCDelta{};               ///< tf range for storing IDCDelta
-  std::vector<uint64_t> mTimeStampRangeIDCDelta{};        ///< time stamp range of IDCDelta
-  bool mUpdateGroupingPar{true};                          ///< flag to set if grouping parameters should be updated or not
-  const int mLaneId{0};                                   ///< the id of the current process within the parallel pipeline
-  std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;         ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
-  int mLanesDistribute{1};                                ///< number of lanes used in the DistributeIDC device
-  unsigned int mTFsMessaged{10};                          ///< send info messages only every mTFsMessaged
-  std::unordered_map<uint32_t, uint32_t> mCreationTime{}; ///< map to store the orbit reset time for precise time stamp
-  bool mDisableIDCDelta{false};
-  bool mDisableCCDBObjects{false};
-  int mNDeltaIDCs{-1};
+  const std::vector<uint32_t> mCRUs{};                                                                                                                                     ///< CRUs to process in this instance
+  int mProcessedCRUs{};                                                                                                                                                    ///< number of processed CRUs to keep track of when the writing to CCDB etc. will be done
+  IDCFactorization mIDCFactorization;                                                                                                                                      ///< object aggregating the IDCs and performing the factorization of the IDCs
+  TPCFactorizeIDCStruct<Type> mIDCStruct{};                                                                                                                                ///< object for averaging and grouping of the IDCs
+  const IDCDeltaCompression mCompressionDeltaIDC{};                                                                                                                        ///< compression type for IDC Delta
+  const bool mDebug{false};                                                                                                                                                ///< dump IDCs to tree for debugging
+  const bool mSendOutDebug{false};                                                                                                                                         ///< flag if the output will be send (for debugging)
+  const bool mUsePrecisetimeStamp{true};                                                                                                                                   ///< use precise time stamp when writing to CCDB
+  const bool mSendOutFFT{false};                                                                                                                                           ///<  flag if the output will be send for the FFT
+  const bool mSendOutCCDB{false};                                                                                                                                          ///< sending the outputs for ccdb populator
+  uint32_t mTFFirst{};                                                                                                                                                     ///< first TF of current aggregation interval
+  std::pair<uint64_t, uint64_t> mTimeStampCCDB{0, 0};                                                                                                                      ///< storing of first and last time stamp range used when setting the validity of the objects when writing to CCDB
+  std::vector<uint32_t> mTFRangeIDCDelta{};                                                                                                                                ///< tf range for storing IDCDelta
+  std::vector<uint64_t> mTimeStampRangeIDCDelta{};                                                                                                                         ///< time stamp range of IDCDelta
+  bool mUpdateGroupingPar{true};                                                                                                                                           ///< flag to set if grouping parameters should be updated or not
+  const int mLaneId{0};                                                                                                                                                    ///< the id of the current process within the parallel pipeline
+  std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;                                                                                                                          ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
+  int mLanesDistribute{1};                                                                                                                                                 ///< number of lanes used in the DistributeIDC device
+  unsigned int mTFsMessaged{10};                                                                                                                                           ///< send info messages only every mTFsMessaged
+  std::unordered_map<uint32_t, uint32_t> mCreationTime{};                                                                                                                  ///< map to store the orbit reset time for precise time stamp
+  bool mDisableIDCDelta{false};                                                                                                                                            ///< debugging
+  bool mDisableCCDBObjects{false};                                                                                                                                         ///< debugging
+  int mNDeltaIDCs{-1};                                                                                                                                                     ///< debugging: number of deltaIDC chunks to calculate
+  long mTFStart{-1};                                                                                                                                                       ///< first TF of current aggregation interval
   const std::vector<InputSpec> mFilter = {{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(mLaneId)}, Lifetime::Timeframe}}; ///< filter for looping over input data
 
   /// \return returns first TF for validity range when storing to CCDB
@@ -482,7 +487,6 @@ DataProcessorSpec getTPCFactorizeIDCSpec(const int lane, const std::vector<uint3
 
   std::vector<InputSpec> inputSpecs;
   inputSpecs.emplace_back(InputSpec{"idcagg", ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(lane)}, Lifetime::Sporadic});
-  inputSpecs.emplace_back(InputSpec{"idcrelTF", gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDCRelTF(), header::DataHeader::SubSpecificationType{static_cast<unsigned int>(lane)}, Lifetime::Sporadic});
 
   if (usePrecisetimeStamp) {
     inputSpecs.emplace_back("orbitreset", "CTP", "ORBITRESET", 0, Lifetime::Condition, ccdbParamSpec("CTP/Calib/OrbitReset"));

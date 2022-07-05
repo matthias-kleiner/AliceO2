@@ -231,7 +231,8 @@ void o2::tpc::IDCFactorization::calcIDCOne()
   }
 
 #pragma omp parallel for num_threads(sNThreads)
-  for (unsigned int cru = 0; cru < mCRUs.size(); ++cru) {
+  for (unsigned int cruInd = 0; cruInd < mCRUs.size(); ++cruInd) {
+    const unsigned int cru = mCRUs[cruInd];
 #ifdef WITH_OPENMP
     const int ithread = omp_get_thread_num();
 #else
@@ -254,6 +255,7 @@ void o2::tpc::IDCFactorization::calcIDCOne()
       std::transform(idcOneSafe[side].front().begin(), idcOneSafe[side].front().end(), idcOneSafe[side][i].begin(), idcOneSafe[side].front().begin(), std::plus<float>());
       std::transform(weightsSafe[side].front().begin(), weightsSafe[side].front().end(), weightsSafe[side][i].begin(), weightsSafe[side].front().begin(), std::plus<unsigned int>());
     }
+
     // replace all 0 with 1 to avoid division by 0
     std::replace(weightsSafe[side].front().begin(), weightsSafe[side].front().end(), 0, 1);
 

@@ -214,8 +214,6 @@ class TPCDistributeIDCSpec : public o2::framework::Task
   void sendOutput(o2::framework::ProcessingContext& pc, const unsigned int currentOutLane, const bool currentBuffer, const unsigned int relTF)
   {
     // send output data for one TF for all CRUs
-    pc.outputs().snapshot(Output{gDataOriginTPC, getDataDescriptionIDCRelTF(), header::DataHeader::SubSpecificationType{currentOutLane}}, relTF);
-
     if (!mLoadFromFile) {
       for (unsigned int i = 0; i < mCRUs.size(); ++i) {
         pc.outputs().adoptContainer(Output{gDataOriginTPC, mDataDescrOut[currentOutLane], header::DataHeader::SubSpecificationType{mCRUs[i]}}, std::move(mIDCs[currentBuffer][mCRUs[i]][relTF]));
@@ -276,15 +274,18 @@ DataProcessorSpec getTPCDistributeIDCSpec(const int ilane, const std::vector<uin
 {
   std::vector<InputSpec> inputSpecs;
   if (!loadFromFile) {
-    inputSpecs.emplace_back(InputSpec{"idcsgroup", ConcreteDataTypeMatcher{gDataOriginTPC, TPCFLPIDCDevice<TPCFLPIDCDeviceGroup>::getDataDescriptionIDCGroup()}, Lifetime::Timeframe});
+    inputSpecs.reserve(crus.size());
+    for (const auto& cru : crus) {
+      const header::DataHeader::SubSpecificationType subSpec{cru << 7};
+      inputSpecs.emplace_back(InputSpec{"idcsgroup", gDataOriginTPC, TPCFLPIDCDevice<TPCFLPIDCDeviceGroup>::getDataDescriptionIDCGroup(), subSpec, Lifetime::Timeframe});
+    }
   }
 
   std::vector<OutputSpec> outputSpecs;
-  outputSpecs.reserve(2 * outlanes);
+  outputSpecs.reserve(outlanes);
   for (unsigned int lane = 0; lane < outlanes; ++lane) {
     const header::DataHeader::SubSpecificationType subSpec{lane};
     outputSpecs.emplace_back(ConcreteDataTypeMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDC(lane)}, Lifetime::Sporadic);
-    outputSpecs.emplace_back(ConcreteDataMatcher{gDataOriginTPC, TPCDistributeIDCSpec::getDataDescriptionIDCRelTF(), subSpec}, Lifetime::Sporadic);
   }
 
   const auto id = fmt::format("tpc-distribute-idc-{:02}", ilane);
