@@ -84,7 +84,7 @@ set(SRCS_O2_DATATYPES
     Interface/GPUO2InterfaceConfigurableParam.cxx)
 set(HDRS_CINT_O2 Merger/GPUTPCGMMergedTrack.h)
 set(HDRS_CINT_O2_DATATYPES DataTypes/GPUDataTypes.h Interface/GPUO2InterfaceConfigurableParam.h)
-set(HDRS_CINT_O2_ADDITIONAL DataTypes/GPUSettings.h Definitions/GPUSettingsList.h DataTypes/GPUDataTypes.h DataTypes/GPUTRDTrack.h DataTypes/CalibdEdxTrackTopologyPol.h DataTypes/CalibdEdxTrackTopologySpline.h) # Manual dependencies for ROOT dictionary generation
+set(HDRS_CINT_O2_ADDITIONAL DataTypes/GPUSettings.h Definitions/GPUSettingsList.h DataTypes/GPUDataTypes.h DataTypes/GPUTRDTrack.h DataTypes/CalibdEdxTrackTopologyPol.h DataTypes/CalibdEdxTrackTopologySpline.h DataTypes/DebugStreamer.h) # Manual dependencies for ROOT dictionary generation
 
 set(SRCS_NO_CINT
     DataTypes/GPUMemorySizeScalers.cxx
@@ -210,6 +210,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2" OR CONFIG_O2_EXTENSIONS)
         DataTypes/CalibdEdxContainer.cxx
         DataTypes/CalibdEdxTrackTopologyPol.cxx
         DataTypes/CalibdEdxTrackTopologySpline.cxx
+        DataTypes/DebugStreamer.cxx
         Refit/GPUTrackingRefit.cxx
         Refit/GPUTrackingRefitKernel.cxx
         Merger/GPUTPCGMO2Output.cxx)

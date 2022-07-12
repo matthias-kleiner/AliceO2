@@ -20,6 +20,7 @@
 #include "GPUCommonMath.h"
 #include "GPUParam.h"
 #include "GPUdEdxInfo.h"
+#include "DebugStreamer.h"
 #if defined(GPUCA_HAVE_O2HEADERS) && !defined(GPUCA_OPENCL1)
 #include "DataFormatsTPC/Defs.h"
 #include "CalibdEdxContainer.h"
@@ -50,6 +51,16 @@ class GPUdEdx
   GPUd() void fillCluster(float qtot, float qmax, int padRow, unsigned char slice, float trackSnp, float trackTgl, const GPUParam& param, const GPUCalibObjectsConst& calib, float z, float pad, float relTime);
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param);
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param);
+
+  /// Destructor
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+  ~GPUdEdx()
+  {
+    delete mStreamer;
+  }
+#else
+  ~GPUdEdx() CON_DEFAULT;
+#endif
 
  private:
   GPUd() float GetSortTruncMean(GPUCA_DEDX_STORAGE_TYPE* array, int count, int trunclow, int trunchigh);
@@ -86,6 +97,7 @@ class GPUdEdx
   unsigned char mCount = 0;
   unsigned char mLastROC = 255;
   char mNSubThresh = 0;
+  DebugStreamer* mStreamer{nullptr};
 };
 
 GPUdi() void GPUdEdx::checkSubThresh(int roc)
@@ -182,6 +194,46 @@ GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, unsigned
   if (qmax < mSubThreshMinMax) {
     mSubThreshMinMax = qmax;
   }
+
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+  if (DebugStreamer::checkStream(ParameterDebugStreamer::streamdEdx)) {
+    if (!mStreamer) {
+      mStreamer = new DebugStreamer("debug_dedx", "UPDATE");
+    }
+
+    // copy elements to non const storage as const objects cannot be written using the TreeStreamRedirector
+    int regionTmp = region;
+    float absRelPadTmp = absRelPad;
+    float thresholdTmp = threshold;
+    float qMaxTopologyCorrTmp = qMaxTopologyCorr;
+    float qTotTopologyCorrTmp = qTotTopologyCorr;
+    float qMaxResidualCorrTmp = qMaxResidualCorr;
+    float qTotResidualCorrTmp = qTotResidualCorr;
+    float residualGainMapGainTmp = residualGainMapGain;
+    float fullGainMapGainTmp = fullGainMapGain;
+
+    mStreamer->stream() << mStreamer->getUniqueTreeName("tree").data()
+                        << "qTot=" << mChargeTot[mCount - 1]
+                        << "qMax=" << mChargeMax[mCount - 1]
+                        << "region=" << regionTmp
+                        << "padRow=" << padRow
+                        << "tanTheta=" << tanTheta
+                        << "trackTgl=" << trackTgl
+                        << "sinPhi=" << trackSnp
+                        << "z=" << z
+                        << "absRelPad=" << absRelPadTmp
+                        << "relTime=" << relTime
+                        << "threshold=" << thresholdTmp
+                        << "qTotIn=" << qTotIn
+                        << "qMaxTopologyCorr=" << qMaxTopologyCorrTmp
+                        << "qTotTopologyCorr=" << qTotTopologyCorrTmp
+                        << "qMaxResidualCorr=" << qMaxResidualCorrTmp
+                        << "qTotResidualCorr=" << qTotResidualCorrTmp
+                        << "residualGainMapGain=" << residualGainMapGainTmp
+                        << "fullGainMapGain=" << fullGainMapGainTmp
+                        << "\n";
+  }
+#endif
 }
 
 GPUdi() void GPUdEdx::fillSubThreshold(int padRow, const GPUParam& GPUrestrict() param)
