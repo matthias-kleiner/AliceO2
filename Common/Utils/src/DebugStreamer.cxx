@@ -9,7 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "DebugStreamer.h"
+#include "CommonUtils/DebugStreamer.h"
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 #include <thread>
 #include <fmt/format.h>

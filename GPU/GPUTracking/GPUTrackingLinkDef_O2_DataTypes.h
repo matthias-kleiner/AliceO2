@@ -36,7 +36,5 @@
 #pragma link C++ class o2::tpc::CalibdEdxTrackTopologyPol + ;
 #pragma link C++ class o2::tpc::CalibdEdxTrackTopologySpline + ;
 #pragma link C++ struct o2::tpc::CalibdEdxTrackTopologyPolContainer + ;
-#pragma link C++ struct o2::gpu::ParameterDebugStreamer + ;
-#pragma link C++ class o2::gpu::DebugStreamer + ;
 
 #endif
