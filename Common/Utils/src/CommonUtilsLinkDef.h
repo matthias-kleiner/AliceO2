@@ -39,7 +39,7 @@
 
 #pragma link C++ class o2::utils::IRFrameSelector + ;
 
-#pragma link C++ struct o2::gpu::ParameterDebugStreamer + ;
-#pragma link C++ class o2::gpu::DebugStreamer + ;
+#pragma link C++ struct o2::utils::ParameterDebugStreamer + ;
+#pragma link C++ class o2::utils::DebugStreamer + ;
 
 #endif

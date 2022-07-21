@@ -17,23 +17,30 @@
 #include "TKey.h"
 #endif
 
-O2ParamImpl(o2::gpu::ParameterDebugStreamer);
+O2ParamImpl(o2::utils::ParameterDebugStreamer);
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
 
-o2::gpu::DebugStreamer::DebugStreamer(const char* outFile, const char* option)
+std::string o2::utils::DebugStreamer::getName(const char* name) const
 {
-  ROOT::EnableThreadSafety();
-  mTreeStreamer = std::make_unique<o2::utils::TreeStreamRedirector>(fmt::format("{}_{}.root", outFile, getCPUID()).data(), option);
+  return fmt::format("{}=", name);
 }
 
-std::string o2::gpu::DebugStreamer::getUniqueTreeName(const char* tree) const { return fmt::format("{}_{}", tree, getNTrees()); }
+void o2::utils::DebugStreamer::setStreamer(const char* outFile, const char* option)
+{
+  if (!isStreamerSet()) {
+    ROOT::EnableThreadSafety();
+    mTreeStreamer = std::make_unique<o2::utils::TreeStreamRedirector>(fmt::format("{}_{}.root", outFile, getCPUID()).data(), option);
+  }
+}
 
-size_t o2::gpu::DebugStreamer::getCPUID() { return std::hash<std::thread::id>{}(std::this_thread::get_id()); }
+std::string o2::utils::DebugStreamer::getUniqueTreeName(const char* tree) const { return fmt::format("{}_{}", tree, getNTrees()); }
 
-int o2::gpu::DebugStreamer::getNTrees() const { return mTreeStreamer->GetFile()->GetListOfKeys()->GetEntries(); }
+size_t o2::utils::DebugStreamer::getCPUID() { return std::hash<std::thread::id>{}(std::this_thread::get_id()); }
 
-void o2::gpu::DebugStreamer::mergeTrees(const char* inpFile, const char* outFile, const char* option)
+int o2::utils::DebugStreamer::getNTrees() const { return mTreeStreamer->GetFile()->GetListOfKeys()->GetEntries(); }
+
+void o2::utils::DebugStreamer::mergeTrees(const char* inpFile, const char* outFile, const char* option)
 {
   TFile fInp(inpFile, "READ");
   TList list;
@@ -47,16 +54,16 @@ void o2::gpu::DebugStreamer::mergeTrees(const char* inpFile, const char* outFile
   fOut.WriteObject(tree, "tree");
 }
 
-void o2::gpu::DebugStreamer::enableStream(const ParameterDebugStreamer::StreamFlags streamFlag)
+void o2::utils::DebugStreamer::enableStream(const StreamFlags streamFlag)
 {
-  ParameterDebugStreamer::StreamFlags streamlevel = getStreamFlags();
+  StreamFlags streamlevel = getStreamFlags();
   streamlevel = streamFlag | streamlevel;
   setStreamFlags(streamlevel);
 }
 
-void o2::gpu::DebugStreamer::disableStream(const ParameterDebugStreamer::StreamFlags streamFlag)
+void o2::utils::DebugStreamer::disableStream(const StreamFlags streamFlag)
 {
-  ParameterDebugStreamer::StreamFlags streamlevel = getStreamFlags();
+  StreamFlags streamlevel = getStreamFlags();
   streamlevel = (~streamFlag) & streamlevel;
   setStreamFlags(streamlevel);
 }

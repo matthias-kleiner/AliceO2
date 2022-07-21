@@ -52,16 +52,6 @@ class GPUdEdx
   GPUd() void fillSubThreshold(int padRow, const GPUParam& param);
   GPUd() void computedEdx(GPUdEdxInfo& output, const GPUParam& param);
 
-  /// Destructor
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
-  ~GPUdEdx()
-  {
-    delete mStreamer;
-  }
-#else
-  ~GPUdEdx() CON_DEFAULT;
-#endif
-
  private:
   GPUd() float GetSortTruncMean(GPUCA_DEDX_STORAGE_TYPE* array, int count, int trunclow, int trunchigh);
   GPUd() void checkSubThresh(int roc);
@@ -97,7 +87,7 @@ class GPUdEdx
   unsigned char mCount = 0;
   unsigned char mLastROC = 255;
   char mNSubThresh = 0;
-  DebugStreamer* mStreamer{nullptr};
+  o2::utils::DebugStreamer mStreamer;
 };
 
 GPUdi() void GPUdEdx::checkSubThresh(int roc)
@@ -195,45 +185,29 @@ GPUdnii() void GPUdEdx::fillCluster(float qtot, float qmax, int padRow, unsigned
     mSubThreshMinMax = qmax;
   }
 
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
-  if (DebugStreamer::checkStream(ParameterDebugStreamer::streamdEdx)) {
-    if (!mStreamer) {
-      mStreamer = new DebugStreamer("debug_dedx", "UPDATE");
-    }
-
-    // copy elements to non const storage as const objects cannot be written using the TreeStreamRedirector
-    int regionTmp = region;
-    float absRelPadTmp = absRelPad;
-    float thresholdTmp = threshold;
-    float qMaxTopologyCorrTmp = qMaxTopologyCorr;
-    float qTotTopologyCorrTmp = qTotTopologyCorr;
-    float qMaxResidualCorrTmp = qMaxResidualCorr;
-    float qTotResidualCorrTmp = qTotResidualCorr;
-    float residualGainMapGainTmp = residualGainMapGain;
-    float fullGainMapGainTmp = fullGainMapGain;
-
-    mStreamer->stream() << mStreamer->getUniqueTreeName("tree").data()
-                        << "qTot=" << mChargeTot[mCount - 1]
-                        << "qMax=" << mChargeMax[mCount - 1]
-                        << "region=" << regionTmp
-                        << "padRow=" << padRow
-                        << "tanTheta=" << tanTheta
-                        << "trackTgl=" << trackTgl
-                        << "sinPhi=" << trackSnp
-                        << "z=" << z
-                        << "absRelPad=" << absRelPadTmp
-                        << "relTime=" << relTime
-                        << "threshold=" << thresholdTmp
-                        << "qTotIn=" << qTotIn
-                        << "qMaxTopologyCorr=" << qMaxTopologyCorrTmp
-                        << "qTotTopologyCorr=" << qTotTopologyCorrTmp
-                        << "qMaxResidualCorr=" << qMaxResidualCorrTmp
-                        << "qTotResidualCorr=" << qTotResidualCorrTmp
-                        << "residualGainMapGain=" << residualGainMapGainTmp
-                        << "fullGainMapGain=" << fullGainMapGainTmp
-                        << "\n";
+  using Streamer = o2::utils::DebugStreamer;
+  if (Streamer::checkStream(o2::utils::StreamFlags::streamdEdx)) {
+    mStreamer.setStreamer("debug_dedx", "UPDATE");
+    mStreamer.stream(
+      Streamer::StreamerObject{mChargeTot[mCount - 1], "qTot"},
+      Streamer::StreamerObject{mChargeMax[mCount - 1], "qMax"},
+      Streamer::StreamerObject{region, "region"},
+      Streamer::StreamerObject{padRow, "padRow"},
+      Streamer::StreamerObject{tanTheta, "tanTheta"},
+      Streamer::StreamerObject{trackTgl, "trackTgl"},
+      Streamer::StreamerObject{trackSnp, "sinPhi"},
+      Streamer::StreamerObject{z, "z"},
+      Streamer::StreamerObject{absRelPad, "absRelPad"},
+      Streamer::StreamerObject{relTime, "relTime"},
+      Streamer::StreamerObject{threshold, "threshold"},
+      Streamer::StreamerObject{qTotIn, "qTotIn"},
+      Streamer::StreamerObject{qMaxTopologyCorr, "qMaxTopologyCorr"},
+      Streamer::StreamerObject{qTotTopologyCorr, "qTotTopologyCorr"},
+      Streamer::StreamerObject{qMaxResidualCorr, "qMaxResidualCorr"},
+      Streamer::StreamerObject{qTotResidualCorr, "qTotResidualCorr"},
+      Streamer::StreamerObject{residualGainMapGain, "residualGainMapGain"},
+      Streamer::StreamerObject{fullGainMapGain, "fullGainMapGain"});
   }
-#endif
 }
 
 GPUdi() void GPUdEdx::fillSubThreshold(int padRow, const GPUParam& GPUrestrict() param)

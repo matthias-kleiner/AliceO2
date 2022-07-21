@@ -16,47 +16,68 @@
 #ifndef ALICEO2_TPC_DEBUGSTREAMER_H_
 #define ALICEO2_TPC_DEBUGSTREAMER_H_
 
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) && defined(DEBUG_STREAMER)
 #include "CommonUtils/ConfigurableParamHelper.h"
 #include "CommonUtils/TreeStreamRedirector.h"
 #endif
 
-namespace o2::gpu
+namespace o2::utils
 {
 
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+/// struct defining the flags which can be used to check if a certain debug streamer is used
+enum StreamFlags {
+  streamdEdx = 1 << 0, ///< stream corrections and cluster properties used for the dE/dx
+};
+
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) && defined(DEBUG_STREAMER)
+
+inline StreamFlags operator|(StreamFlags a, StreamFlags b) { return static_cast<StreamFlags>(static_cast<int>(a) | static_cast<int>(b)); }
+inline StreamFlags operator&(StreamFlags a, StreamFlags b) { return static_cast<StreamFlags>(static_cast<int>(a) & static_cast<int>(b)); }
+inline StreamFlags operator~(StreamFlags a) { return static_cast<StreamFlags>(~static_cast<int>(a)); }
+
 /// struct for setting and storing the streamer level
 struct ParameterDebugStreamer : public o2::conf::ConfigurableParamHelper<ParameterDebugStreamer> {
-
-  /// struct defining the flags which can be used to check if a certain debug streamer is used
-  enum StreamFlags {
-    streamdEdx = 1 << 0, ///< stream corrections and cluster properties used for the dE/dx
-  };
-
   StreamFlags StreamLevel{}; /// flag to store what will be streamed
   O2ParamDef(ParameterDebugStreamer, "DebugStreamerParam");
 };
-
-inline ParameterDebugStreamer::StreamFlags operator|(ParameterDebugStreamer::StreamFlags a, ParameterDebugStreamer::StreamFlags b) { return static_cast<ParameterDebugStreamer::StreamFlags>(static_cast<int>(a) | static_cast<int>(b)); }
-inline ParameterDebugStreamer::StreamFlags operator&(ParameterDebugStreamer::StreamFlags a, ParameterDebugStreamer::StreamFlags b) { return static_cast<ParameterDebugStreamer::StreamFlags>(static_cast<int>(a) & static_cast<int>(b)); }
-inline ParameterDebugStreamer::StreamFlags operator~(ParameterDebugStreamer::StreamFlags a) { return static_cast<ParameterDebugStreamer::StreamFlags>(~static_cast<int>(a)); }
 #endif
 
 /// class to enable streaming debug information to root files
 class DebugStreamer
 {
-#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
+
+#if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) && defined(DEBUG_STREAMER)
  public:
-  /// constructor
+  /// object which will be used for streaming
+  template <typename Type>
+  struct StreamerObject {
+    StreamerObject(const Type& obj, const char* nameTmp) : object{obj}, name{nameTmp} {};
+    Type object;      ///< object which will be streamed to the tree
+    const char* name; ///< branch name of the streamed object
+  };
+
+  /// set the streamer i.e. create the output file and set up the streamer
   /// \param outFile output file name without .root suffix
   /// \param option RECREATE or UPDATE
-  DebugStreamer(const char* outFile, const char* option);
+  void setStreamer(const char* outFile, const char* option);
+
+  /// \return returns if the streamer is set
+  bool isStreamerSet() const { return mTreeStreamer ? true : false; }
 
   /// \return returns streamer object
-  o2::utils::TreeStreamRedirector& stream() { return *mTreeStreamer; }
+  o2::utils::TreeStreamRedirector& getStreamer() { return *mTreeStreamer; }
+
+  /// fill streamer with objects
+  template <typename T, typename... Types>
+  void stream(StreamerObject<T> obj, StreamerObject<Types>... objects)
+  {
+    const std::string name = getName(obj.name);
+    getStreamer() << getUniqueTreeName("tree").data() << name.data() << obj.object;
+    stream(objects...);
+  }
 
   /// \return returns streamer level i.e. what will be written to file
-  static ParameterDebugStreamer::StreamFlags getStreamFlags() { return ParameterDebugStreamer::Instance().StreamLevel; }
+  static StreamFlags getStreamFlags() { return ParameterDebugStreamer::Instance().StreamLevel; }
 
   ///< return returns unique ID for each CPU thread to give each thread an own output file
   static size_t getCPUID();
@@ -69,16 +90,16 @@ class DebugStreamer
   std::string getUniqueTreeName(const char* tree) const;
 
   /// set directly the debug level
-  static void setStreamFlags(const ParameterDebugStreamer::StreamFlags streamFlags) { o2::conf::ConfigurableParam::setValue("DebugStreamerParam", "StreamLevel", static_cast<int>(streamFlags)); }
+  static void setStreamFlags(const StreamFlags streamFlags) { o2::conf::ConfigurableParam::setValue("DebugStreamerParam", "StreamLevel", static_cast<int>(streamFlags)); }
 
   /// enable specific streamer flag
-  static void enableStream(const ParameterDebugStreamer::StreamFlags streamFlag);
+  static void enableStream(const StreamFlags streamFlag);
 
   /// disable a specific streamer flag
-  static void disableStream(const ParameterDebugStreamer::StreamFlags streamFlag);
+  static void disableStream(const StreamFlags streamFlag);
 
   /// check if streamer for specific flag is enabled
-  static bool checkStream(const ParameterDebugStreamer::StreamFlags streamFlag) { return ((getStreamFlags() & streamFlag) == streamFlag); }
+  static bool checkStream(const StreamFlags streamFlag) { return ((getStreamFlags() & streamFlag) == streamFlag); }
 
   /// merge trees with the same content structure, but different naming
   /// \param inpFile input file containing several trees with the same content
@@ -87,12 +108,36 @@ class DebugStreamer
   static void mergeTrees(const char* inpFile, const char* outFile, const char* option = "fast");
 
  private:
+  /// stream end of line
+  void stream() { getStreamer() << getUniqueTreeName("tree").data() << "\n"; }
+
+  /// \return returns name for streaming to tree
+  std::string getName(const char* name) const;
+
   std::unique_ptr<o2::utils::TreeStreamRedirector> mTreeStreamer; ///< streamer which is used for the debugging
 #else
-  /* Empty for GPU */
+ public:
+  /// empty for GPU
+  GPUd() void setStreamer(const char*, const char*){};
+
+  /// always false for GPU
+  GPUd() static bool checkStream(const StreamFlags) { return false; }
+
+  /// empty for GPU
+  template <typename T, typename... Types>
+  GPUd() void stream(T var1, Types... var2)
+  {
+  }
+
+  /// empty struct for GPU
+  template <typename Type>
+  struct StreamerObject {
+    GPUd() StreamerObject(const Type&, const char*){};
+  };
+
 #endif
 };
 
-} // namespace o2::gpu
+} // namespace o2::utils
 
 #endif
