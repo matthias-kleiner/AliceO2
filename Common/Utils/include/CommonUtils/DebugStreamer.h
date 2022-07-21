@@ -31,7 +31,10 @@ enum StreamFlags {
 
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE) && defined(DEBUG_STREAMER)
 
-inline StreamFlags operator|(StreamFlags a, StreamFlags b) { return static_cast<StreamFlags>(static_cast<int>(a) | static_cast<int>(b)); }
+inline StreamFlags operator|(StreamFlags a, StreamFlags b)
+{
+  return static_cast<StreamFlags>(static_cast<int>(a) | static_cast<int>(b));
+}
 inline StreamFlags operator&(StreamFlags a, StreamFlags b) { return static_cast<StreamFlags>(static_cast<int>(a) & static_cast<int>(b)); }
 inline StreamFlags operator~(StreamFlags a) { return static_cast<StreamFlags>(~static_cast<int>(a)); }
 
