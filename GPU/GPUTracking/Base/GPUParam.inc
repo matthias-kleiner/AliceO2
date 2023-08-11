@@ -133,6 +133,8 @@ GPUdi() float MEM_LG(GPUParam)::GetClusterError2(int yz, int type, float z, floa
   return v;
 }
 
+#endif // !GPUCA_TPC_GEOMETRY_O2
+
 MEM_CLASS_PRE()
 GPUdi() float MEM_LG(GPUParam)::GetSystematicClusterErrorIFC2(float x, float z, bool sideC) const
 {

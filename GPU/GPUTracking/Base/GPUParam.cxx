@@ -149,13 +149,6 @@ void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessi
   if (p) {
     par.debugLevel = p->debugLevel;
     par.resetTimers = p->resetTimers;
-    UpdateRun3ClusterErrors(p->param.tpcErrorParamY, p->param.tpcErrorParamZ);
-  }
-  if (w) {
-    par.dodEdx = w->steps.isSet(GPUDataTypes::RecoStep::TPCdEdx);
-    if (par.dodEdx && p && p->tpcDownscaledEdx != 0) {
-      par.dodEdx = (rand() % 100) < p->tpcDownscaledEdx;
-    }
   }
 }
 
