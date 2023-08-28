@@ -66,7 +66,6 @@ GPUdi() float MEM_LG(GPUParam)::GetSystematicClusterErrorIFC2(float x, float z, 
   const float kEpsZBoundary = 1.e-6f; // to disentangle A,C and A+C-common regions
   const float kMaxExpArg = 9.f;       // limit r-dumped error to this exp. argument
   const float kMaxExpArgZ = CAMath::Sqrt(2.f * kMaxExpArg);
-
   double sysErr = 0;
   if (rec.tpc.sysClusErrorInner0 > 0.f) {
     double dr = CAMath::Abs(x - 85.f);
@@ -131,6 +130,12 @@ GPUdi() float MEM_LG(GPUParam)::GetClusterError2(int yz, int type, float z, floa
   v *= yz ? rec.tpc.clusterError2CorrectionZ : rec.tpc.clusterError2CorrectionY;
   v += yz ? rec.tpc.clusterError2AdditionalZ : rec.tpc.clusterError2AdditionalY;
   return v;
+}
+
+MEM_CLASS_PRE()
+GPUdi() float MEM_LG(GPUParam)::GetSystematicClusterErrorIFC2(float x, float z, bool sideC) const
+{
+  return 0;
 }
 
 #endif // !GPUCA_TPC_GEOMETRY_O2
