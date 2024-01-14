@@ -31,7 +31,7 @@ void CorrectionMapsHelper::clear()
 
 void CorrectionMapsHelper::setOwner(bool v)
 {
-  if (mCorrMap || mCorrMapRef) {
+  if (mCorrMap) {
     throw std::runtime_error("Must not change ownership while we contain objects");
   }
   mOwner = v;
@@ -68,10 +68,10 @@ void CorrectionMapsHelper::setCorrMap(std::unique_ptr<TPCFastTransform>&& m)
 //________________________________________________________
 void CorrectionMapsHelper::setCorrMapRef(std::unique_ptr<TPCFastTransform>&& m)
 {
-  if (!mOwner) {
-    throw std::runtime_error("we must not take the ownership from a unique ptr if mOwner is not set");
-  }
-  delete mCorrMapRef;
+  // if (!mOwner) {
+  //   throw std::runtime_error("we must not take the ownership from a unique ptr if mOwner is not set");
+  // }
+  // delete mCorrMapRef;
   mCorrMapRef = m.release();
 }
 

@@ -43,7 +43,7 @@ void CorrectionMapsLoader::extractCCDBInputs(ProcessingContext& pc)
 {
   pc.inputs().get<o2::tpc::CorrMapParam*>("tpcCorrPar");
   pc.inputs().get<o2::gpu::TPCFastTransform*>("tpcCorrMap");
-  pc.inputs().get<o2::gpu::TPCFastTransform*>("tpcCorrMapRef");
+  // pc.inputs().get<o2::gpu::TPCFastTransform*>("tpcCorrMapRef");
   const int maxDumRep = 5;
   int dumRep = 0;
   o2::ctp::LumiInfo lumiObj;
@@ -62,21 +62,25 @@ void CorrectionMapsLoader::extractCCDBInputs(ProcessingContext& pc)
     float tpcScaler = pc.inputs().get<float>("tpcscaler");
     setInstLumi(mInstLumiFactor * tpcScaler);
   }
+  // delete mCorrMapRef;
+  setCorrMapRef(std::move(o2::tpc::TPCFastTransformHelperO2::instance()->create(0)));
+  setUpdatedMapRef();
+  // mCorrMapRef->rectifyAfterReadingFromFile();
 }
 
 //________________________________________________________
 void CorrectionMapsLoader::requestCCDBInputs(std::vector<InputSpec>& inputs, std::vector<o2::framework::ConfigParamSpec>& options, const CorrectionMapsLoaderGloOpts& gloOpts)
 {
   if (gloOpts.lumiMode == 0) {
-    addInput(inputs, {"tpcCorrMap", "TPC", "CorrMap", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMap), {}, 1)});          // time-dependent
-    addInput(inputs, {"tpcCorrMapRef", "TPC", "CorrMapRef", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMapRef), {}, 0)}); // load once
+    addInput(inputs, {"tpcCorrMap", "TPC", "CorrMap", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMap), {}, 1)}); // time-dependent
+    // addInput(inputs, {"tpcCorrMapRef", "TPC", "CorrMapRef", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMapRef), {}, 0)}); // load once
   } else if (gloOpts.lumiMode == 1) {
-    addInput(inputs, {"tpcCorrMap", "TPC", "CorrMap", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMap), {}, 1)});            // time-dependent
-    addInput(inputs, {"tpcCorrMapRef", "TPC", "CorrMapRef", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrDerivMap), {}, 1)}); // time-dependent
+    addInput(inputs, {"tpcCorrMap", "TPC", "CorrMap", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMap), {}, 1)}); // time-dependent
+    // addInput(inputs, {"tpcCorrMapRef", "TPC", "CorrMapRef", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrDerivMap), {}, 1)}); // time-dependent
   } else if (gloOpts.lumiMode == 2) {
     // for MC corrections
-    addInput(inputs, {"tpcCorrMap", "TPC", "CorrMap", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMapMC), {}, 1)});            // time-dependent
-    addInput(inputs, {"tpcCorrMapRef", "TPC", "CorrMapRef", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrDerivMapMC), {}, 1)}); // time-dependent
+    addInput(inputs, {"tpcCorrMap", "TPC", "CorrMap", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrMapMC), {}, 1)}); // time-dependent
+    // addInput(inputs, {"tpcCorrMapRef", "TPC", "CorrMapRef", 0, Lifetime::Condition, ccdbParamSpec(CDBTypeMap.at(CDBType::CalCorrDerivMapMC), {}, 1)}); // time-dependent
   } else {
     LOG(fatal) << "Correction mode unknown! Choose either 0 (default) or 1 (derivative map) for flag corrmap-lumi-mode.";
   }
@@ -145,16 +149,16 @@ bool CorrectionMapsLoader::accountCCDBInputs(const ConcreteDataMatcher& matcher,
     setUpdatedMap();
     return true;
   }
-  if (matcher == ConcreteDataMatcher("TPC", "CorrMapRef", 0)) {
-    setCorrMapRef((o2::gpu::TPCFastTransform*)obj);
-    mCorrMapRef->rectifyAfterReadingFromFile();
-    if (getMeanLumiRefOverride() == 0) {
-      setMeanLumiRef(mCorrMapRef->getLumi());
-    }
-    LOGP(debug, "MeanLumiRefOverride={} MeanLumiMap={} -> meanLumi = {}", getMeanLumiRefOverride(), mCorrMapRef->getLumi(), getMeanLumiRef());
-    setUpdatedMapRef();
-    return true;
-  }
+  // if (matcher == ConcreteDataMatcher("TPC", "CorrMapRef", 0)) {
+  //   setCorrMapRef((o2::gpu::TPCFastTransform*)obj);
+  //   mCorrMapRef->rectifyAfterReadingFromFile();
+  //   if (getMeanLumiRefOverride() == 0) {
+  //     setMeanLumiRef(mCorrMapRef->getLumi());
+  //   }
+  //   LOGP(debug, "MeanLumiRefOverride={} MeanLumiMap={} -> meanLumi = {}", getMeanLumiRefOverride(), mCorrMapRef->getLumi(), getMeanLumiRef());
+  //   setUpdatedMapRef();
+  //   return true;
+  // }
   if (matcher == ConcreteDataMatcher("TPC", "CorrMapParam", 0)) {
     const auto& par = o2::tpc::CorrMapParam::Instance();
     mMeanLumiOverride = par.lumiMean;
