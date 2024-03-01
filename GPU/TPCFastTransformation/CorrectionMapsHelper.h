@@ -39,22 +39,22 @@ class CorrectionMapsHelper
 
   GPUd() void Transform(int slice, int row, float pad, float time, float& x, float& y, float& z, float vertexTime = 0) const
   {
-    mCorrMap->Transform(slice, row, pad, time, x, y, z, vertexTime, mCorrMapRef, mCorrMapMShape, mLumiScale, 1, mLumiScaleMode);
+    mCorrMap->Transform(slice, row, pad, time, x, y, z, vertexTime, mCorrMapRef, mCorrMapMShape, mLumiScale, mUseMShape, mLumiScaleMode);
   }
 
   GPUd() void TransformXYZ(int slice, int row, float& x, float& y, float& z) const
   {
-    mCorrMap->TransformXYZ(slice, row, x, y, z, mCorrMapRef, mCorrMapMShape, mLumiScale, 1, mLumiScaleMode);
+    mCorrMap->TransformXYZ(slice, row, x, y, z, mCorrMapRef, mCorrMapMShape, mLumiScale, mUseMShape, mLumiScaleMode);
   }
 
   GPUd() void InverseTransformYZtoX(int slice, int row, float y, float z, float& x) const
   {
-    mCorrMap->InverseTransformYZtoX(slice, row, y, z, x, mCorrMapRef, mCorrMapMShape, (mScaleInverse ? mLumiScale : 0), (mScaleInverse ? 1 : 0), mLumiScaleMode);
+    mCorrMap->InverseTransformYZtoX(slice, row, y, z, x, mCorrMapRef, mCorrMapMShape, mLumiScaleInv, mUseMShapeInv, mLumiScaleMode);
   }
 
   GPUd() void InverseTransformYZtoNominalYZ(int slice, int row, float y, float z, float& ny, float& nz) const
   {
-    mCorrMap->InverseTransformYZtoNominalYZ(slice, row, y, z, ny, nz, mCorrMapRef, mCorrMapMShape, (mScaleInverse ? mLumiScale : 0), (mScaleInverse ? 1 : 0), mLumiScaleMode);
+    mCorrMap->InverseTransformYZtoNominalYZ(slice, row, y, z, ny, nz, mCorrMapRef, mCorrMapMShape, mLumiScaleInv, mUseMShapeInv, mLumiScaleMode);
   }
 
   GPUd() const GPUCA_NAMESPACE::gpu::TPCFastTransform* getCorrMap() const { return mCorrMap; }
@@ -105,13 +105,18 @@ class CorrectionMapsHelper
     }
   }
 
+  void setLumiScaleInv(float lumiScaleInv) { mLumiScaleInv = lumiScaleInv; }
+
   GPUd() float getInstLumiCTP() const { return mInstLumiCTP; }
   GPUd() float getInstLumi() const { return mInstLumi; }
   GPUd() float getMeanLumi() const { return mMeanLumi; }
   GPUd() float getMeanLumiRef() const { return mMeanLumiRef; }
 
   GPUd() float getLumiScale() const { return mLumiScale; }
+  GPUd() float getLumiScaleInv() const { return mLumiScaleInv; }
   GPUd() int getLumiScaleMode() const { return mLumiScaleMode; }
+  GPUd() bool getUseMShape() const { return mUseMShape; }
+  GPUd() bool getUseMShapeInv() const { return mUseMShapeInv; }
 
   bool isUpdated() const { return mUpdatedFlags != 0; }
   bool isUpdatedMap() const { return (mUpdatedFlags & UpdateFlags::MapBit) != 0; }
@@ -148,6 +153,8 @@ class CorrectionMapsHelper
   int getUpdateFlags() const { return mUpdatedFlags; }
 
   bool getScaleInverse() const { return mScaleInverse; }
+  void setUseMShape(bool useMShape) { mUseMShape = useMShape; }
+  void setUseMShapeInv(bool useMShapeInv) { mUseMShapeInv = useMShapeInv; }
 
   /// return returns if the correction map for the M-shape correction is a dummy spline object
   GPUd() bool isCorrMapMShapeDummy() const
@@ -164,7 +171,7 @@ class CorrectionMapsHelper
                      MapRefBit = 0x2,
                      LumiBit = 0x4,
                      MapMShapeBit = 0x10 };
-  bool mOwner = false; // is content of pointers owned by the helper
+  bool mOwner = false;            // is content of pointers owned by the helper
   bool mLumiCTPAvailable = false; // is CTP Lumi available
   // these 2 are global options, must be set by the workflow global options
   int mLumiScaleType = -1; // use CTP Lumi (1) or TPCScaler (2) for the correction scaling, 0 - no scaling
@@ -175,6 +182,9 @@ class CorrectionMapsHelper
   float mMeanLumi = 0.;                                            // mean luminosity of the map (a.u) used for TPC corrections scaling
   float mMeanLumiRef = 0.;                                         // mean luminosity of the ref map (a.u) used for TPC corrections scaling reference
   float mLumiScale = 0.;                                           // precalculated mInstLumi/mMeanLumi
+  float mLumiScaleInv = 0.;                                        ///< scaling for inverse (this is needed in case the inverse map is updated sporadically)
+  bool mUseMShape{false};                                          ///< use M-Shape correction
+  bool mUseMShapeInv{false};                                       ///< use M-Shape for inverse correction
   float mMeanLumiOverride = -1.f;                                  // optional value to override mean lumi
   float mMeanLumiRefOverride = -1.f;                               // optional value to override ref mean lumi
   float mInstCTPLumiOverride = -1.f;                               // optional value to override inst lumi from CTP
@@ -184,7 +194,7 @@ class CorrectionMapsHelper
   GPUCA_NAMESPACE::gpu::TPCFastTransform* mCorrMapRef{nullptr};    // reference transform
   GPUCA_NAMESPACE::gpu::TPCFastTransform* mCorrMapMShape{nullptr}; // correction map for v-shape distortions on A-side
 #ifndef GPUCA_ALIROOT_LIB
-  ClassDefNV(CorrectionMapsHelper, 6);
+  ClassDefNV(CorrectionMapsHelper, 7);
 #endif
 };
 

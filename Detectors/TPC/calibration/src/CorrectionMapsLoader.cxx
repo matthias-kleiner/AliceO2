@@ -128,6 +128,7 @@ void CorrectionMapsLoader::addOptions(std::vector<ConfigParamSpec>& options)
   // At the moment - nothing, all options are moved to configurable param CorrMapParam
   addOption(options, ConfigParamSpec{"do-not-recalculate-inverse-correction", o2::framework::VariantType::Bool, false, {"Do NOT recalculate the inverse correction in case lumi mode 1 or 2 is used"}});
   addOption(options, ConfigParamSpec{"nthreads-inverse-correction", o2::framework::VariantType::Int, 4, {"Number of threads used for calculating the inverse correction (-1=all threads)"}});
+  addOption(options, ConfigParamSpec{"threshold-recalculate-inverse-correction", o2::framework::VariantType::Float, 0.4f, {"Threshold for recalculating the inverse i.e. when the scaling factor for derivative map is larger than this"}});
 }
 
 //________________________________________________________
@@ -181,6 +182,8 @@ bool CorrectionMapsLoader::accountCCDBInputs(const ConcreteDataMatcher& matcher,
     }
     LOGP(debug, "MeanLumiOverride={} MeanLumiMap={} -> meanLumi = {}", getMeanLumiOverride(), mCorrMap->getLumi(), getMeanLumi());
     setUpdatedMap();
+    // in case new map is loaded reset the scaling
+    mReferenceScalingInverse = 0;
     return true;
   }
   if (matcher == ConcreteDataMatcher("TPC", "CorrMapRef", 0)) {
@@ -256,6 +259,8 @@ void CorrectionMapsLoader::init(o2::framework::InitContext& ic)
     mScaleInverse = true;
   }
   const int nthreadsInv = (ic.options().get<int>("nthreads-inverse-correction"));
+  mThresholdRecalcInverse = (ic.options().get<float>("threshold-recalculate-inverse-correction"));
+
   (nthreadsInv < 0) ? TPCFastSpaceChargeCorrectionHelper::instance()->setNthreadsToMaximum() : TPCFastSpaceChargeCorrectionHelper::instance()->setNthreads(nthreadsInv);
 }
 
@@ -273,24 +278,60 @@ void CorrectionMapsLoader::copySettings(const CorrectionMapsLoader& src)
   setInstCTPLumiOverride(src.getInstCTPLumiOverride());
   setLumiScaleMode(src.getLumiScaleMode());
   enableMShapeCorrection(src.getUseMShapeCorrection());
+  setUseMShape(src.getUseMShape());
+  setUseMShapeInv(src.getUseMShapeInv());
+  setLumiScaleInv(src.getLumiScaleInv());
   mInstLumiCTPFactor = src.mInstLumiCTPFactor;
   mLumiCTPSource = src.mLumiCTPSource;
   mLumiScaleMode = src.mLumiScaleMode;
   mScaleInverse = src.getScaleInverse();
+  mThresholdRecalcInverse = src.mThresholdRecalcInverse;
+  mReferenceScalingInverse = src.mReferenceScalingInverse;
 }
 
 void CorrectionMapsLoader::updateInverse()
 {
   if (mLumiScaleMode == 1 || mLumiScaleMode == 2) {
-    LOGP(info, "Recalculating the inverse correction");
-    setUpdatedMap();
+    LOGP(info, "Checking for recalculating the inverse correction");
     std::vector<float> scaling{1, mLumiScale};
     std::vector<o2::gpu::TPCFastSpaceChargeCorrection*> corr{&(mCorrMap->getCorrection()), &(mCorrMapRef->getCorrection())};
     if (mCorrMapMShape) {
       scaling.emplace_back(1);
       corr.emplace_back(&(mCorrMapMShape->getCorrection()));
     }
-    TPCFastSpaceChargeCorrectionHelper::instance()->initInverse(corr, scaling, false);
+    // check if recalulation is needed
+    bool recalcInv = false;
+
+    if (!isCorrMapMShapeDummy()) {
+      // recalculation needed for M-shape correction
+      LOGP(info, "Recalculating inverse as M-shape was used updated");
+      recalcInv = true;
+      mInvUpdatedDueToMShape = true;
+    } else if (mInvUpdatedDueToMShape) {
+      // recalculation needed as current inverse still contains the M-Shape corrections!
+      LOGP(info, "Recalculating inverse as M-shape was used in last TF");
+      recalcInv = true;
+      // reset flag that current inverse contains M-Shape corrections
+      mInvUpdatedDueToMShape = false;
+    } else if (std::abs(mLumiScale - mReferenceScalingInverse) > mThresholdRecalcInverse) {
+      // recalculation needed due to change in derivative map scaling
+      recalcInv = true;
+      LOGP(info, "Recalculating inverse as derivative map scaling factor {} is larger than threshold of {} for recalculating the inverse", mLumiScale, mThresholdRecalcInverse);
+    }
+
+    if (recalcInv) {
+      LOGP(info, "Recalculating inverse correction");
+      setUpdatedMap();
+      // store the new reference lumi of the inverse map
+      mReferenceScalingInverse = mLumiScale;
+      TPCFastSpaceChargeCorrectionHelper::instance()->initInverse(corr, scaling, false);
+    } else {
+      LOGP(info, "Recalculation not needed");
+    }
+
+    // in case the stored inverse was already scaled by some value -> scale only the new missing delta
+    setLumiScaleInv(mLumiScale - mReferenceScalingInverse);
+    mUseMShape = false;
   } else {
     LOGP(info, "Reinitializing inverse correction with lumi scale mode {} not supported for now", mLumiScaleMode);
   }

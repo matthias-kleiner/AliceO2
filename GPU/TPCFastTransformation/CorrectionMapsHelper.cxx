@@ -32,6 +32,9 @@ void CorrectionMapsHelper::clear()
   mMeanLumi = 0.f;
   mMeanLumiRef = 0.f;
   mScaleInverse = false;
+  mLumiScaleInv = 0;
+  mUseMShape = false;
+  mUseMShapeInv = false;
 }
 
 void CorrectionMapsHelper::setOwner(bool v)
@@ -103,9 +106,25 @@ void CorrectionMapsHelper::updateLumiScale(bool report)
     mLumiScale = -1.f;
   } else if ((mLumiScaleMode == 1) || (mLumiScaleMode == 2)) {
     mLumiScale = mMeanLumiRef ? (mInstLumi - mMeanLumi) / mMeanLumiRef : 0.f;
+    setUseMShape(!isCorrMapMShapeDummy());
+    if (mScaleInverse) {
+      setLumiScaleInv(mLumiScale);
+      setUseMShapeInv(!isCorrMapMShapeDummy());
+    } else {
+      // never use inverse of M-shape!
+      setUseMShapeInv(false);
+    }
     LOGP(debug, "mInstLumi: {}  mMeanLumi: {} mMeanLumiRef: {}", mInstLumi, mMeanLumi, mMeanLumiRef);
   } else {
     mLumiScale = mMeanLumi ? mInstLumi / mMeanLumi : 0.f;
+    setUseMShape(!isCorrMapMShapeDummy());
+    if (mScaleInverse) {
+      setLumiScaleInv(mLumiScale);
+      setUseMShapeInv(!isCorrMapMShapeDummy());
+    } else {
+      // never use inverse of M-shape!
+      setUseMShapeInv(false);
+    }
   }
   setUpdatedLumi();
   if (report) {
@@ -116,7 +135,7 @@ void CorrectionMapsHelper::updateLumiScale(bool report)
 //________________________________________________________
 void CorrectionMapsHelper::reportScaling()
 {
-  LOGP(info, "Map scaling update: LumiScaleType={} instLumi(CTP)={} instLumi(scaling)={} meanLumiRef={}, meanLumi={} -> LumiScale={} lumiScaleMode={}, M-Shape map valid: {}, M-Shape default: {}",
-       mLumiScaleType == 0 ? "NoScaling" : (mLumiScaleType == 1 ? "LumiCTP" : "TPCScaler"), getInstLumiCTP(), getInstLumi(), getMeanLumiRef(), getMeanLumi(), getLumiScale(),
-       mLumiScaleMode == 0 ? "Linear" : "Derivative", (mCorrMapMShape != nullptr), isCorrMapMShapeDummy());
+  LOGP(info, "Map scaling update: LumiScaleType={} instLumi(CTP)={} instLumi(scaling)={} meanLumiRef={}, meanLumi={} -> LumiScale={} mLumiScaleInv={} lumiScaleMode={}, M-Shape map valid: {}, M-Shape default: {}, use M-Shape: {}, use M-Shape inv {}",
+       mLumiScaleType == 0 ? "NoScaling" : (mLumiScaleType == 1 ? "LumiCTP" : "TPCScaler"), getInstLumiCTP(), getInstLumi(), getMeanLumiRef(), getMeanLumi(), getLumiScale(), getLumiScaleInv(),
+       mLumiScaleMode == 0 ? "Linear" : "Derivative", (mCorrMapMShape != nullptr), isCorrMapMShapeDummy(), getUseMShape(), getUseMShapeInv());
 }

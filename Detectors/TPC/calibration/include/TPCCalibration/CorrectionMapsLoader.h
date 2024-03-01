@@ -73,8 +73,11 @@ class CorrectionMapsLoader : public o2::gpu::CorrectionMapsHelper
   static void addOption(std::vector<o2::framework::ConfigParamSpec>& options, o2::framework::ConfigParamSpec&& osp);
   static void addInput(std::vector<o2::framework::InputSpec>& inputs, o2::framework::InputSpec&& isp);
 
-  float mInstLumiCTPFactor = 1.0; // multiplicative factor for inst. lumi
-  int mLumiCTPSource = 0;         // 0: main, 1: alternative CTP lumi source
+  float mInstLumiCTPFactor = 1.0;     // multiplicative factor for inst. lumi
+  int mLumiCTPSource = 0;             // 0: main, 1: alternative CTP lumi source
+  float mThresholdRecalcInverse{0.4}; ///< threshold of scaling for derivative map after which inverse is recalculated
+  float mReferenceScalingInverse{0.}; ///< in case recalculation of inverse is requested the scaling for inverse map needs to be stored to correctly scaling the inverse
+  bool mInvUpdatedDueToMShape{false}; ///< flag if inverse was recalculated in previous TF due to M-shape. In this case the inverse has to be recalculated!
   std::unique_ptr<GPUCA_NAMESPACE::gpu::TPCFastTransform> mCorrMapMShape{nullptr};
 #endif
 };

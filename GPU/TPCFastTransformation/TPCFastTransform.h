@@ -484,7 +484,7 @@ GPUdi() void TPCFastTransform::TransformInternal(int slice, int row, float& u, f
             dv = dvRef * scale + dv;
           }
         }
-        if (ref2) {
+        if (ref2 && (scale2 != 0)) {
           float dxRef, duRef, dvRef;
           ref2->mCorrection.getCorrection(slice, row, u, v, dxRef, duRef, dvRef);
           dx = dxRef * scale2 + dx;
