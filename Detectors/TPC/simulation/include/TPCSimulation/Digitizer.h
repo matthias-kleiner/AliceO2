@@ -137,7 +137,7 @@ class Digitizer
   void setLumiScaleFactor();
   void setMeanLumiDistortions(float meanLumi);
   void setMeanLumiDistortionsDerivative(float meanLumi);
-  
+
   /// in case of scaled distortions, the distortions can be recalculated to ensure consistent distortions and corrections
   void recalculateDistortions();
 

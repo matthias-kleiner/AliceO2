@@ -223,7 +223,7 @@ class TPCDPLDigitizerTask : public BaseDPLDigitizer
       if (mDistortionType == 2) {
         pc.inputs().get<SC*>("tpcdistortionsderiv");
         mDigitizer.setLumiScaleFactor();
-        if(mRecalcDistortions){
+        if (mRecalcDistortions) {
           mDigitizer.recalculateDistortions();
         }
       }
