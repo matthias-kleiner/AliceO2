@@ -189,7 +189,7 @@ o2::framework::DataProcessorSpec getTPCPressureTemperatureSpec()
     Options{
       {"enable-root-output", VariantType::Bool, false, {"Enable root-files output writers"}},
       {"fit-interval", VariantType::Int, 300, {"interval in seconds for which to e.g. perform fits of the temperature sensors"}}} // end Options
-  };                                                                                                                              // end DataProcessorSpec
+  }; // end DataProcessorSpec
 }
 
 } // end namespace tpc
