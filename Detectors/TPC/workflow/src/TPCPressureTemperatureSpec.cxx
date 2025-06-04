@@ -36,7 +36,7 @@ namespace tpc
 class PressureTemperatureDevice : public o2::framework::Task
 {
  public:
-  PressureTemperatureDevice(std::shared_ptr<o2::base::GRPGeomRequest> req) : mCCDBRequest(req) {};
+  PressureTemperatureDevice(std::shared_ptr<o2::base::GRPGeomRequest> req) : mCCDBRequest(req){};
   void init(o2::framework::InitContext& ic) final
   {
     o2::base::GRPGeomHelper::instance().setRequest(mCCDBRequest);
@@ -189,7 +189,7 @@ o2::framework::DataProcessorSpec getTPCPressureTemperatureSpec()
     Options{
       {"enable-root-output", VariantType::Bool, false, {"Enable root-files output writers"}},
       {"fit-interval", VariantType::Int, 300, {"interval in seconds for which to e.g. perform fits of the temperature sensors"}}} // end Options
-  }; // end DataProcessorSpec
+  };                                                                                                                              // end DataProcessorSpec
 }
 
 } // end namespace tpc
