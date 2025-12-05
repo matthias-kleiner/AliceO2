@@ -43,7 +43,7 @@ struct DataContainer3D {
   /// \param nZ number of vertices in z direction
   /// \param nR number of vertices in r direction
   /// \param nPhi number of vertices in phi direction
-  DataContainer3D(unsigned short nZ, unsigned short nR, unsigned short nPhi) : mZVertices{nZ}, mRVertices{nR}, mPhiVertices{nPhi}, mData(nZ * nR * nPhi) {};
+  DataContainer3D(unsigned short nZ, unsigned short nR, unsigned short nPhi) : mZVertices{nZ}, mRVertices{nR}, mPhiVertices{nPhi}, mData(nZ * nR * nPhi){};
 
   ///< default constructor for Root I/O
   DataContainer3D() = default;
