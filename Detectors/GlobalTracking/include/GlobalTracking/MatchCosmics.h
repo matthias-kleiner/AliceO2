@@ -26,7 +26,6 @@
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "GlobalTracking/MatchCosmicsParams.h"
 #include "CommonUtils/TreeStreamRedirector.h"
-#include "TPCFastTransform.h"
 
 #define _ALLOW_DEBUG_TREES_COSM // to allow debug and control tree output
 

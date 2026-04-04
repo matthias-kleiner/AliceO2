@@ -624,7 +624,6 @@ GPUdi() void TPCFastTransformPOD::InverseTransformYZtoX(int32_t sector, int32_t 
     o2::utils::DebugStreamer::instance()->getStreamer("debug_fasttransform", "UPDATE") << o2::utils::DebugStreamer::instance()->getUniqueTreeName("tree_InverseTransformYZtoX").data()
                                                                                        << "sector=" << sector
                                                                                        << "row=" << row
-                                                                                       << "scale=" << scale
                                                                                        << "y=" << realY
                                                                                        << "z=" << realZ
                                                                                        << "x=" << realX
@@ -644,7 +643,6 @@ GPUdi() void TPCFastTransformPOD::InverseTransformYZtoNominalYZ(int32_t sector, 
     o2::utils::DebugStreamer::instance()->getStreamer("debug_fasttransform", "UPDATE") << o2::utils::DebugStreamer::instance()->getUniqueTreeName("tree_InverseTransformYZtoNominalYZ").data()
                                                                                        << "sector=" << sector
                                                                                        << "row=" << row
-                                                                                       << "scale=" << scale
                                                                                        << "real y=" << realY
                                                                                        << "real z=" << realZ
                                                                                        << "measured y=" << measuredY

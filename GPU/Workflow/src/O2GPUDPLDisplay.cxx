@@ -24,7 +24,6 @@
 #include "GPUO2InterfaceDisplay.h"
 #include "GPUO2InterfaceUtils.h"
 #include "GPUO2InterfaceConfiguration.h"
-#include "TPCFastTransform.h"
 #include "TPCReconstruction/TPCFastTransformHelperO2.h"
 #include "TPCFastTransformPOD.h"
 #include "GlobalTrackingWorkflowHelpers/InputHelper.h"

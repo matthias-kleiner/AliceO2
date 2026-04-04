@@ -37,7 +37,6 @@
 #include "DataFormatsTPC/TrackTPC.h"
 #include "DataFormatsTRD/TrackTRD.h"
 #include "ReconstructionDataFormats/PID.h"
-#include "TPCFastTransform.h"
 #include "CommonDataFormat/InteractionRecord.h"
 #include "GlobalTracking/MatchTOFParams.h"
 

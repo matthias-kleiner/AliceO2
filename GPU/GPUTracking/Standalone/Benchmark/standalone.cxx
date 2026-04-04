@@ -24,7 +24,6 @@
 #include "display/GPUDisplayInterface.h"
 #include "genEvents.h"
 
-#include "TPCFastTransform.h"
 #include "TPCFastTransformPOD.h"
 #include "GPUTPCGMMergedTrack.h"
 #include "GPUSettings.h"

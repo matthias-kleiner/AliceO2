@@ -48,7 +48,6 @@
 #include "DataFormatsTPC/ClusterNativeHelper.h"
 #include "DataFormatsTPC/VDriftCorrFact.h"
 #include "ITSReconstruction/RecoGeomHelper.h"
-#include "TPCFastTransform.h"
 #include "GPUO2InterfaceRefit.h"
 #include "GPUTPCGeometry.h"
 #include "GlobalTracking/MatchTPCITSParams.h"

@@ -35,7 +35,6 @@
 #include <numeric>
 #include <algorithm>
 #include "GPUO2InterfaceRefit.h"
-#include "TPCFastTransform.h"
 #include "DataFormatsTPC/PIDResponse.h"
 
 namespace o2
