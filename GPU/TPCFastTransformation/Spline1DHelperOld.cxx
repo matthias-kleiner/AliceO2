@@ -131,7 +131,7 @@ void Spline1DHelperOld<DataT>::getDDDScoefficients(const typename Spline1D<doubl
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainer<DataT>& spline,
+void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<DataT, FlatObject>& spline,
                                                           double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F)
 {
   /// Create classic spline parameters for a given input function F
@@ -255,7 +255,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainer<Data
 
 template <typename DataT>
 void Spline1DHelperOld<DataT>::approximateDataPoints(
-  Spline1DContainer<DataT>& spline,
+  Spline1DContainerBase<DataT, FlatObject>& spline,
   double xMin, double xMax,
   double vx[], double vf[], int32_t nDataPoints)
 {
@@ -268,7 +268,7 @@ void Spline1DHelperOld<DataT>::approximateDataPoints(
 
 template <typename DataT>
 void Spline1DHelperOld<DataT>::approximateFunction(
-  Spline1DContainer<DataT>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
+  Spline1DContainerBase<DataT, FlatObject>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
   int32_t nAuxiliaryDataPoints)
 {
   /// Create best-fit spline parameters for a given input function F
@@ -279,7 +279,7 @@ void Spline1DHelperOld<DataT>::approximateFunction(
 
 template <typename DataT>
 void Spline1DHelperOld<DataT>::approximateFunctionGradually(
-  Spline1DContainer<DataT>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
+  Spline1DContainerBase<DataT, FlatObject>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
   int32_t nAuxiliaryDataPoints)
 {
   /// Create best-fit spline parameters gradually for a given input function F
@@ -318,7 +318,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionGradually(
 
 template <typename DataT>
 int32_t Spline1DHelperOld<DataT>::setSpline(
-  const Spline1DContainer<DataT>& spline, int32_t nFdimensions, int32_t nAuxiliaryDataPoints)
+  const Spline1DContainerBase<DataT, FlatObject>& spline, int32_t nFdimensions, int32_t nAuxiliaryDataPoints)
 {
   // Prepare creation of a best-fit spline
   //
@@ -465,7 +465,7 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
 
 template <typename DataT>
 int32_t Spline1DHelperOld<DataT>::setSpline(
-  const Spline1DContainer<DataT>& spline, int32_t nFdimensions, double xMin, double xMax, double vx[], int32_t nDataPoints)
+  const Spline1DContainerBase<DataT, FlatObject>& spline, int32_t nFdimensions, double xMin, double xMax, double vx[], int32_t nDataPoints)
 {
   // Prepare creation of a best-fit spline
   //
