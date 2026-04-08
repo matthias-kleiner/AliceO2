@@ -50,8 +50,7 @@ template <typename DataT, class FlatBase = FlatObject>
 class Spline2DContainerBase : public FlatBase
 {
  public:
-  typedef typename Spline1D<DataT>::SafetyLevel SafetyLevel;
-  typedef typename Spline1D<DataT>::Knot Knot;
+  using KnotType = Knot<DataT>;
 
   /// _____________  Version control __________________________
 
@@ -121,8 +120,10 @@ class Spline2DContainerBase : public FlatBase
   /// Get (u1,u2) of i-th knot
   GPUd() void getKnotU(int32_t iKnot, int32_t& u1, int32_t& u2) const
   {
-    u1 = mGridX1.getKnot(iKnot % mGridX1.getNumberOfKnots()).getU();
-    u2 = mGridX2.getKnot(iKnot / mGridX1.getNumberOfKnots()).getU();
+    if constexpr (!std::is_same_v<FlatBase, NoFlatObject>) {
+      u1 = mGridX1.getKnot(iKnot % mGridX1.getNumberOfKnots()).getU();
+      u2 = mGridX2.getKnot(iKnot / mGridX1.getNumberOfKnots()).getU();
+    }
   }
 
   /// Get index of a knot (iKnotX1,iKnotX2)
@@ -139,11 +140,23 @@ class Spline2DContainerBase : public FlatBase
 
   /// _______________  Technical stuff  ________________________
 
-  /// Get offset of GridX1 flat data in the flat buffer
-  GPUd() size_t getGridX1Offset() const { return mGridX1.getFlatBufferPtr() - this->mFlatBufferPtr; }
+  /// Get offset of GridX1 flat data in the flat buffer (only valid for FlatObject-based splines)
+  GPUd() size_t getGridX1Offset() const
+  {
+    if constexpr (!std::is_same_v<FlatBase, NoFlatObject>) {
+      return mGridX1.getFlatBufferPtr() - this->mFlatBufferPtr;
+    }
+    return 0;
+  }
 
-  /// Get offset of GridX2 flat data in the flat buffer
-  GPUd() size_t getGridX2Offset() const { return mGridX2.getFlatBufferPtr() - this->mFlatBufferPtr; }
+  /// Get offset of GridX2 flat data in the flat buffer (only valid for FlatObject-based splines)
+  GPUd() size_t getGridX2Offset() const
+  {
+    if constexpr (!std::is_same_v<FlatBase, NoFlatObject>) {
+      return mGridX2.getFlatBufferPtr() - this->mFlatBufferPtr;
+    }
+    return 0;
+  }
 
   /// Set X range
   GPUd() void setXrange(DataT x1Min, DataT x1Max, DataT x2Min, DataT x2Max)
@@ -181,8 +194,6 @@ class Spline2DContainerBase : public FlatBase
   template <class OtherFlatBase>
   void importFrom(const Spline2DContainerBase<DataT, OtherFlatBase>& src);
 #endif
-
-  using FlatBase::releaseInternalBuffer;
 
   void destroy();
   void setActualBufferAddress(char* actualFlatBufferPtr);
@@ -258,8 +269,7 @@ class Spline2DSpec<DataT, YdimT, 0, FlatBase>
   typedef Spline2DContainerBase<DataT, FlatBase> TBase;
 
  public:
-  typedef typename TBase::SafetyLevel SafetyLevel;
-  typedef typename TBase::Knot Knot;
+  using KnotType = Knot<DataT>;
 
   /// _______________  Interpolation math   ________________________
 
@@ -290,8 +300,8 @@ class Spline2DSpec<DataT, YdimT, 0, FlatBase>
     int32_t iu = mGridX1.template getLeftKnotIndexForU<SafeT>(u);
     int32_t iv = mGridX2.template getLeftKnotIndexForU<SafeT>(v);
 
-    const typename TBase::Knot& knotU = mGridX1.template getKnot<SafetyLevel::kNotSafe>(iu);
-    const typename TBase::Knot& knotV = mGridX2.template getKnot<SafetyLevel::kNotSafe>(iv);
+    const typename TBase::KnotType& knotU = mGridX1.template getKnot<SafetyLevel::kNotSafe>(iu);
+    const typename TBase::KnotType& knotV = mGridX2.template getKnot<SafetyLevel::kNotSafe>(iv);
 
     const DataT* par00 = Parameters + (nu * iv + iu) * nYdim4; // values { {Y1,Y2,Y3}, {Y1,Y2,Y3}'v, {Y1,Y2,Y3}'u, {Y1,Y2,Y3}''vu } at {u0, v0}
     const DataT* par10 = par00 + nYdim4;                       // values { ... } at {u1, v0}
@@ -339,6 +349,9 @@ class Spline2DSpec<DataT, YdimT, 0, FlatBase>
   GPUd() void interpolateAtU(int32_t inpYdim, GPUgeneric() const DataT Parameters[],
                              DataT u1, DataT u2, GPUgeneric() DataT S[/*inpYdim*/]) const
   {
+    if constexpr (!std::is_same_v<FlatBase, FlatObject>) {
+      return;
+    }
 
     const auto nYdimTmp = SplineUtil::getNdim<YdimT>(inpYdim);
     const int32_t nYdim = nYdimTmp.get();
@@ -352,11 +365,11 @@ class Spline2DSpec<DataT, YdimT, 0, FlatBase>
     const DataT& u = u1;
     const DataT& v = u2;
     int32_t nu = mGridX1.getNumberOfKnots();
-    int32_t iu = mGridX1.template getLeftKnotIndexForU<SafeT>(u);
-    int32_t iv = mGridX2.template getLeftKnotIndexForU<SafeT>(v);
+    int32_t iu = this->mGridX1.template getLeftKnotIndexForU<SafeT>(u);
+    int32_t iv = this->mGridX2.template getLeftKnotIndexForU<SafeT>(v);
 
-    const typename TBase::Knot& knotU = mGridX1.template getKnot<SafetyLevel::kNotSafe>(iu);
-    const typename TBase::Knot& knotV = mGridX2.template getKnot<SafetyLevel::kNotSafe>(iv);
+    const typename TBase::KnotType& knotU = this->mGridX1.template getKnot<SafetyLevel::kNotSafe>(iu);
+    const typename TBase::KnotType& knotV = this->mGridX2.template getKnot<SafetyLevel::kNotSafe>(iv);
 
     const DataT* A = Parameters + (nu * iv + iu) * nYdim4; // values { {Y1,Y2,Y3}, {Y1,Y2,Y3}'v, {Y1,Y2,Y3}'u, {Y1,Y2,Y3}''vu } at {u0, v0}
     const DataT* B = A + nYdim4 * nu;                      // values { ... } at {u0, v1}
@@ -412,8 +425,8 @@ class Spline2DSpec<DataT, YdimT, 0, FlatBase>
     int32_t iu = mGridX1.template getLeftKnotIndexForU<SafeT>(u);
     int32_t iv = mGridX2.template getLeftKnotIndexForU<SafeT>(v);
 
-    const typename TBase::Knot& knotU = mGridX1.template getKnot<SafetyLevel::kNotSafe>(iu);
-    const typename TBase::Knot& knotV = mGridX2.template getKnot<SafetyLevel::kNotSafe>(iv);
+    const typename TBase::KnotType& knotU = mGridX1.template getKnot<SafetyLevel::kNotSafe>(iu);
+    const typename TBase::KnotType& knotV = mGridX2.template getKnot<SafetyLevel::kNotSafe>(iv);
 
     const DataT* A = Parameters + (nu * iv + iu) * nYdim4; // values { {Y1,Y2,Y3}, {Y1,Y2,Y3}'v, {Y1,Y2,Y3}'u, {Y1,Y2,Y3}''vu } at {u0, v0}
     const DataT* B = A + nYdim4 * nu;                      // values { ... } at {u0, v1}
@@ -563,8 +576,8 @@ class Spline2DSpec<DataT, YdimT, 0, FlatBase>
     int32_t iu = mGridX1.getLeftKnotIndexForUFromBuffer(gridX1FlatBuf, u);
     int32_t iv = mGridX2.getLeftKnotIndexForUFromBuffer(gridX2FlatBuf, v);
 
-    const auto& knotU = mGridX1.template getKnotFromBuffer<decltype(mGridX1)::kNotSafe>(gridX1FlatBuf, iu);
-    const auto& knotV = mGridX2.template getKnotFromBuffer<decltype(mGridX2)::kNotSafe>(gridX2FlatBuf, iv);
+    const auto& knotU = mGridX1.template getKnotFromBuffer<kNotSafe>(gridX1FlatBuf, iu);
+    const auto& knotV = mGridX2.template getKnotFromBuffer<kNotSafe>(gridX2FlatBuf, iv);
 
     const DataT* A = Parameters + (nu * iv + iu) * nYdim4;
     const DataT* B = A + nYdim4 * nu;
@@ -608,7 +621,6 @@ class Spline2DSpec<DataT, YdimT, 1, FlatBase>
   typedef Spline2DSpec<DataT, YdimT, 0, FlatBase> TBase;
 
  public:
-  typedef typename TVeryBase::SafetyLevel SafetyLevel;
 
 #if !defined(GPUCA_GPUCODE)
   /// Default constructor — skips recreate for NoFlatObject (no owned buffer)
@@ -714,7 +726,6 @@ class Spline2DSpec<DataT, YdimT, 2, FlatBase>
   typedef Spline2DSpec<DataT, YdimT, 0, FlatBase> TBase;
 
  public:
-  typedef typename TVeryBase::SafetyLevel SafetyLevel;
 
 #if !defined(GPUCA_GPUCODE)
   /// Default constructor — skips recreate for NoFlatObject (no owned buffer)

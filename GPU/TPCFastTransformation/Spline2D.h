@@ -80,8 +80,7 @@ class Spline2DBase
   typedef Spline2DSpec<DataT, YdimT, SplineUtil::getSpec(YdimT), FlatBase> TBase;
 
  public:
-  typedef typename TVeryBase::SafetyLevel SafetyLevel;
-  typedef typename TVeryBase::Knot Knot;
+  using KnotType = Knot<DataT>;
 
 #if !defined(GPUCA_GPUCODE)
   using TBase::TBase; // inherit constructors

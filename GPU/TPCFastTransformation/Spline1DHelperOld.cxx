@@ -49,7 +49,7 @@ int32_t Spline1DHelperOld<DataT>::storeError(int32_t code, const char* msg)
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::getScoefficients(const typename Spline1D<double>::Knot& knotL, double u,
+void Spline1DHelperOld<DataT>::getScoefficients(const typename Spline1D<double>::KnotType& knotL, double u,
                                                 double& cSl, double& cDl, double& cSr, double& cDr)
 {
   /// Get derivatives of the interpolated value {S(u): 1D -> nYdim} at the segment [knotL, next knotR]
@@ -69,7 +69,7 @@ void Spline1DHelperOld<DataT>::getScoefficients(const typename Spline1D<double>:
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::getDScoefficients(const typename Spline1D<double>::Knot& knotL, double u,
+void Spline1DHelperOld<DataT>::getDScoefficients(const typename Spline1D<double>::KnotType& knotL, double u,
                                                  double& cSl, double& cDl, double& cSr, double& cDr)
 {
   u = u - knotL.u;
@@ -85,7 +85,7 @@ void Spline1DHelperOld<DataT>::getDScoefficients(const typename Spline1D<double>
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::getDDScoefficients(const typename Spline1D<double>::Knot& knotL, double u,
+void Spline1DHelperOld<DataT>::getDDScoefficients(const typename Spline1D<double>::KnotType& knotL, double u,
                                                   double& cSl, double& cDl, double& cSr, double& cDr)
 {
   u = u - knotL.u;
@@ -98,7 +98,7 @@ void Spline1DHelperOld<DataT>::getDDScoefficients(const typename Spline1D<double
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::getDDScoefficientsLeft(const typename Spline1D<double>::Knot& knotL,
+void Spline1DHelperOld<DataT>::getDDScoefficientsLeft(const typename Spline1D<double>::KnotType& knotL,
                                                       double& cSl, double& cDl, double& cSr, double& cDr)
 {
   double dv = double(knotL.Li);
@@ -109,7 +109,7 @@ void Spline1DHelperOld<DataT>::getDDScoefficientsLeft(const typename Spline1D<do
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::getDDScoefficientsRight(const typename Spline1D<double>::Knot& knotL,
+void Spline1DHelperOld<DataT>::getDDScoefficientsRight(const typename Spline1D<double>::KnotType& knotL,
                                                        double& cSl, double& cDl, double& cSr, double& cDr)
 {
   double dv = double(knotL.Li);
@@ -120,7 +120,7 @@ void Spline1DHelperOld<DataT>::getDDScoefficientsRight(const typename Spline1D<d
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::getDDDScoefficients(const typename Spline1D<double>::Knot& knotL,
+void Spline1DHelperOld<DataT>::getDDDScoefficients(const typename Spline1D<double>::KnotType& knotL,
                                                    double& cSl, double& cDl, double& cSr, double& cDr)
 {
   double dv = double(knotL.Li);
@@ -131,7 +131,7 @@ void Spline1DHelperOld<DataT>::getDDDScoefficients(const typename Spline1D<doubl
 }
 
 template <typename DataT>
-void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<DataT, FlatObject>& spline,
+void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainer<DataT, FlatObject>& spline,
                                                           double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F)
 {
   /// Create classic spline parameters for a given input function F
@@ -155,7 +155,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
 
   // second derivative at knot0 is 0
   {
-    const typename Spline1D<DataT>::Knot& knot0 = spline.getKnot(0);
+    const Knot<DataT>& knot0 = spline.getKnot(0);
     double cZ0 = (-4) * knot0.Li;
     double cZ1 = (-2) * knot0.Li;
     // f''(u) = cS1*(f1-f0) + cZ0*z0 + cZ1*z1;
@@ -165,7 +165,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
 
   // second derivative at knot nKnots-1  is 0
   {
-    const typename Spline1D<DataT>::Knot& knot0 = spline.getKnot(nKnots - 2);
+    const Knot<DataT>& knot0 = spline.getKnot(nKnots - 2);
     double cZ0 = (6 - 4) * knot0.Li;
     double cZ1 = (6 - 2) * knot0.Li;
     // f''(u) = cS1*(f1-f0) + cZ0*z0 + cZ1*z1;
@@ -175,12 +175,12 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
 
   // second derivative at other knots is same from the left and from the right
   for (int32_t i = 1; i < nKnots - 1; i++) {
-    const typename Spline1D<DataT>::Knot& knot0 = spline.getKnot(i - 1);
+    const Knot<DataT>& knot0 = spline.getKnot(i - 1);
     double cZ0 = (6 - 4) * knot0.Li;
     double cZ1_0 = (6 - 2) * knot0.Li;
     // f''(u) = cS1*(f1-f0) + cZ0*z0 + cZ1*z1;
 
-    const typename Spline1D<DataT>::Knot& knot1 = spline.getKnot(i);
+    const Knot<DataT>& knot1 = spline.getKnot(i);
     double cZ1_1 = (-4) * knot1.Li;
     double cZ2 = (-2) * knot1.Li;
     // f''(u) = cS2*(f2-f1) + cZ1_1*z1 + cZ2*z2;
@@ -200,7 +200,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
   double uToXscale = (((double)xMax) - xMin) / spline.getUmax();
 
   for (int32_t i = 0; i < nKnots; ++i) {
-    const typename Spline1D<DataT>::Knot& knot = spline.getKnot(i);
+    const Knot<DataT>& knot = spline.getKnot(i);
     double u = knot.u;
     double f[Ndim];
     F(xMin + u * uToXscale, f);
@@ -215,7 +215,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
     {
       double f0 = parameters[(2 * 0) * Ndim + dim];
       double f1 = parameters[(2 * 1) * Ndim + dim];
-      const typename Spline1D<DataT>::Knot& knot0 = spline.getKnot(0);
+      const Knot<DataT>& knot0 = spline.getKnot(0);
       double cS1 = (6) * knot0.Li * knot0.Li;
       // f''(u) = cS1*(f1-f0) + cZ0*z0 + cZ1*z1;
       b(0) = -cS1 * (f1 - f0);
@@ -225,7 +225,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
     {
       double f0 = parameters[2 * (nKnots - 2) * Ndim + dim];
       double f1 = parameters[2 * (nKnots - 1) * Ndim + dim];
-      const typename Spline1D<DataT>::Knot& knot0 = spline.getKnot(nKnots - 2);
+      const Knot<DataT>& knot0 = spline.getKnot(nKnots - 2);
       double cS1 = (6 - 12) * knot0.Li * knot0.Li;
       // f''(u) = cS1*(f1-f0) + cZ0*z0 + cZ1*z1;
       b(nKnots - 1) = -cS1 * (f1 - f0);
@@ -236,11 +236,11 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
       double f0 = parameters[2 * (i - 1) * Ndim + dim];
       double f1 = parameters[2 * (i)*Ndim + dim];
       double f2 = parameters[2 * (i + 1) * Ndim + dim];
-      const typename Spline1D<DataT>::Knot& knot0 = spline.getKnot(i - 1);
+      const Knot<DataT>& knot0 = spline.getKnot(i - 1);
       double cS1 = (6 - 12) * knot0.Li * knot0.Li;
       // f''(u) = cS1*(f1-f0) + cZ0*z0 + cZ1*z1;
 
-      const typename Spline1D<DataT>::Knot& knot1 = spline.getKnot(i);
+      const Knot<DataT>& knot1 = spline.getKnot(i);
       double cS2 = (6) * knot1.Li * knot1.Li;
       // f''(u) = cS2*(f2-f1) + cZ1_1*z1 + cZ2*z2;
       b(i) = -cS1 * (f1 - f0) + cS2 * (f2 - f1);
@@ -255,7 +255,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionClassic(Spline1DContainerBase<
 
 template <typename DataT>
 void Spline1DHelperOld<DataT>::approximateDataPoints(
-  Spline1DContainerBase<DataT, FlatObject>& spline,
+  Spline1DContainer<DataT, FlatObject>& spline,
   double xMin, double xMax,
   double vx[], double vf[], int32_t nDataPoints)
 {
@@ -268,7 +268,7 @@ void Spline1DHelperOld<DataT>::approximateDataPoints(
 
 template <typename DataT>
 void Spline1DHelperOld<DataT>::approximateFunction(
-  Spline1DContainerBase<DataT, FlatObject>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
+  Spline1DContainer<DataT, FlatObject>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
   int32_t nAuxiliaryDataPoints)
 {
   /// Create best-fit spline parameters for a given input function F
@@ -279,7 +279,7 @@ void Spline1DHelperOld<DataT>::approximateFunction(
 
 template <typename DataT>
 void Spline1DHelperOld<DataT>::approximateFunctionGradually(
-  Spline1DContainerBase<DataT, FlatObject>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
+  Spline1DContainer<DataT, FlatObject>& spline, double xMin, double xMax, std::function<void(double x, double f[/*spline.getFdimensions()*/])> F,
   int32_t nAuxiliaryDataPoints)
 {
   /// Create best-fit spline parameters gradually for a given input function F
@@ -318,7 +318,7 @@ void Spline1DHelperOld<DataT>::approximateFunctionGradually(
 
 template <typename DataT>
 int32_t Spline1DHelperOld<DataT>::setSpline(
-  const Spline1DContainerBase<DataT, FlatObject>& spline, int32_t nFdimensions, int32_t nAuxiliaryDataPoints)
+  const Spline1DContainer<DataT, FlatObject>& spline, int32_t nFdimensions, int32_t nAuxiliaryDataPoints)
 {
   // Prepare creation of a best-fit spline
   //
@@ -365,8 +365,8 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
     DataPoint& p = mDataPoints[i];
     double u = i * scalePoints2Knots;
     int32_t iKnot = mSpline.getLeftKnotIndexForU(u);
-    const typename Spline1D<double>::Knot& knot0 = mSpline.getKnot(iKnot);
-    const typename Spline1D<double>::Knot& knot1 = mSpline.getKnot(iKnot + 1);
+    const typename Spline1D<double>::KnotType& knot0 = mSpline.getKnot(iKnot);
+    const typename Spline1D<double>::KnotType& knot1 = mSpline.getKnot(iKnot + 1);
     double l = knot1.u - knot0.u;
     double s = (u - knot0.u) * knot0.Li; // scaled u
     double s2 = s * s;
@@ -386,7 +386,7 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
   mKnotDataPoints.resize(nKnots);
 
   for (int32_t i = 0; i < nKnots; ++i) {
-    const typename Spline1D<double>::Knot& knot = mSpline.getKnot(i);
+    const typename Spline1D<double>::KnotType& knot = mSpline.getKnot(i);
     int32_t iu = (int32_t)(knot.u + 0.1f);
     mKnotDataPoints[i] = iu * (1 + nAuxiliaryDataPoints);
     mDataPoints[mKnotDataPoints[i]].isKnot = 1;
@@ -465,7 +465,7 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
 
 template <typename DataT>
 int32_t Spline1DHelperOld<DataT>::setSpline(
-  const Spline1DContainerBase<DataT, FlatObject>& spline, int32_t nFdimensions, double xMin, double xMax, double vx[], int32_t nDataPoints)
+  const Spline1DContainer<DataT, FlatObject>& spline, int32_t nFdimensions, double xMin, double xMax, double vx[], int32_t nDataPoints)
 {
   // Prepare creation of a best-fit spline
   //
@@ -507,7 +507,7 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
     p.iKnot = iKnot;
     p.isKnot = 0;
     p.u = u;
-    const typename Spline1D<double>::Knot& knot0 = mSpline.getKnot(iKnot);
+    const typename Spline1D<double>::KnotType& knot0 = mSpline.getKnot(iKnot);
     getScoefficients(knot0, u, p.cS0, p.cZ0, p.cS1, p.cZ1);
   }
 
@@ -535,9 +535,9 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
   }
 
   for (int32_t iKnot = 0; iKnot < nKnots - 2; ++iKnot) {
-    const typename Spline1D<double>::Knot& knot0 = mSpline.getKnot(iKnot);
-    const typename Spline1D<double>::Knot& knot1 = mSpline.getKnot(iKnot + 1);
-    // const typename Spline1D<double>::Knot& knot2 = mSpline.getKnot(iKnot + 2);
+    const typename Spline1D<double>::KnotType& knot0 = mSpline.getKnot(iKnot);
+    const typename Spline1D<double>::KnotType& knot1 = mSpline.getKnot(iKnot + 1);
+    // const typename Spline1D<double>::KnotType& knot2 = mSpline.getKnot(iKnot + 2);
     /*
     another way to calculate f(u):
      T uu = T(u - knotL.u);
@@ -614,7 +614,7 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
 
   for (int32_t iKnot = -1; iKnot < nKnots - 2; ++iKnot) {
 
-    const typename Spline1D<double>::Knot& knot1 = mSpline.getKnot(iKnot + 1);
+    const typename Spline1D<double>::KnotType& knot1 = mSpline.getKnot(iKnot + 1);
     /*
      ()''u
      dSr = (3 - 6*v)*knotL.Li*knotL.Li;
@@ -652,7 +652,7 @@ int32_t Spline1DHelperOld<DataT>::setSpline(
 
   {
     int32_t iKnot = nKnots - 2;
-    const typename Spline1D<double>::Knot& knot0 = mSpline.getKnot(iKnot);
+    const typename Spline1D<double>::KnotType& knot0 = mSpline.getKnot(iKnot);
     /*
      ()''u
      dSr = (3 - 6*v)*knotL.Li*knotL.Li;
