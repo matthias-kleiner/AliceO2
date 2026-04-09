@@ -25,7 +25,6 @@
 #include "Framework/DeviceSpec.h"
 #include "TPCCalibration/VDriftHelper.h"
 #include "TPCFastTransformPOD.h"
-#include "TPCCalibration/CorrectionMapsOptions.h"
 
 // from Tracks
 #include "ReconstructionDataFormats/GlobalTrackID.h"
@@ -232,7 +231,7 @@ void TOFMatcherSpec::endOfStream(EndOfStreamContext& ec)
        mTimer.CpuTime(), mTimer.RealTime(), mTimer.Counter() - 1);
 }
 
-DataProcessorSpec getTOFMatcherSpec(GID::mask_t src, bool useMC, bool useFIT, bool tpcRefit, bool strict, float extratolerancetrd, bool pushMatchable, const o2::tpc::CorrectionMapsGloOpts& sclOpts, int nlanes)
+DataProcessorSpec getTOFMatcherSpec(GID::mask_t src, bool useMC, bool useFIT, bool tpcRefit, bool strict, float extratolerancetrd, bool pushMatchable, bool requestCTPLumi, int nlanes)
 {
   uint32_t ss = o2::globaltracking::getSubSpec(strict ? o2::globaltracking::MatchingType::Strict : o2::globaltracking::MatchingType::Standard);
   Options opts;
@@ -259,7 +258,7 @@ DataProcessorSpec getTOFMatcherSpec(GID::mask_t src, bool useMC, bool useFIT, bo
                                                               true);
   o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);
   dataRequest->inputs.emplace_back("corrMap", o2::header::gDataOriginTPC, "TPCCORRMAP", 0, Lifetime::Timeframe);
-  if(sclOpts.requestCTPLumi) {
+  if(requestCTPLumi) {
     dataRequest->inputs.emplace_back("lumiCTP", o2::header::gDataOriginCTP, "LUMICTP", 0, Lifetime::Timeframe);
   }
   std::vector<OutputSpec> outputs;
@@ -315,7 +314,7 @@ DataProcessorSpec getTOFMatcherSpec(GID::mask_t src, bool useMC, bool useFIT, bo
     "tof-matcher",
     dataRequest->inputs,
     outputs,
-    AlgorithmSpec{adaptFromTask<TOFMatcherSpec>(dataRequest, ggRequest, useMC, useFIT, tpcRefit, strict, pushMatchable, nlanes, sclOpts.requestCTPLumi)},
+    AlgorithmSpec{adaptFromTask<TOFMatcherSpec>(dataRequest, ggRequest, useMC, useFIT, tpcRefit, strict, pushMatchable, nlanes, requestCTPLumi)},
     opts};
 }
 

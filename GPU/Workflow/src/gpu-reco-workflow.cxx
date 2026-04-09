@@ -28,7 +28,6 @@
 #include "Algorithm/RangeTokenizer.h"
 #include "GlobalTrackingWorkflowHelpers/InputHelper.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
-#include "TPCCalibration/CorrectionMapsOptions.h"
 
 #include <unordered_map>
 #include <numeric>
@@ -62,8 +61,8 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"tpc-deadMap-sources", VariantType::Int, -1, {"Sources to consider for TPC dead channel map creation; -1=all, 0=deactivated"}},
     {"tpc-mc-time-gain", VariantType::Bool, false, {"use time gain calibration for MC (true) or for data (false)"}},
     {"filtered-output-specs", VariantType::Bool, false, {"use filtered output specs for output DataDescriptions"}},
+    {"disable-ctp-lumi-request", o2::framework::VariantType::Bool, false, {"do not request CTP lumi"}},
   };
-  o2::tpc::CorrectionMapsOptions::addGlobalOptions(options);
   o2::raw::HBFUtilsInitializer::addConfigOption(options);
   std::swap(workflowOptions, options);
 }
@@ -144,7 +143,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 
   auto inputType = cfgc.options().get<std::string>("input-type");
   bool doMC = !cfgc.options().get<bool>("disable-mc");
-  auto sclOpt = o2::tpc::CorrectionMapsOptions::parseGlobalOptions(cfgc.options());
+  auto requestCTPLumi = !cfgc.options().get<bool>("disable-ctp-lumi-request");
   o2::conf::ConfigurableParam::updateFromFile(cfgc.options().get<std::string>("configFile"));
   o2::conf::ConfigurableParam::updateFromString(cfgc.options().get<std::string>("configKeyValues"));
   o2::conf::ConfigurableParam::writeINI("o2gpurecoworkflow_configuration.ini");
@@ -163,7 +162,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 
   GPURecoWorkflowSpec::Config cfg;
   cfg.runTPCTracking = true;
-  cfg.enableCTPLumi = sclOpt.requestCTPLumi;
+  cfg.enableCTPLumi = requestCTPLumi;
   cfg.decompressTPCFromROOT = isEnabled(inputTypes, ioType::CompClustROOT);
   cfg.decompressTPC = isEnabled(inputTypes, ioType::CompClustFlat) || cfg.decompressTPCFromROOT;
   cfg.zsDecoder = isEnabled(inputTypes, ioType::ZSRaw);
