@@ -51,6 +51,7 @@
 #include "DetectorsBase/GRPGeomHelper.h"
 #include "TPCCalibration/VDriftHelper.h"
 #include "TPCFastTransformPOD.h"
+#include "TPCCalibration/CorrectionMapsOptions.h"
 
 #ifdef ENABLE_UPGRADES
 #include "ITS3Reconstruction/TopologyDictionary.h"
@@ -70,8 +71,8 @@ class TPCITSMatchingDPL : public Task
 {
  public:
   TPCITSMatchingDPL(std::shared_ptr<DataRequest> dr, std::shared_ptr<o2::base::GRPGeomRequest> gr,
-                    bool useFT0, bool calib, bool skipTPCOnly, bool useMC)
-    : mDataRequest(dr), mGGCCDBRequest(gr), mUseFT0(useFT0), mCalibMode(calib), mSkipTPCOnly(skipTPCOnly), mUseMC(useMC) {}
+                    bool useFT0, bool calib, bool skipTPCOnly, bool useMC, bool requestCTPLumi)
+    : mDataRequest(dr), mGGCCDBRequest(gr), mUseFT0(useFT0), mCalibMode(calib), mSkipTPCOnly(skipTPCOnly), mUseMC(useMC), mRequestCTPLumi(requestCTPLumi) {}
   ~TPCITSMatchingDPL() override = default;
   void init(InitContext& ic) final;
   void run(ProcessingContext& pc) final;
@@ -89,6 +90,7 @@ class TPCITSMatchingDPL : public Task
   bool mCalibMode = false;
   bool mSkipTPCOnly = false; // to use only externally constrained tracks (for test only)
   bool mUseMC = true;
+  bool mRequestCTPLumi = false;
   TStopwatch mTimer;
 };
 
@@ -186,7 +188,7 @@ void TPCITSMatchingDPL::updateTimeDependentParams(ProcessingContext& pc)
   mTPCVDriftHelper.extractCCDBInputs(pc);
   auto const& raw = pc.inputs().get<const char*>("corrMap");
   mTPCCorrMaps = &o2::gpu::TPCFastTransformPOD::get(raw);
-  float lumiCTP = pc.inputs().get<float>("lumiCTP");
+  float lumiCTP = mRequestCTPLumi ? pc.inputs().get<float>("lumiCTP") : 0;
 
   static bool initOnceDone = false;
   if (!initOnceDone) { // this params need to be queried only once
@@ -234,7 +236,7 @@ void TPCITSMatchingDPL::updateTimeDependentParams(ProcessingContext& pc)
   }
 }
 
-DataProcessorSpec getTPCITSMatchingSpec(GTrackID::mask_t src, bool useFT0, bool calib, bool skipTPCOnly, bool useGeom, bool useMC)
+DataProcessorSpec getTPCITSMatchingSpec(GTrackID::mask_t src, bool useFT0, bool calib, bool skipTPCOnly, bool useGeom, bool useMC, const o2::tpc::CorrectionMapsGloOpts& sclOpts)
 {
   std::vector<OutputSpec> outputs;
   auto dataRequest = std::make_shared<DataRequest>();
@@ -291,12 +293,14 @@ DataProcessorSpec getTPCITSMatchingSpec(GTrackID::mask_t src, bool useFT0, bool 
 
   o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);
   dataRequest->inputs.emplace_back("corrMap", o2::header::gDataOriginTPC, "TPCCORRMAP", 0, Lifetime::Timeframe);
-  dataRequest->inputs.emplace_back("lumiCTP", o2::header::gDataOriginCTP, "LUMICTP", 0, Lifetime::Timeframe);
+  if(sclOpts.requestCTPLumi) {
+    dataRequest->inputs.emplace_back("lumiCTP", o2::header::gDataOriginCTP, "LUMICTP", 0, Lifetime::Timeframe);
+  }
   return DataProcessorSpec{
     "itstpc-track-matcher",
     dataRequest->inputs,
     outputs,
-    AlgorithmSpec{adaptFromTask<TPCITSMatchingDPL>(dataRequest, ggRequest, useFT0, calib, skipTPCOnly, useMC)},
+    AlgorithmSpec{adaptFromTask<TPCITSMatchingDPL>(dataRequest, ggRequest, useFT0, calib, skipTPCOnly, useMC, sclOpts.requestCTPLumi)},
     opts};
 }
 
