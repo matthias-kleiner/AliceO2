@@ -144,7 +144,6 @@ class Spline1DBase
   using ParentSpec = Spline1DSpec<DataT, YdimT, SplineUtil::getSpec(YdimT), FlatBase>;
 
  public:
-
 #if !defined(GPUCA_GPUCODE)
   Spline1DBase() = default;
   Spline1DBase(const Spline1DBase& v) : ParentSpec(v)
@@ -178,7 +177,6 @@ template <typename DataT, int32_t YdimT>
 class Spline1D<DataT, YdimT, FlatObject> : public Spline1DBase<DataT, YdimT, FlatObject>
 {
  public:
-  using Spline1DBase<DataT, YdimT, FlatObject>::Spline1DBase;
 #if !defined(GPUCA_GPUCODE) && !defined(GPUCA_STANDALONE)
   static Spline1D* readFromFile(TFile& inpf, const char* name)
   {
@@ -192,8 +190,6 @@ class Spline1D<DataT, YdimT, FlatObject> : public Spline1DBase<DataT, YdimT, Fla
 template <typename DataT, int32_t YdimT>
 class Spline1D<DataT, YdimT, NoFlatObject> : public Spline1DBase<DataT, YdimT, NoFlatObject>
 {
- public:
-  using Spline1DBase<DataT, YdimT, NoFlatObject>::Spline1DBase;
 };
 
 } // namespace gpu

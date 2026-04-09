@@ -341,8 +341,8 @@ class SplineSpec<DataT, XdimT, YdimT, 0> : public SplineContainer<DataT>
 
       const typename Spline1D<DataT>::KnotType& knotL = mGrid[d].getKnot(indices[d]);
       DataT coordinate = u[d];
-      typedef Spline1DSpec<DataT, 0, 0> TGridX;
-      const TGridX& gridX = *((const TGridX*)&(mGrid[d]));
+      using GridXBase = Spline1DSpec<DataT, 0, 0>;
+      const GridXBase& gridX = *((const GridXBase*)&(mGrid[d]));
       gridX.interpolateAtU(nInterpolations, knotL, S0, D0, S1, D1, coordinate, iParameters);
       nInterpolations /= 4;
       nKnots /= 2;

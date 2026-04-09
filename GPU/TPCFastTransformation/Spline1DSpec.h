@@ -571,7 +571,7 @@ class Spline1DSpec<DataT, YdimT, 2, FlatBase> : public Spline1DSpec<DataT, YdimT
   {
     Container::cloneFromObject(v, nullptr);
   }
-  
+
   /// Constructor for a regular spline
   void recreate(int32_t nYdim, int32_t numberOfKnots) { ParentSpec::recreate(nYdim, numberOfKnots); }
 
@@ -586,11 +586,9 @@ class Spline1DSpec<DataT, YdimT, 2, FlatBase> : public Spline1DSpec<DataT, YdimT
 template <typename DataT, class FlatBase>
 class Spline1DSpec<DataT, 1, 3, FlatBase> : public Spline1DSpec<DataT, 1, SplineUtil::getSpec(999), FlatBase>
 {
-  typedef Spline1DSpec<DataT, 1, SplineUtil::getSpec(999), FlatBase> ParentSpec;
+  using ParentSpec = Spline1DSpec<DataT, 1, SplineUtil::getSpec(999), FlatBase>;
 
  public:
-  using ParentSpec::ParentSpec; // inherit constructors
-
   /// Simplified interface for 1D: return the interpolated value
   GPUd() DataT interpolate(DataT x) const
   {
