@@ -156,7 +156,9 @@ void VDriftHelper::extractCCDBInputs(ProcessingContext& pc, bool laser, bool its
     if (float tp = mPTHelper.getTP(pc.services().get<o2::framework::TimingInfo>().creation); tp > 0) {
       // try to extract refTP if needed
       auto& vd = (mVDTPCITSTgl.creationTime < mVDLaser.creationTime) ? mVDLaser : mVDTPCITSTgl;
-      if (mForceTPScaling) {
+      if (vd.refTP < 0) { // negative refTP is a user-imposed sentinel to disable T/P scaling for this object
+        mIsTPScalingPossible = false;
+      } else if (mForceTPScaling) {
         const auto& gaspar = o2::tpc::ParameterGas::Instance();
         tp = (gaspar.Temperature > 0 && gaspar.Pressure > 0) ? ((gaspar.Temperature + 273.15) / gaspar.Pressure) : -1;
         mIsTPScalingPossible = (tp > 0) && (vd.refTP > 0 || extractTPForVDrift(vd));
