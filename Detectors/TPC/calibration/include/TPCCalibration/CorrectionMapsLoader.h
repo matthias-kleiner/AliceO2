@@ -60,7 +60,7 @@ class CorrectionMapsLoader : public o2::gpu::CorrectionMapsHelper
   int mLumiCTPSource = 0;              // 0: main, 1: alternative CTP lumi source
   bool mIDC2CTPFallbackActive = false; // flag indicating that fallback from IDC to CTP scaling is active
   o2::tpc::SectorEdgeFluctuations mSecEdgeFlucInfo; // definition of sector edge fluctuation distortion map scaling
-  bool mApplySecEdgeFlucCorr = true;   // flag indicating if sector edge fluctuation correction is enabled
+  bool mApplySecEdgeFlucCorr = true;                // flag indicating if sector edge fluctuation correction is enabled
 };
 
 } // namespace tpc

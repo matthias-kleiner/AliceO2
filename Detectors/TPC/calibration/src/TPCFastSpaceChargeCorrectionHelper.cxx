@@ -1094,7 +1094,7 @@ void TPCFastSpaceChargeCorrectionHelper::addCorrections(
           if (scale == 0.) {
             continue;
           }
-          
+
           auto& linfo = corr.getRowInfo(row);
 
           double scaleU = rowInfo.gridMeasured.getYscale() / linfo.gridMeasured.getYscale();
