@@ -49,7 +49,7 @@ struct ResidualsContainer {
   void fillStatisticsBranches();
   uint64_t getNEntries() const { return nResidualsTotal; }
 
-  void fill(const o2::dataformats::TFIDInfo& ti, const gsl::span<const UnbinnedResid> resid, const gsl::span<const DetInfoResid> detInfoRes, const gsl::span<const o2::tpc::TrackDataCompact> trkRefsIn, const gsl::span<const o2::tpc::TrackData>* trkDataIn, const o2::ctp::LumiInfo* lumiInput);
+  void fill(const o2::dataformats::TFIDInfo& ti, const gsl::span<const UnbinnedResid> resid, const gsl::span<const DetInfoResid> detInfoRes, const gsl::span<const o2::tpc::TrackDataCompact> trkRefsIn, const gsl::span<const o2::tpc::TrackData>* trkDataIn, const o2::ctp::LumiInfo* lumiInput, float tpcVDrift, float tpcDriftTimeOffset);
   void merge(ResidualsContainer* prev);
   void print();
   void writeToFile(bool closeFileAfterwards);
@@ -63,6 +63,8 @@ struct ResidualsContainer {
   std::vector<uint32_t> sumBinnedResid, *sumBinnedResidPtr{&sumBinnedResid}; ///< sum of binned residuals for each TF
   std::vector<uint32_t> sumUnbinnedResid, *sumUnbinnedResidPtr{&sumUnbinnedResid}; ///< sum of unbinned residuals for each TF
   std::vector<o2::ctp::LumiInfo> lumi, *lumiPtr{&lumi};                      ///< luminosity information from CTP per TF
+  std::vector<float> tpcVDriftRefPerTF, *tpcVDriftRefPerTFPtr{&tpcVDriftRefPerTF};                         ///< TPC reference vDrift used for the residual extraction of each TF
+  std::vector<float> tpcDriftTimeOffsetRefPerTF, *tpcDriftTimeOffsetRefPerTFPtr{&tpcDriftTimeOffsetRefPerTF}; ///< TPC reference drift time offset used for the residual extraction of each TF
   std::vector<UnbinnedResid> unbinnedRes, *unbinnedResPtr{&unbinnedRes};     ///< unbinned residuals which are sent to the aggregator
   std::vector<DetInfoResid> detInfoUnbRes, *detInfoUnbResPtr{&detInfoUnbRes}; ///< detector info associated to unbinned residuals which are sent to the aggregator
   std::vector<TrackData> trkData, *trkDataPtr{&trkData};                     ///< track data and cluster ranges
@@ -94,7 +96,7 @@ struct ResidualsContainer {
   float TPCVDriftRef{-1.};                          ///< TPC nominal drift speed in cm/microseconds
   float TPCDriftTimeOffsetRef{0.};                  ///< TPC nominal (e.g. at the start of run) drift time bias in cm/mus
 
-  ClassDefNV(ResidualsContainer, 5);
+  ClassDefNV(ResidualsContainer, 6);
 };
 
 class ResidualAggregator final : public o2::calibration::TimeSlotCalibration<ResidualsContainer>

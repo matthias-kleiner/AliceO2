@@ -155,6 +155,8 @@ void ResidualsContainer::init(const TrackResiduals* residualsEngine, std::string
   treeOutRecords->Branch("sumOfBinnedResiduals", &sumBinnedResidPtr);
   treeOutRecords->Branch("sumOfUnbinnedResiduals", &sumUnbinnedResidPtr);
   treeOutRecords->Branch("CTPLumi", &lumiPtr);
+  treeOutRecords->Branch("TPCVDriftRefPerTF", &tpcVDriftRefPerTFPtr);
+  treeOutRecords->Branch("TPCDriftTimeOffsetRefPerTF", &tpcDriftTimeOffsetRefPerTFPtr);
   treeOutRecords->Branch("TPCVDriftRef", &TPCVDriftRef);
   treeOutRecords->Branch("TPCDriftTimeOffsetRef", &TPCDriftTimeOffsetRef);
   LOG(debug) << "Done initializing residuals container for file named " << fileName;
@@ -171,7 +173,7 @@ void ResidualsContainer::fillStatisticsBranches()
   }
 }
 
-void ResidualsContainer::fill(const o2::dataformats::TFIDInfo& ti, const gsl::span<const UnbinnedResid> resid, const gsl::span<const DetInfoResid> detInfoRes, const gsl::span<const o2::tpc::TrackDataCompact> trkRefsIn, const gsl::span<const o2::tpc::TrackData>* trkDataIn, const o2::ctp::LumiInfo* lumiInput)
+void ResidualsContainer::fill(const o2::dataformats::TFIDInfo& ti, const gsl::span<const UnbinnedResid> resid, const gsl::span<const DetInfoResid> detInfoRes, const gsl::span<const o2::tpc::TrackDataCompact> trkRefsIn, const gsl::span<const o2::tpc::TrackData>* trkDataIn, const o2::ctp::LumiInfo* lumiInput, float tpcVDrift, float tpcDriftTimeOffset)
 {
   // receives large vector of unbinned residuals and fills the sector-wise vectors
   // with binned residuals and statistics
@@ -253,6 +255,8 @@ void ResidualsContainer::fill(const o2::dataformats::TFIDInfo& ti, const gsl::sp
     trackInfo.clear();
   }
   tfOrbits.push_back(ti.firstTForbit);
+  tpcVDriftRefPerTF.push_back(tpcVDrift);
+  tpcDriftTimeOffsetRefPerTF.push_back(tpcDriftTimeOffset);
   if (lumiInput) {
     lumi.push_back(*lumiInput);
   }
@@ -372,6 +376,10 @@ void ResidualsContainer::merge(ResidualsContainer* prev)
   std::swap(prev->sumUnbinnedResid, sumUnbinnedResid);
   prev->lumi.insert(prev->lumi.end(), lumi.begin(), lumi.end());
   std::swap(prev->lumi, lumi);
+  prev->tpcVDriftRefPerTF.insert(prev->tpcVDriftRefPerTF.end(), tpcVDriftRefPerTF.begin(), tpcVDriftRefPerTF.end());
+  std::swap(prev->tpcVDriftRefPerTF, tpcVDriftRefPerTF);
+  prev->tpcDriftTimeOffsetRefPerTF.insert(prev->tpcDriftTimeOffsetRefPerTF.end(), tpcDriftTimeOffsetRefPerTF.begin(), tpcDriftTimeOffsetRefPerTF.end());
+  std::swap(prev->tpcDriftTimeOffsetRefPerTF, tpcDriftTimeOffsetRefPerTF);
 
   firstSeenTF = prev->firstSeenTF;
   LOGP(debug, "Done with the merge. Current slot has {} entries", getNEntries());
