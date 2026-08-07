@@ -532,7 +532,7 @@ void Pressure::makeRobustPressure(TimeStampType timeInterval, TimeStampType time
   // drop trailing query times that don't yet have a full look-ahead margin of data
   // to their right in the buffer: the smoothing window is ±timeInterval, so without
   // it those points would be smoothed with a partially or fully one-sided (past-only)
-  // window, biasing them low/high and causing a jump at the slot boundary. 
+  // window, biasing them low/high and causing a jump at the slot boundary.
   const auto& robBuffTimes = mRobPressureBuff.second;
   const TimeStampType lookaheadMargin = 2 * timeInterval;
   while (times.size() > 1 && !robBuffTimes.empty() && times.back() + lookaheadMargin > robBuffTimes.back()) {
