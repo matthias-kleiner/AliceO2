@@ -30,6 +30,12 @@
 ///
 /// Only raw detector data are stored (TPC ClusterNative, ITS compact clusters + patterns, raw TOF time, TRD tracklet words); calibrations,
 /// the cluster dictionary and the geometry are applied offline.
+///
+/// --debug-tree writes cosmics_collector_debug.root for test runs: tree "cl" with every stored TPC cluster transformed (local x, y, z in the
+/// frame used by the road, zCos in the common frame of the cosmic's time, global gx, gy), tree "road" with the predicted track points of
+/// each leg (row by row, same frames), tree "its" with the local (with the ITS road also global) coordinates of the ITS clusters, tree
+/// "tof" with the raw and calibrated TOF time and the cluster position, tree "trd" with the road tracklets and their residuals, and tree
+/// "cosm" with one entry per cosmic.
 
 #include <vector>
 #include <unordered_set>
@@ -39,6 +45,7 @@
 #include "Framework/Task.h"
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/DataProcessorSpec.h"
+#include "Framework/DeviceSpec.h"
 #include "GlobalTrackingWorkflow/CosmicsClusterCollectorSpec.h"
 #include "DataFormatsGlobalTracking/RecoContainer.h"
 #include "DataFormatsGlobalTracking/CosmicTrack.h"
@@ -70,6 +77,7 @@
 #include "MathUtils/Utils.h"
 #include "MathUtils/Primitive2D.h"
 #include "TPCFastTransformPOD.h"
+#include "CommonUtils/TreeStreamRedirector.h"
 
 using namespace o2::framework;
 using GTrackID = o2::dataformats::GlobalTrackID;
@@ -138,6 +146,8 @@ class CosmicsClusterCollectorSpec : public Task
   void roadITS(const RecoContainer& data, const o2::dataformats::TrackCosmics& cosm, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicITSCluster>& out, std::vector<ITSPattRequest>& requests,
                const std::unordered_set<int>& matched) const;
   void cacheITSChipCentres();
+  void writeDebug(const o2::dataformats::CosmicTrack& cosm, int icosm) const;
+  void writeDebugTOF(const o2::tof::Cluster& c, int icosm, int leg, uint8_t flags) const;
 
   std::shared_ptr<DataRequest> mDataRequest;
   std::shared_ptr<o2::base::GRPGeomRequest> mGGCCDBRequest;
@@ -158,9 +168,14 @@ class CosmicsClusterCollectorSpec : public Task
   bool mUseMC = false;
   mutable bool mStaggeredWarned = false;
   mutable bool mNoDictWarned = false;
-  size_t mNCosmics = 0;    ///< cosmics processed
-  size_t mNClAttached = 0; ///< attached TPC clusters stored
-  size_t mNClCorridor = 0; ///< road TPC clusters stored
+  std::unique_ptr<o2::utils::TreeStreamRedirector> mDebugOut; ///< debug trees with transformed clusters and road points (--debug-tree)
+  int mDbgTF = 0;                                             ///< context of the debug output: TF counter
+  int mDbgCosmic = 0;                                         ///< entry of the cosmic in the TF
+  int mDbgLeg = 0;                                            ///< leg (0 bottom, 1 top)
+  float mDbgTauC = 0.f;                                       ///< time of the cosmic [TB]: common frame (zCos) of the debug output
+  size_t mNCosmics = 0;                                       ///< cosmics processed
+  size_t mNClAttached = 0;                                    ///< attached TPC clusters stored
+  size_t mNClCorridor = 0;                                    ///< road TPC clusters stored
   TStopwatch mTimer;
 };
 
@@ -175,6 +190,11 @@ void CosmicsClusterCollectorSpec::init(InitContext& ic)
   mRoadTOF = ic.options().get<float>("tof-road-width");
   mRoadTRD = ic.options().get<float>("trd-road-width");
   mRoadITS = ic.options().get<float>("its-road-width");
+  if (ic.options().get<bool>("debug-tree")) {
+    const auto timesliceId = ic.services().get<const o2::framework::DeviceSpec>().inputTimesliceId;
+    const std::string name = timesliceId == 0 ? "cosmics_collector_debug.root" : fmt::format("cosmics_collector_debug_{}.root", timesliceId);
+    mDebugOut = std::make_unique<o2::utils::TreeStreamRedirector>(name.c_str(), "recreate");
+  }
 }
 
 void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
@@ -213,6 +233,7 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
     buildUsedMap(recoData, time0Windows);
   }
   std::vector<ITSPattRequest> pattRequests; // ITS clusters whose patterns are not in the dictionary
+  mDbgTF = tfID.tfCounter;
   for (size_t ic = 0; ic < nCosmics; ic++) {
     const auto& cosm = cosmics[ic];
     auto& out = cosmicsOut.emplace_back();
@@ -237,6 +258,9 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
       }
       if (refs[GTrackID::TOF].isIndexSet()) {
         addTOF(recoData, refs[GTrackID::TOF], leg, out.clTOF, matchedTOF);
+        if (mDebugOut) {
+          writeDebugTOF(recoData.getTOFClusters()[refs[GTrackID::TOF].getIndex()], ic, leg, o2::dataformats::HitMatched);
+        }
       }
       if (refs[GTrackID::TRD].isIndexSet()) {
         addTRD(recoData, refs[GTrackID::TRD], leg, out.trdTracklets, matchedTRD);
@@ -246,6 +270,8 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
     cosmicTime.tb = cosm.getTimeMUS().getTimeStamp() / mTPCTBinMUS;
     cosmicTime.errTB = cosm.getTimeMUS().getTimeStampError() / mTPCTBinMUS;
     cosmicTime.known = cosm.getTimeMUS().getTimeStampError() < mMaxAbsTimeErr;
+    mDbgCosmic = ic;
+    mDbgTauC = cosmicTime.tb;
     std::unordered_set<uint32_t> taken;
     for (int leg = 0; leg < 2; leg++) { // attached clusters of both legs first, so that a road never takes the other leg's clusters
       if (tpcLegs[leg]) {
@@ -256,6 +282,7 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
     for (int leg = 0; leg < 2; leg++) {
       if (tpcLegs[leg]) {
         const size_t nAttached = tpcCl[leg]->size();
+        mDbgLeg = leg;
         addTPCCorridor(recoData, *tpcLegs[leg], cosmicTime, *tpcCl[leg], taken);
         mNClCorridor += tpcCl[leg]->size() - nAttached;
       }
@@ -272,6 +299,11 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
   }
   if (!pattRequests.empty()) {
     fillITSPatterns(recoData, pattRequests, cosmicsOut);
+  }
+  if (mDebugOut) {
+    for (size_t ic = 0; ic < cosmicsOut.size(); ic++) {
+      writeDebug(cosmicsOut[ic], ic);
+    }
   }
   mNCosmics += cosmicsOut.size();
   LOGP(info, "Collected clusters for {} cosmics in TF {}", cosmicsOut.size(), tfID.tfCounter);
@@ -486,6 +518,13 @@ void CosmicsClusterCollectorSpec::addTPCCorridor(const RecoContainer& data, cons
           if (!branch.accept(xRow * cosAlpha - y * sinAlpha, xRow * sinAlpha + y * cosAlpha)) {
             continue;
           }
+          if (mDebugOut) { // predicted point, z in the frame of the road and in the common frame of the cosmic's time
+            const float zCos = z + (sideA ? 1.f : -1.f) * (mDbgTauC - frame.vertexTime) * vDrift;
+            (*mDebugOut) << "road"
+                         << "tf=" << mDbgTF << "cosm=" << mDbgCosmic << "leg=" << mDbgLeg << "frame=" << int(frame.flag != 0) << "sector=" << sector
+                         << "row=" << row << "x=" << xReal << "y=" << y << "z=" << z << "zCos=" << zCos << "gx=" << xReal * cosAlpha - y * sinAlpha
+                         << "gy=" << xReal * sinAlpha + y * cosAlpha << "snp=" << parRow.getSnp() << "tgl=" << parRow.getTgl() << "\n";
+          }
           searchRow(clusters, sector, row, y, z, parRow.getSnp(), parRow.getTgl(), frame.vertexTime, frame.zTolerance, frame.flag, out, taken);
         }
       }
@@ -664,6 +703,9 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
     cl.channel = c.getMainContributingChannel();
     cl.leg = leg;
     cl.flags = o2::dataformats::HitRoad;
+    if (mDebugOut) {
+      writeDebugTOF(c, icosm, leg, o2::dataformats::HitRoad);
+    }
   }
 }
 
@@ -729,6 +771,12 @@ void CosmicsClusterCollectorSpec::roadTRD(const RecoContainer& data, const o2::t
       tr.layer = layer;
       tr.leg = leg;
       tr.flags = o2::dataformats::HitRoad;
+      if (mDebugOut) {
+        const auto& point = calibrated[cand.tracklet];
+        (*mDebugOut) << "trd"
+                     << "tf=" << mDbgTF << "cosm=" << icosm << "leg=" << leg << "layer=" << layer << "x=" << point.getX() << "y=" << point.getY()
+                     << "z=" << point.getZ() << "dy=" << cand.dy << "dz=" << cand.dz << "trigMUS=" << cand.trigBC * float(o2::constants::lhc::LHCBunchSpacingMUS) << "\n";
+      }
     }
   }
 }
@@ -917,6 +965,85 @@ void CosmicsClusterCollectorSpec::addTRD(const RecoContainer& data, GTrackID gid
   }
 }
 
+void CosmicsClusterCollectorSpec::writeDebug(const o2::dataformats::CosmicTrack& cosm, int icosm) const
+{
+  constexpr int NSectorsA = TPCGeo::getNumberOfSectorsA();
+  const float timeCosmic = cosm.cosmic.getTimeMUS().getTimeStamp() / mTPCTBinMUS;
+  const bool absTimeKnown = cosm.cosmic.getTimeMUS().getTimeStampError() < mMaxAbsTimeErr;
+  int nAttached[2] = {0, 0};
+  int nRoad[2] = {0, 0};
+  int side[2] = {-2, -2};
+  const o2::tpc::TrackTPC* legs[2] = {&cosm.tpcBottom, &cosm.tpcTop};
+  const std::vector<o2::dataformats::CosmicTPCCluster>* legClusters[2] = {&cosm.clTPCBottom, &cosm.clTPCTop};
+  for (int leg = 0; leg < 2; leg++) {
+    if (legs[leg]->getNClusters() == 0) { // no TPC part
+      continue;
+    }
+    side[leg] = legs[leg]->hasASideClustersOnly() ? 1 : (legs[leg]->hasCSideClustersOnly() ? -1 : 0);
+    for (const auto& c : *legClusters[leg]) {
+      // transform with the vertex time used by the road: the leg's time0, or the cosmic's time for clusters found on the other side
+      const float vertexTime = c.isAbsTime() ? timeCosmic : legs[leg]->getTime0();
+      float x = 0.f;
+      float y = 0.f;
+      float z = 0.f;
+      mCorrMap->Transform(c.sector, c.row, c.cl.getPad(), c.cl.getTime(), x, y, z, vertexTime);
+      float xCos = 0.f;
+      float yCos = 0.f;
+      float zCos = 0.f;
+      mCorrMap->Transform(c.sector, c.row, c.cl.getPad(), c.cl.getTime(), xCos, yCos, zCos, timeCosmic);
+      const float alpha = o2::math_utils::sector2Angle(c.sector % NSectorsA);
+      const float sinAlpha = std::sin(alpha);
+      const float cosAlpha = std::cos(alpha);
+      (*mDebugOut) << "cl"
+                   << "tf=" << mDbgTF << "cosm=" << icosm << "leg=" << leg << "flags=" << int(c.flags) << "sector=" << int(c.sector) << "row=" << int(c.row)
+                   << "pad=" << c.cl.getPad() << "time=" << c.cl.getTime() << "qMax=" << float(c.cl.getQmax()) << "qTot=" << float(c.cl.getQtot())
+                   << "x=" << x << "y=" << y << "z=" << z << "zCos=" << zCos << "gx=" << x * cosAlpha - y * sinAlpha << "gy=" << x * sinAlpha + y * cosAlpha << "\n";
+      (c.isAttached() ? nAttached : nRoad)[leg]++;
+    }
+  }
+  for (const auto& c : cosm.clITS) { // local coordinates on the chip from the dictionary or the stored pattern
+    const o2::itsmft::CompClusterExt compCluster(c.row, c.col, c.pattID, c.chipID);
+    o2::math_utils::Point3D<float> local;
+    if (c.pattEntry >= 0) {
+      o2::itsmft::ClusterPattern pattern;
+      auto pattIt = cosm.itsPatterns.begin() + c.pattEntry;
+      pattern.acquirePattern(pattIt);
+      local = o2::itsmft::TopologyDictionary::getClusterCoordinates<float>(compCluster, pattern, c.pattID != o2::itsmft::CompCluster::InvalidPatternID);
+    } else if (mITSDict && c.pattID != o2::itsmft::CompCluster::InvalidPatternID) {
+      local = mITSDict->getClusterCoordinates<float>(compCluster);
+    } else { // pattern not available: pixel centre
+      o2::itsmft::SegmentationAlpide::detectorToLocalUnchecked(c.row, c.col, local);
+    }
+    o2::math_utils::Point3D<float> global(0.f, 0.f, 0.f);
+    if (!mITSChipCentres.empty()) { // geometry loaded for the ITS road
+      global = o2::its::GeometryTGeo::Instance()->getMatrixL2G(c.chipID) * local;
+    }
+    (*mDebugOut) << "its"
+                 << "tf=" << mDbgTF << "cosm=" << icosm << "leg=" << int(c.leg) << "flags=" << int(c.flags) << "gx=" << global.X() << "gy=" << global.Y() << "gz=" << global.Z() << "chip=" << int(c.chipID) << "row=" << int(c.row) << "col=" << int(c.col)
+                 << "pattID=" << int(c.pattID) << "hasPatt=" << int(c.pattEntry >= 0) << "xLoc=" << local.X() << "zLoc=" << local.Z() << "rofBC=" << c.rofBC << "\n";
+  }
+  const auto& time = cosm.cosmic.getTimeMUS();
+  (*mDebugOut) << "cosm"
+               << "tf=" << mDbgTF << "cosm=" << icosm << "t=" << time.getTimeStamp() << "tErr=" << time.getTimeStampError() << "absTime=" << int(absTimeKnown)
+               << "chi2Match=" << cosm.cosmic.getChi2Match() << "chi2Refit=" << cosm.cosmic.getChi2Refit() << "q2pt=" << cosm.cosmic.getQ2Pt()
+               << "tgl=" << cosm.cosmic.getTgl() << "side0=" << side[0] << "side1=" << side[1] << "nAtt0=" << nAttached[0] << "nAtt1=" << nAttached[1]
+               << "nRoad0=" << nRoad[0] << "nRoad1=" << nRoad[1] << "nITS=" << int(cosm.clITS.size()) << "nTOF=" << int(cosm.clTOF.size())
+               << "nTRD=" << int(cosm.trdTracklets.size()) << "mcEvent=" << (cosm.label.isSet() ? cosm.label.getEventID() : -1)
+               << "mcTrack=" << (cosm.label.isSet() ? cosm.label.getTrackID() : -1) << "\n";
+}
+
+void CosmicsClusterCollectorSpec::writeDebugTOF(const o2::tof::Cluster& c, int icosm, int leg, uint8_t flags) const
+{
+  // the TOF cluster position is in the frame of its sector
+  const float alpha = o2::math_utils::sector2Angle(c.getSector());
+  const float sinAlpha = std::sin(alpha);
+  const float cosAlpha = std::cos(alpha);
+  (*mDebugOut) << "tof"
+               << "tf=" << mDbgTF << "cosm=" << icosm << "leg=" << leg << "channel=" << c.getMainContributingChannel() << "timeRaw=" << c.getTimeRaw()
+               << "time=" << c.getTime() << "flags=" << int(flags) << "tot=" << c.getTot() << "x=" << c.getX() << "y=" << c.getY() << "z=" << c.getZ()
+               << "gx=" << c.getX() * cosAlpha - c.getY() * sinAlpha << "gy=" << c.getX() * sinAlpha + c.getY() * cosAlpha << "\n";
+}
+
 void CosmicsClusterCollectorSpec::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
 {
   if (o2::base::GRPGeomHelper::instance().finaliseCCDB(matcher, obj)) {
@@ -930,6 +1057,7 @@ void CosmicsClusterCollectorSpec::finaliseCCDB(ConcreteDataMatcher& matcher, voi
 
 void CosmicsClusterCollectorSpec::endOfStream(EndOfStreamContext& ec)
 {
+  mDebugOut.reset();
   LOGP(info, "Cosmics cluster collector: {} cosmics, {} attached and {} road TPC clusters; Cpu: {:.3e} Real: {:.3e} s in {} slots",
        mNCosmics, mNClAttached, mNClCorridor, mTimer.CpuTime(), mTimer.RealTime(), mTimer.Counter() - 1);
 }
@@ -976,7 +1104,8 @@ DataProcessorSpec getCosmicsClusterCollectorSpec(GTrackID::mask_t src, bool useM
       {"max-cosmics-per-tf", VariantType::Int, 100, {"collect the clusters of at most this many cosmics per TF"}},
       {"tof-road-width", VariantType::Float, 5.f, {"half-width of the road at the TOF [cm]"}},
       {"trd-road-width", VariantType::Float, 5.f, {"half-width of the road at the TRD [cm] (in z plus the pad length)"}},
-      {"its-road-width", VariantType::Float, 1.5f, {"half-width of the road in the ITS [cm]"}}}};
+      {"its-road-width", VariantType::Float, 1.5f, {"half-width of the road in the ITS [cm]"}},
+      {"debug-tree", VariantType::Bool, false, {"write cosmics_collector_debug.root with transformed clusters and road points (test runs)"}}}};
 }
 
 } // namespace o2::globaltracking
