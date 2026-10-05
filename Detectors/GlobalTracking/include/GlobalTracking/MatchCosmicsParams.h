@@ -18,6 +18,7 @@
 #include "CommonUtils/ConfigurableParamHelper.h"
 #include "DetectorsBase/Propagator.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
+#include <string>
 
 namespace o2
 {
@@ -49,6 +50,11 @@ struct MatchCosmicsParams : public o2::conf::ConfigurableParamHelper<MatchCosmic
 
   O2ParamDef(MatchCosmicsParams, "cosmicsMatch");
 };
+
+/// key=value string (configKeyValues syntax) of a named set of MatchCosmicsParams settings; the cosmics-match workflow applies it before
+/// --configKeyValues, so single keys can still be overridden. Unknown names are fatal.
+/// "physics-v1": cosmics in collision data (seed cuts against collision tracks, realistic systematic errors for the pair chi2, tgl window)
+std::string getMatchCosmicsPreset(const std::string& name);
 
 } // namespace globaltracking
 } // end namespace o2
