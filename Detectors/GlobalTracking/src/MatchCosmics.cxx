@@ -309,6 +309,10 @@ void MatchCosmics::refitWinners(const o2::globaltracking::RecoContainer& data)
     // calculate weighted average of 2 legs and chi2
     o2::track::TrackParCov::MatrixDSym5 cov5;
     float chi2Match = trCosmBtm.getPredictedChi2(trCosmTop, cov5);
+    if (mMatchParams->maxChi2Match >= 0.f && chi2Match > mMatchParams->maxChi2Match) {
+      LOG(debug) << "Top/Bottom refitted legs disagree, chi2Match " << chi2Match;
+      continue;
+    }
     if (!trCosmBtm.update(trCosmTop, cov5)) {
       LOG(debug) << "Top/Bottom update failed";
       continue;
