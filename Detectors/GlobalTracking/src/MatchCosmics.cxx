@@ -68,7 +68,8 @@ void MatchCosmics::process(const o2::globaltracking::RecoContainer& data)
         trc.matchID = Reject; // reject track
         continue;
       }
-      if (std::abs(trc.getY()) < mMatchParams->minSeedDCAxy) { // passes close to the beam line: indistinguishable from collision tracks
+      if (std::abs(trc.getY()) < mMatchParams->minSeedDCAxy || trc.getY() * trc.getY() < mMatchParams->minSeedDCAxyNSigma * mMatchParams->minSeedDCAxyNSigma * trc.getSigmaY2()) {
+        // passes close to the beam line, absolutely or within its errors: indistinguishable from collision tracks
         trc.matchID = Reject;
         continue;
       }
