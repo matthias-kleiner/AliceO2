@@ -444,6 +444,27 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
         break;
       }
     }
+    if (mMatchParams->vetoSameHalf) {
+      // a cosmic has its two legs on opposite sides of its closest approach to the beam line: project the legs' reference points (before
+      // the propagation to the DCA) on the transverse direction of seed0 at its DCA; pieces of one leg are on the same side. Transverse
+      // only: the z of a TPC-only track refers to its own time0, so z differences between the legs are meaningless. Skipped for
+      // reference points close to the DCA (e.g. ITS-containing tracks), where the sign is undefined.
+      std::array<float, 3> pca{};
+      seed0.getXYZGlo(pca);
+      const float phi = seed0.getAlpha() + std::asin(seed0.getSnp());
+      const float dir[2] = {std::cos(phi), std::sin(phi)};
+      float proj0 = 0.f;
+      float proj1 = 0.f;
+      for (int k = 0; k < 2; k++) {
+        proj0 += (seed0.xyzRef[k] - pca[k]) * dir[k];
+        proj1 += (seed1.xyzRef[k] - pca[k]) * dir[k];
+      }
+      constexpr float MinDist = 20.f; // cm
+      if (std::abs(proj0) > MinDist && std::abs(proj1) > MinDist && proj0 * proj1 > 0.f) {
+        rej = RejSameHalf;
+        break;
+      }
+    }
     o2::track::TrackParCov seed1Inv = seed1;
     seed1Inv.invert();
     for (int i = 0; i < o2::track::kNParams; i++) { // add systematic error
@@ -466,6 +487,43 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
       break;
     }
     bool ignoreZ = seed0.origID.getSource() == o2d::GlobalTrackID::TPC || seed1.origID.getSource() == o2d::GlobalTrackID::TPC;
+    if (ignoreZ && mMatchParams->constrainTPCOnlyZ) {
+      // a TPC-only track with clusters on one side has z relative to its time0: z(t) = z + side * vD * (t - tRef); a CE-crossing or
+      // non-TPC-only track has an absolute z (side 0). Bring both legs to a common time where possible and test z; for legs on opposite
+      // sides, z continuity fixes the common time, which must lie in both time brackets.
+      const int side0 = seed0.tpcSide;
+      const int side1 = seed1.tpcSide;
+      const float sigZ2 = (seed0.getSigmaZ2() + seed1Inv.getSigmaZ2()) * mMatchParams->crudeNSigma2Cut[o2::track::kZ];
+      if (side0 == 0 || side1 == 0 || side0 == side1) {
+        float dZ = seed0.getZ() - seed1Inv.getZ();
+        float dZTimeTol = 0.f;          // the time of a non-TPC absolute leg is only known within its bracket (tRef is the bracket centre)
+        if (side0 != 0 && side1 != 0) { // same side: the z offset is fixed by the difference of the reference times
+          dZ -= side0 * mTPCVDrift * (seed0.tRef - seed1.tRef);
+        } else if (side1 != 0) { // seed0 absolute: move seed1 to the time of seed0
+          dZ -= side1 * mTPCVDrift * (seed0.tRef - seed1.tRef);
+          if (seed0.origID.getSource() != o2d::GlobalTrackID::TPC) {
+            dZTimeTol = 0.5f * mTPCVDrift * seed0.tBracket.delta();
+          }
+        } else if (side0 != 0) { // seed1 absolute: move seed0 to the time of seed1
+          dZ += side0 * mTPCVDrift * (seed1.tRef - seed0.tRef);
+          if (seed1.origID.getSource() != o2d::GlobalTrackID::TPC) {
+            dZTimeTol = 0.5f * mTPCVDrift * seed1.tBracket.delta();
+          }
+        }
+        const float dZTol = std::sqrt(sigZ2) + dZTimeTol;
+        if (dZ * dZ > dZTol * dZTol) {
+          rej = RejZ;
+          break;
+        }
+      } else { // opposite sides
+        const float t = 0.5f * (side0 * (seed1Inv.getZ() - seed0.getZ()) / mTPCVDrift + seed0.tRef + seed1.tRef);
+        const float tTol = std::sqrt(sigZ2) / (2.f * mTPCVDrift);
+        if (t < std::max(seed0.tBracket.getMin(), seed1.tBracket.getMin()) - tTol || t > std::min(seed0.tBracket.getMax(), seed1.tBracket.getMax()) + tTol) {
+          rej = RejZ;
+          break;
+        }
+      }
+    }
     // RSTODO this is simplification: one should constraint the TPC-only track Z by the time of other candidate (at least their difference of both tracks are TPC only).
     // If the shift is large, eventually the tracks need to be refitted.
     if (!ignoreZ) { // cut on Z makes no sense for TPC only tracks
@@ -558,9 +616,13 @@ void MatchCosmics::createSeeds(const o2::globaltracking::RecoContainer& data)
       }
       terr += this->mMatchParams->timeToleranceMUS;
       trackEntry[_origID] = mSeeds.size();
-      mSeeds.emplace_back(TrackSeed{_tr, {t0 - terr, t0 + terr}, _origID, MinusOne});
+      auto& seed = mSeeds.emplace_back(TrackSeed{_tr, {t0 - terr, t0 + terr}, _origID, MinusOne});
+      seed.getXYZGlo(seed.xyzRef);
+      seed.tRef = t0;
       if constexpr (isTPCTrack<decltype(_tr)>()) {
-        mSeeds.back().setCov(this->mMatchParams->tpcExtraZError2 + _tr.getCov()[o2::track::kSigZ2], o2::track::kSigZ2);
+        seed.setCov(this->mMatchParams->tpcExtraZError2 + _tr.getCov()[o2::track::kSigZ2], o2::track::kSigZ2);
+        seed.tRef = _tr.getTime0() * this->mTPCTBinMUS; // the z of a TPC-only track refers to its time0
+        seed.tpcSide = _tr.hasASideClustersOnly() ? 1 : (_tr.hasCSideClustersOnly() ? -1 : 0);
       }
       return true;
     } else {
