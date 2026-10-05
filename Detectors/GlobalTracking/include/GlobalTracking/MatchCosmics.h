@@ -81,6 +81,8 @@ class MatchCosmics
     int id1 = MinusOne;  ///< id of 2nd parnter
     float chi2 = -1.f;   ///< matching chi2
     int next = MinusOne; ///< index of eventual next record
+    float tCommon = 0.f; ///< common time [mus] fixed by z continuity of TPC-only legs on opposite TPC sides
+    float tCommonErr = -1.f; ///< its error [mus] (< 0: not fixed, the refit uses the centre of the time-bracket overlap)
   };
 
   struct TrackSeed : public o2::track::TrackParCov {
@@ -135,7 +137,7 @@ class MatchCosmics
  private:
   void updateTimeDependentParams();
   RejFlag checkPair(int i, int j);
-  void registerMatch(int i, int j, float chi2);
+  void registerMatch(int i, int j, float chi2, float tCommon = 0.f, float tCommonErr = -1.f);
   void suppressMatch(int partner0, int partner1);
   void createSeeds(const o2::globaltracking::RecoContainer& data);
   bool validateMatch(int partner0);

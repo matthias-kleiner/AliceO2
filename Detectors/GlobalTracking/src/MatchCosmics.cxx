@@ -188,6 +188,10 @@ void MatchCosmics::refitWinners(const o2::globaltracking::RecoContainer& data)
     const o2::track::TrackParCov outerLegs[2] = {data.getTrackParamOut(mSeeds[rec.id0].origID), data.getTrackParamOut(mSeeds[rec.id1].origID)};
     auto tOverlap = mSeeds[rec.id0].tBracket.getOverlap(mSeeds[rec.id1].tBracket);
     float t0 = tOverlap.mean(), dt = tOverlap.delta() * 0.5;
+    if (rec.tCommonErr >= 0.f) { // TPC-only legs on opposite sides: their z continuity fixes the time, refit both legs with it
+      t0 = rec.tCommon;
+      dt = rec.tCommonErr;
+    }
     auto pnt0 = outerLegs[0].getXYZGlo(), pnt1 = outerLegs[1].getXYZGlo();
     int btm = 0, top = 1;
     // we fit topward from bottom
@@ -433,6 +437,8 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
     return (rej = RejTime); // since the brackets are sorted in tmin, all following tbj will also exceed tbi
   }
   float chi2 = 1.e9f;
+  float tCommon = 0.f;     // time fixed by z continuity of TPC-only legs on opposite sides, used by the refit
+  float tCommonErr = -1.f; // its error (< 0: not fixed)
 
   // check
   // 1) crude check on tgl and q/pt (if B!=0). Note: back-to-back tracks will have mutually params (see TrackPar::invertParam)
@@ -527,6 +533,8 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
           rej = RejZ;
           break;
         }
+        tCommon = t;
+        tCommonErr = std::sqrt(seed0.getSigmaZ2() + seed1Inv.getSigmaZ2()) / (2.f * mTPCVDrift);
       }
     }
     // RSTODO this is simplification: one should constraint the TPC-only track Z by the time of other candidate (at least their difference of both tracks are TPC only).
@@ -551,8 +559,8 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
       break;
     }
     rej = Accept;
-    registerMatch(i, j, chi2);
-    registerMatch(j, i, chi2); // the reverse reference can be also done in a separate loop
+    registerMatch(i, j, chi2, tCommon, tCommonErr);
+    registerMatch(j, i, chi2, tCommon, tCommonErr); // the reverse reference can be also done in a separate loop
     LOG(debug) << "Chi2 = " << chi2 << " NMatches " << mRecords.size();
     break;
   }
@@ -564,7 +572,8 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
     if (seed1I.rotate(seed0.getAlpha()) && o2::base::Propagator::Instance()->PropagateToXBxByBz(seed1I, seed0.getX(), mMatchParams->maxSnp, mMatchParams->maxStep, mMatchParams->matCorr)) {
       int rejI = int(rej);
       (*mDBGOut) << "match"
-                 << "tf=" << mTFCount << "seed0=" << seed0 << "seed1=" << seed1I << "chi2Match=" << chi2 << "rej=" << rejI << "\n";
+                 << "tf=" << mTFCount << "seed0=" << seed0 << "seed1=" << seed1I << "chi2Match=" << chi2 << "rej=" << rejI
+                 << "side0=" << int(seed0.tpcSide) << "side1=" << int(seed1.tpcSide) << "tCommon=" << tCommon << "tCommonErr=" << tCommonErr << "\n";
     }
   }
 #endif
@@ -573,11 +582,11 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
 }
 
 //________________________________________________________
-void MatchCosmics::registerMatch(int i, int j, float chi2)
+void MatchCosmics::registerMatch(int i, int j, float chi2, float tCommon, float tCommonErr)
 {
   /// register track index j as a match for track index i
   int newRef = mRecords.size();
-  auto& matchRec = mRecords.emplace_back(MatchRecord{i, j, chi2, MinusOne});
+  auto& matchRec = mRecords.emplace_back(MatchRecord{i, j, chi2, MinusOne, tCommon, tCommonErr});
   auto* best = &mSeeds[i].matchID;
   while (*best > MinusOne) {
     auto& oldMatchRec = mRecords[*best];
