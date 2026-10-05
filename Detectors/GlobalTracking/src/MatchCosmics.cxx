@@ -68,6 +68,10 @@ void MatchCosmics::process(const o2::globaltracking::RecoContainer& data)
         trc.matchID = Reject; // reject track
         continue;
       }
+      if (std::abs(trc.getY()) < mMatchParams->minSeedDCAxy) { // passes close to the beam line: indistinguishable from collision tracks
+        trc.matchID = Reject;
+        continue;
+      }
       if (mMatchParams->dcaCutChi2[trc.origID.getSource()] > 0.f && mUsePVInfo && (std::abs(trc.getY()) < mMatchParams->fiducialRIP && std::abs(trc.getZ()) < mMatchParams->fiducialZIP)) {
         // do the propagation only if we are in the fiducial IP range.
         for (int iv = trc.vtIDMin; trc.vtIDMin >= 0 && iv <= trc.vtIDMax; iv++) { // vtIDMax is the last compatible vertex (inclusive), -1 if none
@@ -540,7 +544,7 @@ void MatchCosmics::createSeeds(const o2::globaltracking::RecoContainer& data)
         return true;
       }
       if constexpr (isTPCTrack<decltype(_tr)>()) {
-        if (!this->mMatchParams->allowTPCOnly) {
+        if (!this->mMatchParams->allowTPCOnly || _tr.getNClusters() < this->mMatchParams->minSeedNClTPC) {
           return true;
         }
         // unconstrained TPC track, with t0 = TrackTPC.getTime0+0.5*(DeltaFwd-DeltaBwd) and terr = 0.5*(DeltaFwd+DeltaBwd) in TimeBins
