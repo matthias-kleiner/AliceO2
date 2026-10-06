@@ -143,7 +143,7 @@ class CosmicsClusterCollectorSpec : public Task
   bool predictOutward(const o2::tpc::TrackTPC& leg, const CosmicTime& cosmicTime, int sector, float x, float& y, float& z) const;
   void roadTOF(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTOFCluster>& out, const std::unordered_set<int>& matched, float& timeTOFMUS) const;
   void roadTRD(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTRDTracklet>& out, const std::unordered_set<int>& matched) const;
-  void roadITS(const RecoContainer& data, const o2::dataformats::TrackCosmics& cosm, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicITSCluster>& out, std::vector<ITSPattRequest>& requests,
+  void roadITS(const RecoContainer& data, const o2::dataformats::TrackCosmics& cosm, const CosmicTime& cosmicTime, int legsSide, int icosm, std::vector<o2::dataformats::CosmicITSCluster>& out, std::vector<ITSPattRequest>& requests,
                const std::unordered_set<int>& matched) const;
   void cacheITSChipCentres();
   void writeDebug(const o2::dataformats::CosmicTrack& cosm, int icosm) const;
@@ -161,6 +161,7 @@ class CosmicsClusterCollectorSpec : public Task
   DetID::mask_t mRoadDets{};                                   ///< detectors searched along the road besides the TPC
   float mRoadTOF = 5.f;                                        ///< road half-width at the TOF [cm]
   float mTOFFlightTol = 2.f;                                   ///< max. deviation of the top/bottom TOF time difference from the flight time [ns]
+  float mTOFTimeErr = 0.1f;                                    ///< error of the TOF time of a cosmic for the later roads [mus] (covers TPC vs TOF offsets)
   float mRoadTRD = 5.f;                                        ///< road half-width at the TRD [cm] (in z plus the pad length)
   float mRoadITS = 1.5f;                                       ///< road half-width in the ITS [cm]
   std::vector<o2::math_utils::Point3D<float>> mITSChipCentres; ///< global positions of the ITS chip centres (aligned geometry)
@@ -190,6 +191,7 @@ void CosmicsClusterCollectorSpec::init(InitContext& ic)
   mMaxCosmicsPerTF = ic.options().get<int>("max-cosmics-per-tf");
   mRoadTOF = ic.options().get<float>("tof-road-width");
   mTOFFlightTol = ic.options().get<float>("tof-flight-tolerance");
+  mTOFTimeErr = ic.options().get<float>("tof-time-error");
   mRoadTRD = ic.options().get<float>("trd-road-width");
   mRoadITS = ic.options().get<float>("its-road-width");
   if (ic.options().get<bool>("debug-tree")) {
@@ -273,7 +275,18 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
     cosmicTime.errTB = cosm.getTimeMUS().getTimeStampError() / mTPCTBinMUS;
     cosmicTime.known = cosm.getTimeMUS().getTimeStampError() < mMaxAbsTimeErr;
     mDbgCosmic = ic;
-    mDbgTauC = cosmicTime.tb;
+    // TOF road first: a top/bottom hit pair matching the muon's flight gives the cosmic's time to ~ns (also for one-side legs on the same
+    // side, whose brackets leave it open by tens of mus); the TPC corridor of the other side and the TRD / ITS roads then use that time
+    if (mRoadDets[DetID::TOF]) {
+      roadTOF(recoData, tpcLegs, cosmicTime, ic, out.clTOF, matchedTOF, out.timeTOFMUS);
+    }
+    CosmicTime roadTime = cosmicTime;
+    if (out.timeTOFMUS >= 0.f) {
+      roadTime.tb = out.timeTOFMUS / mTPCTBinMUS;
+      roadTime.errTB = mTOFTimeErr / mTPCTBinMUS;
+      roadTime.known = true;
+    }
+    mDbgTauC = roadTime.tb;
     std::unordered_set<uint32_t> taken;
     for (int leg = 0; leg < 2; leg++) { // attached clusters of both legs first, so that a road never takes the other leg's clusters
       if (tpcLegs[leg]) {
@@ -285,18 +298,17 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
       if (tpcLegs[leg]) {
         const size_t nAttached = tpcCl[leg]->size();
         mDbgLeg = leg;
-        addTPCCorridor(recoData, *tpcLegs[leg], cosmicTime, *tpcCl[leg], taken);
+        addTPCCorridor(recoData, *tpcLegs[leg], roadTime, *tpcCl[leg], taken);
         mNClCorridor += tpcCl[leg]->size() - nAttached;
       }
     }
-    if (mRoadDets[DetID::TOF]) {
-      roadTOF(recoData, tpcLegs, cosmicTime, ic, out.clTOF, matchedTOF, out.timeTOFMUS);
-    }
     if (mRoadDets[DetID::TRD]) {
-      roadTRD(recoData, tpcLegs, cosmicTime, ic, out.trdTracklets, matchedTRD);
+      roadTRD(recoData, tpcLegs, roadTime, ic, out.trdTracklets, matchedTRD);
     }
     if (mRoadDets[DetID::ITS]) {
-      roadITS(recoData, cosm, cosmicTime, ic, out.clITS, pattRequests, matchedITS);
+      const int side0 = tpcLegs[0] ? (tpcLegs[0]->hasASideClustersOnly() ? 1 : (tpcLegs[0]->hasCSideClustersOnly() ? -1 : 0)) : 0;
+      const int side1 = tpcLegs[1] ? (tpcLegs[1]->hasASideClustersOnly() ? 1 : (tpcLegs[1]->hasCSideClustersOnly() ? -1 : 0)) : 0;
+      roadITS(recoData, cosm, roadTime, side0 == side1 ? side0 : 0, ic, out.clITS, pattRequests, matchedITS);
     }
   }
   if (!pattRequests.empty()) {
@@ -835,7 +847,7 @@ void CosmicsClusterCollectorSpec::roadTRD(const RecoContainer& data, const o2::t
   }
 }
 
-void CosmicsClusterCollectorSpec::roadITS(const RecoContainer& data, const o2::dataformats::TrackCosmics& cosm, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicITSCluster>& out,
+void CosmicsClusterCollectorSpec::roadITS(const RecoContainer& data, const o2::dataformats::TrackCosmics& cosm, const CosmicTime& cosmicTime, int legsSide, int icosm, std::vector<o2::dataformats::CosmicITSCluster>& out,
                                           std::vector<ITSPattRequest>& requests, const std::unordered_set<int>& matched) const
 {
   if (data.getITSPerLayer() || mITSChipCentres.empty()) {
@@ -904,6 +916,8 @@ void CosmicsClusterCollectorSpec::roadITS(const RecoContainer& data, const o2::d
   }
   const auto window = timeWindowMUS(cosmicTime);
   const float zTimeTol = 0.5f * (window.second - window.first) / mTPCTBinMUS * mCorrMap->getVDrift(); // z of the cosmic is in the frame of its time
+  // the refitted cosmic has the z of its TPC time; with legs on one TPC side and a road time from the TOF its z moves by side * vD * dt
+  const float zShift = legsSide * (cosmicTime.tb - cosm.getTimeMUS().getTimeStamp() / mTPCTBinMUS) * mCorrMap->getVDrift();
   const float rofLengthMUS = o2::itsmft::DPLAlpideParam<DetID::ITS>::Instance().roFrameLengthInBC * o2::constants::lhc::LHCBunchSpacingMUS;
   // per half of the cosmic and layer the ITS cluster closest to the trajectory (the road near the beam line also contains collision clusters)
   constexpr int NLayers = 7;
@@ -936,7 +950,7 @@ void CosmicsClusterCollectorSpec::roadITS(const RecoContainer& data, const o2::d
       float dist2 = 0.f;
       float zTraj = 0.f;
       closest(global.X(), global.Y(), dist2, zTraj);
-      const float normZ = (global.Z() - zTraj) / (mRoadITS + zTimeTol);
+      const float normZ = (global.Z() - zTraj - zShift) / (mRoadITS + zTimeTol);
       const float score = std::max(dist2 / (mRoadITS * mRoadITS), normZ * normZ);
       const int half = global.Y() < pcaY ? 0 : 1; // bottom / top half of the cosmic
       const int layer = geom->getLayer(c.getSensorID());
@@ -1158,6 +1172,7 @@ DataProcessorSpec getCosmicsClusterCollectorSpec(GTrackID::mask_t src, bool useM
       {"max-cosmics-per-tf", VariantType::Int, 100, {"collect the clusters of at most this many cosmics per TF"}},
       {"tof-road-width", VariantType::Float, 5.f, {"half-width of the road at the TOF [cm]"}},
       {"tof-flight-tolerance", VariantType::Float, 2.f, {"max. deviation of the top/bottom TOF time difference from the muon's flight time [ns]"}},
+      {"tof-time-error", VariantType::Float, 0.1f, {"error of a cosmic's TOF time for the TPC other-side corridor and the TRD / ITS roads [mus]"}},
       {"trd-road-width", VariantType::Float, 5.f, {"half-width of the road at the TRD [cm] (in z plus the pad length)"}},
       {"its-road-width", VariantType::Float, 1.5f, {"half-width of the road in the ITS [cm]"}},
       {"debug-tree", VariantType::Bool, false, {"write cosmics_collector_debug.root with transformed clusters and road points (test runs)"}}}};
