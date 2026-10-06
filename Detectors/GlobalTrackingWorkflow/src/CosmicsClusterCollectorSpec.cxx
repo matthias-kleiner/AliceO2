@@ -40,6 +40,8 @@
 #include <vector>
 #include <unordered_set>
 #include <algorithm>
+#include <numeric>
+#include <iterator>
 #include <cmath>
 #include "TStopwatch.h"
 #include "Framework/Task.h"
@@ -156,6 +158,7 @@ class CosmicsClusterCollectorSpec : public Task
                const std::unordered_set<int>& matched) const;
   void cacheITSChipCentres();
   void writeDebug(const o2::dataformats::CosmicTrack& cosm, int icosm) const;
+  void flagDuplicates(std::vector<o2::dataformats::CosmicTrack>& cosmics) const;
   void writeDebugTOF(const o2::tof::Cluster& c, int icosm, int leg, uint8_t flags) const;
 
   std::shared_ptr<DataRequest> mDataRequest;
@@ -364,6 +367,7 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
   if (!pattRequests.empty()) {
     fillITSPatterns(recoData, pattRequests, cosmicsOut);
   }
+  flagDuplicates(cosmicsOut);
   if (mDebugOut) {
     for (size_t ic = 0; ic < cosmicsOut.size(); ic++) {
       writeDebug(cosmicsOut[ic], ic);
@@ -1152,6 +1156,51 @@ void CosmicsClusterCollectorSpec::addTRD(const RecoContainer& data, GTrackID gid
   }
 }
 
+void CosmicsClusterCollectorSpec::flagDuplicates(std::vector<o2::dataformats::CosmicTrack>& cosmics) const
+{
+  // the same muon can be matched twice, e.g. when a leg is split into two TPC tracks: the roads then collect largely the same clusters
+  // (PbPb 567939: 10 of 47 cosmic pairs in a TF share 56-99 % of the clusters of the smaller one, all others none). The best one (TOF time,
+  // then more attached clusters) stays, the others point to it.
+  constexpr float MinSharedFraction = 0.3f;
+  const size_t n = cosmics.size();
+  if (n < 2) {
+    return;
+  }
+  std::vector<std::vector<uint64_t>> keys(n); // sorted cluster addresses: sector, row and the packed time and pad of the raw cluster
+  std::vector<int> nAttached(n, 0);
+  for (size_t ic = 0; ic < n; ic++) {
+    for (const auto* legClusters : {&cosmics[ic].clTPCBottom, &cosmics[ic].clTPCTop}) {
+      for (const auto& c : *legClusters) {
+        keys[ic].push_back((uint64_t(c.sector) << 56) | (uint64_t(c.row) << 48) | (uint64_t(c.cl.timeFlagsPacked) << 16) | c.cl.padPacked);
+        nAttached[ic] += c.isAttached();
+      }
+    }
+    std::sort(keys[ic].begin(), keys[ic].end());
+  }
+  std::vector<int> order(n);
+  std::iota(order.begin(), order.end(), 0);
+  std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+    const bool timedA = cosmics[a].timeTOFMUS >= 0.f;
+    const bool timedB = cosmics[b].timeTOFMUS >= 0.f;
+    return timedA != timedB ? timedA : nAttached[a] > nAttached[b];
+  });
+  std::vector<int> kept;
+  for (int ic : order) {
+    for (int ik : kept) {
+      std::vector<uint64_t> shared;
+      std::set_intersection(keys[ic].begin(), keys[ic].end(), keys[ik].begin(), keys[ik].end(), std::back_inserter(shared));
+      const size_t nMin = std::min(keys[ic].size(), keys[ik].size());
+      if (nMin > 0 && shared.size() >= MinSharedFraction * nMin) {
+        cosmics[ic].duplicateOf = ik;
+        break;
+      }
+    }
+    if (cosmics[ic].duplicateOf < 0) {
+      kept.push_back(ic);
+    }
+  }
+}
+
 void CosmicsClusterCollectorSpec::writeDebug(const o2::dataformats::CosmicTrack& cosm, int icosm) const
 {
   constexpr int NSectorsA = TPCGeo::getNumberOfSectorsA();
@@ -1264,7 +1313,7 @@ void CosmicsClusterCollectorSpec::writeDebug(const o2::dataformats::CosmicTrack&
                << "chi2Match=" << cosm.cosmic.getChi2Match() << "chi2Refit=" << cosm.cosmic.getChi2Refit() << "q2pt=" << cosm.cosmic.getQ2Pt()
                << "tgl=" << cosm.cosmic.getTgl() << "side0=" << side[0] << "side1=" << side[1] << "nAtt0=" << nAttached[0] << "nAtt1=" << nAttached[1]
                << "nRoad0=" << nRoad[0] << "nRoad1=" << nRoad[1] << "nITS=" << int(cosm.clITS.size()) << "nTOF=" << int(cosm.clTOF.size())
-               << "nTRD=" << int(cosm.trdTracklets.size()) << "tTOF=" << cosm.timeTOFMUS << "scoreTOF=" << cosm.scoreTOFPair << "scoreTOFRev=" << cosm.scoreTOFReversed
+               << "nTRD=" << int(cosm.trdTracklets.size()) << "tTOF=" << cosm.timeTOFMUS << "scoreTOF=" << cosm.scoreTOFPair << "scoreTOFRev=" << cosm.scoreTOFReversed << "dupOf=" << cosm.duplicateOf
                << "mcEvent=" << (cosm.label.isSet() ? cosm.label.getEventID() : -1) << "mcTrack=" << (cosm.label.isSet() ? cosm.label.getTrackID() : -1)
                << "clLeg=" << clLeg << "clFlags=" << clFlags << "clSector=" << clSector << "clRow=" << clRow << "clPad=" << clPad << "clTime=" << clTime
                << "clQMax=" << clQMax << "clQTot=" << clQTot << "clX=" << clX << "clY=" << clY << "clZ=" << clZ << "clZCos=" << clZCos << "clGx=" << clGx

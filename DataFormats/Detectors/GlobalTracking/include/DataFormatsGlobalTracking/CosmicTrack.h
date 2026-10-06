@@ -102,8 +102,10 @@ struct CosmicTrack {
   float scoreTOFPair = -1.f;                   ///< score of the HitTOFFlight pair: road and flight-time residuals squared in units of the cuts (< 0: none)
   float scoreTOFReversed = -1.f;               ///< same for the best pair in the impossible order (bottom hit first) = an accidental coincidence:
                                                ///< QA of the flag's background; comparable to scoreTOFPair = ambiguous TOF time (< 0: none)
+  int duplicateOf = -1;                        ///< entry (in the TF) of the cosmic this one duplicates: the same muon matched twice (e.g. a leg split
+                                               ///< into two TPC tracks), >= 30 % shared TPC clusters with a better one (TOF time, more attached) (-1: none)
   o2::MCCompLabel label{};                     ///< MC label of the cosmic (MC only)
-  ClassDefNV(CosmicTrack, 3);
+  ClassDefNV(CosmicTrack, 4);
 };
 
 /// per-TF quantities of the TPC transformation used in the reconstruction
