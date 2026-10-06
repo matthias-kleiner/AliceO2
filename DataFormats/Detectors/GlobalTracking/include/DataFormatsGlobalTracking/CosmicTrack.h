@@ -47,8 +47,9 @@ struct CosmicTPCCluster {
 
 /// origin of the ITS / TOF / TRD hits of a cosmic
 enum CosmicHitFlags : uint8_t {
-  HitMatched = 0x1, ///< part of the leg's matched global track
-  HitRoad = 0x2     ///< found by the road search around the cosmic
+  HitMatched = 0x1,  ///< part of the leg's matched global track
+  HitRoad = 0x2,     ///< found by the road search around the cosmic
+  HitTOFFlight = 0x4 ///< TOF road hit of the top/bottom pair whose time difference matches the muon's flight (fixes the cosmic's time)
 };
 
 /// ITS cluster of a leg: the raw compact cluster (chip, anchor pixel, pattern ID) and its ROF; no coordinates (the dictionary and the
@@ -96,8 +97,9 @@ struct CosmicTrack {
   std::vector<uint8_t> itsPatterns;            ///< pattern bytes (row span, column span, bitmap) of the ITS clusters that need them
   std::vector<CosmicTOFCluster> clTOF;         ///< TOF clusters of the legs' matched tracks and on the road
   std::vector<CosmicTRDTracklet> trdTracklets; ///< TRD tracklets of the legs' matched tracks and on the road
+  float timeTOFMUS = -1.f;                     ///< time of the cosmic [mus since the TF start] from its HitTOFFlight pair (< 0: none)
   o2::MCCompLabel label{};                     ///< MC label of the cosmic (MC only)
-  ClassDefNV(CosmicTrack, 1);
+  ClassDefNV(CosmicTrack, 2);
 };
 
 /// per-TF quantities of the TPC transformation used in the reconstruction
