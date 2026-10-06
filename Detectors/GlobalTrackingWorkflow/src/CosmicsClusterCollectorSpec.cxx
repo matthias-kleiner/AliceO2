@@ -87,6 +87,15 @@ using DetID = o2::detectors::DetID;
 namespace o2::globaltracking
 {
 
+namespace
+{
+/// TPC side of a track with clusters on one side only (+1 A, -1 C: its z moves with the time assumed for its clusters), 0 otherwise
+int tpcSide(const o2::tpc::TrackTPC& trk)
+{
+  return trk.hasASideClustersOnly() ? 1 : (trk.hasCSideClustersOnly() ? -1 : 0);
+}
+} // namespace
+
 class CosmicsClusterCollectorSpec : public Task
 {
  public:
@@ -344,9 +353,12 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
       roadTRD(recoData, tpcLegs, roadTime, ic, out.trdTracklets, matchedTRD);
     }
     if (mRoadDets[DetID::ITS]) {
-      const int side0 = tpcLegs[0] ? (tpcLegs[0]->hasASideClustersOnly() ? 1 : (tpcLegs[0]->hasCSideClustersOnly() ? -1 : 0)) : 0;
-      const int side1 = tpcLegs[1] ? (tpcLegs[1]->hasASideClustersOnly() ? 1 : (tpcLegs[1]->hasCSideClustersOnly() ? -1 : 0)) : 0;
-      roadITS(recoData, cosm, roadTime, side0 == side1 ? side0 : 0, ic, out.clITS, pattRequests, matchedITS);
+      // the refitted cosmic's z moves with the time only if both legs are TPC-only on one side (an ITS part fixes it absolutely)
+      int legsSide = 0;
+      if (tpcLegs[0] && tpcLegs[1] && legs[0].getSource() == GTrackID::TPC && legs[1].getSource() == GTrackID::TPC && tpcSide(*tpcLegs[0]) == tpcSide(*tpcLegs[1])) {
+        legsSide = tpcSide(*tpcLegs[0]);
+      }
+      roadITS(recoData, cosm, roadTime, legsSide, ic, out.clITS, pattRequests, matchedITS);
     }
   }
   if (!pattRequests.empty()) {
@@ -490,7 +502,7 @@ void CosmicsClusterCollectorSpec::addTPCCorridor(const RecoContainer& data, cons
   const float vDrift = mCorrMap->getVDrift();
   const auto& clusters = data.getTPCClusters();
   const float time0Leg = trk.getTime0();
-  const int legSide = trk.hasASideClustersOnly() ? 1 : (trk.hasCSideClustersOnly() ? -1 : 0);
+  const int legSide = tpcSide(trk);
 
   struct Frame {
     float vertexTime; ///< vertex time used for the transformation [TB]
@@ -716,9 +728,8 @@ bool CosmicsClusterCollectorSpec::predictOutward(const o2::tpc::TrackTPC& leg, c
   if (!par.rotateParam(o2::math_utils::sector2Angle(sector % TPCGeo::getNumberOfSectorsA())) || !par.propagateParamTo(x, mBz)) {
     return false;
   }
-  const int side = leg.hasASideClustersOnly() ? 1 : (leg.hasCSideClustersOnly() ? -1 : 0);
   y = par.getY();
-  z = par.getZ() + side * (cosmicTime.tb - leg.getTime0()) * mCorrMap->getVDrift();
+  z = par.getZ() + tpcSide(leg) * (cosmicTime.tb - leg.getTime0()) * mCorrMap->getVDrift();
   return true;
 }
 
@@ -735,13 +746,26 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
   const float zTimeTol = 0.5f * (window.second - window.first) / mTPCTBinMUS * mCorrMap->getVDrift(); // z uncertainty of one-side legs
   const float vDriftPerMUS = mCorrMap->getVDrift() / mTPCTBinMUS;
   const float cosmicTimeMUS = cosmicTime.tb * mTPCTBinMUS;
+  int legSide[2] = {0, 0};
+  float curvature = 0.f; // |1/R| of the muon [1/cm] for the flight path between the TOF hits
+  int nLegs = 0;
+  for (int leg = 0; leg < 2; leg++) {
+    if (legs[leg]) {
+      legSide[leg] = tpcSide(*legs[leg]);
+      curvature += std::abs(legs[leg]->getCurvature(mBz));
+      nLegs++;
+    }
+  }
+  curvature = nLegs ? curvature / nLegs : 0.f;
   struct Candidate {
     int index;
+    bool matched;  // hit of the leg's matched global track (already stored)
     double timeNS; // since the start of the TF
     float dy;
     float dzAtCosmicTime;
-    int side; // TPC side of a one-side leg (z moves with the time), 0: z absolute
-    float gx, gy, gz;
+    float gx;
+    float gy;
+    float gz;
   };
   std::vector<Candidate> candidates[2];
   const auto clusters = data.getTOFClusters();
@@ -750,9 +774,13 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
   for (int i = 0; i < (int)clusters.size(); i++) {
     const auto& c = clusters[i];
     const float timeMUS = c.getTime() * 1e-6f; // [ps] since the start of the TF
-    if (timeMUS < window.first - MaxFlightMUS || timeMUS > window.second + MaxFlightMUS || matched.count(i)) {
+    if (timeMUS < window.first - MaxFlightMUS || timeMUS > window.second + MaxFlightMUS) {
       continue;
     }
+    const bool isMatched = matched.count(i) > 0;
+    const float alpha = o2::math_utils::sector2Angle(c.getSector());
+    const float sinAlpha = std::sin(alpha);
+    const float cosAlpha = std::cos(alpha);
     for (int leg = 0; leg < 2; leg++) {
       float y = 0.f;
       float z = 0.f;
@@ -765,26 +793,30 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
       if (score >= 1.f) {
         continue;
       }
-      if (score < bestScore[leg]) {
+      if (!isMatched && score < bestScore[leg]) {
         bestScore[leg] = score;
         best[leg] = i;
       }
-      const float alpha = o2::math_utils::sector2Angle(c.getSector());
-      const int side = legs[leg]->hasASideClustersOnly() ? 1 : (legs[leg]->hasCSideClustersOnly() ? -1 : 0);
-      candidates[leg].push_back(Candidate{i, c.getTime() * 1e-3, c.getY() - y, c.getZ() - z, side, c.getX() * std::cos(alpha) - c.getY() * std::sin(alpha),
-                                          c.getX() * std::sin(alpha) + c.getY() * std::cos(alpha), c.getZ()});
+      candidates[leg].push_back(Candidate{i, isMatched, c.getTime() * 1e-3, c.getY() - y, c.getZ() - z, c.getX() * cosAlpha - c.getY() * sinAlpha,
+                                          c.getX() * sinAlpha + c.getY() * cosAlpha, c.getZ()});
     }
   }
   float bestPairScore = -1.f;
   float bestReversedScore = -1.f;
+  int bestPair[2] = {-1, -1};
   for (const auto& c0 : candidates[0]) {
     for (const auto& c1 : candidates[1]) {
       if (c0.index == c1.index) {
         continue;
       }
+      // top / bottom by the hits' height: a muon goes down (for near-horizontal cosmics both orders are possible, but rare)
       const auto& top = c0.gy > c1.gy ? c0 : c1;
       const auto& bottom = c0.gy > c1.gy ? c1 : c0;
-      const float length = std::sqrt((top.gx - bottom.gx) * (top.gx - bottom.gx) + (top.gy - bottom.gy) * (top.gy - bottom.gy) + (top.gz - bottom.gz) * (top.gz - bottom.gz));
+      // flight path along the helix: arc in the transverse plane from the chord, then the dip
+      const float chordXY = std::hypot(top.gx - bottom.gx, top.gy - bottom.gy);
+      const float halfAngleSin = 0.5f * curvature * chordXY;
+      const float arcXY = halfAngleSin > 1e-4f && halfAngleSin < 1.f ? 2.f * std::asin(halfAngleSin) / curvature : chordXY;
+      const float length = std::hypot(arcXY, top.gz - bottom.gz);
       const float timeDiff = float(top.timeNS - bottom.timeNS);
       const float flightDev = timeDiff + length / CmPerNS;       // the muon crosses the top TOF first
       const float reversedDev = timeDiff - length / CmPerNS;     // bottom hit first: impossible for a muon, only accidental pairs
@@ -794,8 +826,8 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
       }
       const double pairTimeNS = 0.5 * (c0.timeNS + c1.timeNS);
       const float shiftMUS = float(pairTimeNS * 1e-3) - cosmicTimeMUS;
-      const float dz0 = c0.dzAtCosmicTime - c0.side * shiftMUS * vDriftPerMUS;
-      const float dz1 = c1.dzAtCosmicTime - c1.side * shiftMUS * vDriftPerMUS;
+      const float dz0 = c0.dzAtCosmicTime - legSide[0] * shiftMUS * vDriftPerMUS;
+      const float dz1 = c1.dzAtCosmicTime - legSide[1] * shiftMUS * vDriftPerMUS;
       if (std::abs(dz0) > mRoadTOF || std::abs(dz1) > mRoadTOF) {
         continue;
       }
@@ -809,20 +841,41 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
       }
       if (bestPairScore < 0.f || score < bestPairScore) {
         bestPairScore = score;
-        best[0] = c0.index;
-        best[1] = c1.index;
+        bestPair[0] = c0.index;
+        bestPair[1] = c1.index;
         timeTOFMUS = float(pairTimeNS * 1e-3);
       }
     }
   }
   scoreTOFPair = bestPairScore;
   scoreTOFReversed = bestReversedScore;
-  const uint8_t flags = bestPairScore < 0.f ? o2::dataformats::HitRoad : (o2::dataformats::HitRoad | o2::dataformats::HitTOFFlight);
+  uint8_t flags = o2::dataformats::HitRoad;
+  if (bestPairScore >= 0.f) {
+    best[0] = bestPair[0];
+    best[1] = bestPair[1];
+    flags |= o2::dataformats::HitTOFFlight;
+  }
   for (int leg = 0; leg < 2; leg++) {
     if (best[leg] < 0) {
       continue;
     }
     const auto& c = clusters[best[leg]];
+    if (matched.count(best[leg])) { // the leg's matched hit, already stored: flag it as part of the flight pair
+      for (auto& cl : out) {
+        if (cl.leg == leg && cl.channel == c.getMainContributingChannel() && cl.timeRaw == c.getTimeRaw()) {
+          cl.flags |= o2::dataformats::HitTOFFlight;
+        }
+      }
+      if (mDebugOut) {
+        auto& dbg = mDbgCosmics[icosm];
+        for (size_t j = 0; j < dbg.tofFlags.size(); j++) {
+          if (dbg.tofLeg[j] == leg && dbg.tofChannel[j] == c.getMainContributingChannel() && dbg.tofTimeRaw[j] == c.getTimeRaw()) {
+            dbg.tofFlags[j] |= o2::dataformats::HitTOFFlight;
+          }
+        }
+      }
+      continue;
+    }
     auto& cl = out.emplace_back();
     cl.timeRaw = c.getTimeRaw();
     cl.tot = c.getTot();
@@ -1102,7 +1155,8 @@ void CosmicsClusterCollectorSpec::addTRD(const RecoContainer& data, GTrackID gid
 void CosmicsClusterCollectorSpec::writeDebug(const o2::dataformats::CosmicTrack& cosm, int icosm) const
 {
   constexpr int NSectorsA = TPCGeo::getNumberOfSectorsA();
-  const float timeCosmic = cosm.cosmic.getTimeMUS().getTimeStamp() / mTPCTBinMUS;
+  // the time the other-side corridor used (and the common frame zCos): the TOF time if the TOF road found one, else the TPC time
+  const float timeCosmic = (cosm.timeTOFMUS >= 0.f ? cosm.timeTOFMUS : cosm.cosmic.getTimeMUS().getTimeStamp()) / mTPCTBinMUS;
   const bool absTimeKnown = cosm.cosmic.getTimeMUS().getTimeStampError() < mMaxAbsTimeErr;
   int nAttached[2] = {0, 0};
   int nRoad[2] = {0, 0};
@@ -1127,7 +1181,7 @@ void CosmicsClusterCollectorSpec::writeDebug(const o2::dataformats::CosmicTrack&
     if (legs[leg]->getNClusters() == 0) { // no TPC part
       continue;
     }
-    side[leg] = legs[leg]->hasASideClustersOnly() ? 1 : (legs[leg]->hasCSideClustersOnly() ? -1 : 0);
+    side[leg] = tpcSide(*legs[leg]);
     for (const auto& c : *legClusters[leg]) {
       // transform with the vertex time used by the road: the leg's time0, or the cosmic's time for clusters found on the other side
       const float vertexTime = c.isAbsTime() ? timeCosmic : legs[leg]->getTime0();

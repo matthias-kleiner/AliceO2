@@ -321,15 +321,10 @@ void MatchCosmics::refitWinners(const o2::globaltracking::RecoContainer& data)
       LOG(debug) << "Top/Bottom update failed";
       continue;
     }
-    // TPC-only legs on opposite sides: their z continuity defines the time, so z does not reject random pairs of collision tracks;
-    // require the pT of a cosmic for both legs and for the refitted cosmic
-    if (mSeeds[rec.id0].tpcSide * mSeeds[rec.id1].tpcSide < 0) {
-      const float q2PtLeg0 = data.getTrackParam(mSeeds[rec.id0].origID).getQ2Pt();
-      const float q2PtLeg1 = data.getTrackParam(mSeeds[rec.id1].origID).getQ2Pt();
-      if (std::max({std::abs(q2PtLeg0), std::abs(q2PtLeg1), std::abs(trCosmBtm.getQ2Pt())}) > mQ2PtCutoffOppositeSides) {
-        LOG(debug) << "Legs on opposite TPC sides below minPtOppositeSides";
-        continue;
-      }
+    // TPC-only legs on opposite sides: the legs' pT is required in checkPair, the refitted cosmic's here
+    if (mSeeds[rec.id0].tpcSide * mSeeds[rec.id1].tpcSide < 0 && std::abs(trCosmBtm.getQ2Pt()) > mQ2PtCutoffOppositeSides) {
+      LOG(debug) << "Cosmic with legs on opposite TPC sides below minPtOppositeSides";
+      continue;
     }
     // create final track
     mCosmicTracks.emplace_back(mSeeds[poolEntryID[btm]].origID, mSeeds[poolEntryID[top]].origID, trCosmBtm, trCosmTop, chi2, chi2Match, nclTot, t0, dt);
@@ -453,6 +448,12 @@ MatchCosmics::RejFlag MatchCosmics::checkPair(int i, int j)
   // check
   // 1) crude check on tgl and q/pt (if B!=0). Note: back-to-back tracks will have mutually params (see TrackPar::invertParam)
   while (1) {
+    // TPC-only legs on opposite sides: their z continuity defines the time, so z does not reject random pairs of collision tracks; require
+    // the pT of a cosmic for both legs already here, so that such a pair cannot win against the true partner of one of its legs
+    if (seed0.tpcSide * seed1.tpcSide < 0 && std::max(std::abs(seed0.getQ2Pt()), std::abs(seed1.getQ2Pt())) > mQ2PtCutoffOppositeSides) {
+      rej = RejQ2Pt;
+      break;
+    }
     auto dTgl = seed0.getTgl() + seed1.getTgl();
     if (dTgl * dTgl > (mMatchParams->systSigma2[o2::track::kTgl] + seed0.getSigmaTgl2() + seed1.getSigmaTgl2()) * mMatchParams->crudeNSigma2Cut[o2::track::kTgl]) {
       rej = RejTgl;

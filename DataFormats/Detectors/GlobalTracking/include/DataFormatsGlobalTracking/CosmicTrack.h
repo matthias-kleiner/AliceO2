@@ -32,7 +32,8 @@ struct CosmicTPCCluster {
     Attached = 0x1, ///< attached to the TPC track of this leg
     Corridor = 0x2, ///< found in the road around the leg
     Used = 0x4,     ///< attached to some TPC track (for corridor clusters: another track, e.g. a split piece of the leg)
-    AbsTime = 0x8   ///< found on the other TPC side, with the absolute time of the cosmic instead of the time0 of the leg
+    AbsTime = 0x8   ///< found on the other TPC side with the absolute time of the cosmic instead of the time0 of the leg: CosmicTrack::timeTOFMUS
+                    ///< if >= 0, else the time of CosmicTrack::cosmic
   };
   o2::tpc::ClusterNative cl{}; ///< raw cluster: time, pad, widths, charges, flags
   uint8_t sector = 0;
