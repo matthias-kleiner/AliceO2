@@ -31,6 +31,7 @@ struct MatchCosmicsParams : public o2::conf::ConfigurableParamHelper<MatchCosmic
   float crudeNSigma2Cut[o2::track::kNParams] = {49.f, 49.f, 49.f, 49.f, 49.f};
   float crudeChi2Cut = 999.f;
   float maxChi2Match = -1.f; // reject cosmics whose top/bottom refitted legs disagree by more than this chi2 (< 0: no cut)
+  float minPtOppositeSides = 0.f; // TPC-only legs on opposite TPC sides: reject cosmics with the pT of either leg or of the refitted cosmic below this (scaled with field; 0: no cut)
   float timeToleranceMUS = 0.f;
   float maxStep = 10.f;
   float maxSnp = 0.99f;
@@ -53,7 +54,8 @@ struct MatchCosmicsParams : public o2::conf::ConfigurableParamHelper<MatchCosmic
 
 /// key=value string (configKeyValues syntax) of a named set of MatchCosmicsParams settings; the cosmics-match workflow applies it before
 /// --configKeyValues, so single keys can still be overridden. Unknown names are fatal.
-/// "physics-v1": cosmics in collision data (seed cuts against collision tracks, realistic systematic errors for the pair chi2, tgl window)
+/// "physics-v1": cosmics in collision data (seed cuts against collision tracks, realistic systematic errors for the pair chi2, tgl window,
+/// pT cut on pairs of TPC-only legs on opposite TPC sides)
 std::string getMatchCosmicsPreset(const std::string& name);
 
 } // namespace globaltracking

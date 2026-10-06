@@ -321,6 +321,16 @@ void MatchCosmics::refitWinners(const o2::globaltracking::RecoContainer& data)
       LOG(debug) << "Top/Bottom update failed";
       continue;
     }
+    // TPC-only legs on opposite sides: their z continuity defines the time, so z does not reject random pairs of collision tracks;
+    // require the pT of a cosmic for both legs and for the refitted cosmic
+    if (mSeeds[rec.id0].tpcSide * mSeeds[rec.id1].tpcSide < 0) {
+      const float q2PtLeg0 = data.getTrackParam(mSeeds[rec.id0].origID).getQ2Pt();
+      const float q2PtLeg1 = data.getTrackParam(mSeeds[rec.id1].origID).getQ2Pt();
+      if (std::max({std::abs(q2PtLeg0), std::abs(q2PtLeg1), std::abs(trCosmBtm.getQ2Pt())}) > mQ2PtCutoffOppositeSides) {
+        LOG(debug) << "Legs on opposite TPC sides below minPtOppositeSides";
+        continue;
+      }
+    }
     // create final track
     mCosmicTracks.emplace_back(mSeeds[poolEntryID[btm]].origID, mSeeds[poolEntryID[top]].origID, trCosmBtm, trCosmTop, chi2, chi2Match, nclTot, t0, dt);
     if (mUseMC) {
@@ -683,10 +693,13 @@ void MatchCosmics::updateTimeDependentParams()
   mBz = o2::base::Propagator::Instance()->getNominalBz();
   mFieldON = std::abs(mBz) > 0.01;
   mQ2PtCutoff = 1.f / std::max(0.05f, mMatchParams->minSeedPt);
+  mQ2PtCutoffOppositeSides = mMatchParams->minPtOppositeSides > 0.f ? 1.f / mMatchParams->minPtOppositeSides : 1e9;
   if (mFieldON) {
     mQ2PtCutoff *= 5.00668 / std::abs(mBz);
+    mQ2PtCutoffOppositeSides *= 5.00668 / std::abs(mBz);
   } else {
     mQ2PtCutoff = 1e9;
+    mQ2PtCutoffOppositeSides = 1e9;
   }
 }
 

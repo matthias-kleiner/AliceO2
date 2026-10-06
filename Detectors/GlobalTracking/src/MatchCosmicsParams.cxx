@@ -27,12 +27,14 @@ std::string o2::globaltracking::getMatchCosmicsPreset(const std::string& name)
   // - realistic systematic errors for the leg comparison (true pairs had y / snp / q/pt pulls 2-4x too wide), so that the crude pair
   //   chi2 cut is meaningful; per-parameter windows open except tgl (3 sigma: the main discriminant against random pairs)
   // - loose cut on the chi2 of the refitted legs; z test of TPC-only legs at a common time and same-half veto switched on
+  // - TPC-only legs on opposite sides (time from z continuity, ~94 % of the PbPb candidates were random pairs): both legs and the
+  //   refitted cosmic above 2 GeV (offline: PbPb candidates / 10.5, cosmic MC efficiency 81.8 -> 80.6 %)
   static const std::map<std::string, std::string> presets{
     {"physics-v1",
      "cosmicsMatch.minSeedPt=1;cosmicsMatch.minSeedDCAxy=3;cosmicsMatch.minSeedDCAxyNSigma=10;cosmicsMatch.minSeedNClTPC=30;"
      "cosmicsMatch.crudeChi2Cut=50;cosmicsMatch.systSigma2[0]=0.25;cosmicsMatch.systSigma2[2]=4e-4;cosmicsMatch.systSigma2[4]=2.5e-3;"
      "cosmicsMatch.crudeNSigma2Cut[0]=144;cosmicsMatch.crudeNSigma2Cut[2]=144;cosmicsMatch.crudeNSigma2Cut[3]=9;cosmicsMatch.crudeNSigma2Cut[4]=144;"
-     "cosmicsMatch.maxChi2Match=1000;cosmicsMatch.constrainTPCOnlyZ=true;cosmicsMatch.vetoSameHalf=true"}};
+     "cosmicsMatch.maxChi2Match=1000;cosmicsMatch.constrainTPCOnlyZ=true;cosmicsMatch.vetoSameHalf=true;cosmicsMatch.minPtOppositeSides=2"}};
   auto it = presets.find(name);
   if (it == presets.end()) {
     std::string known;
