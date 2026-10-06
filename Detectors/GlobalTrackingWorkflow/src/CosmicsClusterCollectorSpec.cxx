@@ -141,7 +141,7 @@ class CosmicsClusterCollectorSpec : public Task
   void addTRD(const RecoContainer& data, GTrackID gid, uint8_t leg, std::vector<o2::dataformats::CosmicTRDTracklet>& out, std::unordered_set<int>& matched) const;
   std::pair<float, float> timeWindowMUS(const CosmicTime& cosmicTime) const;
   bool predictOutward(const o2::tpc::TrackTPC& leg, const CosmicTime& cosmicTime, int sector, float x, float& y, float& z) const;
-  void roadTOF(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTOFCluster>& out, const std::unordered_set<int>& matched, float& timeTOFMUS) const;
+  void roadTOF(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTOFCluster>& out, const std::unordered_set<int>& matched, float& timeTOFMUS, float& scoreTOFPair, float& scoreTOFReversed) const;
   void roadTRD(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTRDTracklet>& out, const std::unordered_set<int>& matched) const;
   void roadITS(const RecoContainer& data, const o2::dataformats::TrackCosmics& cosm, const CosmicTime& cosmicTime, int legsSide, int icosm, std::vector<o2::dataformats::CosmicITSCluster>& out, std::vector<ITSPattRequest>& requests,
                const std::unordered_set<int>& matched) const;
@@ -278,7 +278,7 @@ void CosmicsClusterCollectorSpec::run(ProcessingContext& pc)
     // TOF road first: a top/bottom hit pair matching the muon's flight gives the cosmic's time to ~ns (also for one-side legs on the same
     // side, whose brackets leave it open by tens of mus); the TPC corridor of the other side and the TRD / ITS roads then use that time
     if (mRoadDets[DetID::TOF]) {
-      roadTOF(recoData, tpcLegs, cosmicTime, ic, out.clTOF, matchedTOF, out.timeTOFMUS);
+      roadTOF(recoData, tpcLegs, cosmicTime, ic, out.clTOF, matchedTOF, out.timeTOFMUS, out.scoreTOFPair, out.scoreTOFReversed);
     }
     CosmicTime roadTime = cosmicTime;
     if (out.timeTOFMUS >= 0.f) {
@@ -676,12 +676,13 @@ bool CosmicsClusterCollectorSpec::predictOutward(const o2::tpc::TrackTPC& leg, c
   return true;
 }
 
-void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTOFCluster>& out, const std::unordered_set<int>& matched, float& timeTOFMUS) const
+void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::tpc::TrackTPC* const* legs, const CosmicTime& cosmicTime, int icosm, std::vector<o2::dataformats::CosmicTOFCluster>& out, const std::unordered_set<int>& matched, float& timeTOFMUS, float& scoreTOFPair, float& scoreTOFReversed) const
 {
   // TOF clusters along the legs' outward continuations (the road in PbPb also contains hits of collision tracks). Preferred: the top/bottom
   // pair whose time difference matches the muon's flight between them; its mean time fixes the cosmic's time, also when the legs' brackets
   // leave it open by tens of mus (one-side legs on the same side), and the z of one-side legs is shifted to it. Otherwise per leg the
-  // cluster closest to its continuation.
+  // cluster closest to its continuation. The same search in the impossible order (bottom hit first) only finds accidental pairs: its best
+  // score is kept as QA of the flag's background.
   constexpr float MaxFlightMUS = 0.1f; // flight time of the muon between the TPC and the TOF, slow tails
   constexpr float CmPerNS = 29.9792458f;
   const auto window = timeWindowMUS(cosmicTime);
@@ -729,6 +730,7 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
     }
   }
   float bestPairScore = -1.f;
+  float bestReversedScore = -1.f;
   for (const auto& c0 : candidates[0]) {
     for (const auto& c1 : candidates[1]) {
       if (c0.index == c1.index) {
@@ -737,8 +739,11 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
       const auto& top = c0.gy > c1.gy ? c0 : c1;
       const auto& bottom = c0.gy > c1.gy ? c1 : c0;
       const float length = std::sqrt((top.gx - bottom.gx) * (top.gx - bottom.gx) + (top.gy - bottom.gy) * (top.gy - bottom.gy) + (top.gz - bottom.gz) * (top.gz - bottom.gz));
-      const float flightDev = float(top.timeNS - bottom.timeNS) + length / CmPerNS; // the muon crosses the top TOF first
-      if (std::abs(flightDev) > mTOFFlightTol) {
+      const float timeDiff = float(top.timeNS - bottom.timeNS);
+      const float flightDev = timeDiff + length / CmPerNS;     // the muon crosses the top TOF first
+      const float reversedDev = timeDiff - length / CmPerNS;   // bottom hit first: impossible for a muon, only accidental pairs
+      const bool reversed = std::abs(flightDev) > mTOFFlightTol; // the two cannot both pass (L/c ~ 25 ns >> tolerance)
+      if (reversed && std::abs(reversedDev) > mTOFFlightTol) {
         continue;
       }
       const double pairTimeNS = 0.5 * (c0.timeNS + c1.timeNS);
@@ -748,7 +753,14 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
       if (std::abs(dz0) > mRoadTOF || std::abs(dz1) > mRoadTOF) {
         continue;
       }
-      const float score = (c0.dy * c0.dy + c1.dy * c1.dy + dz0 * dz0 + dz1 * dz1) / (mRoadTOF * mRoadTOF) + flightDev * flightDev / (mTOFFlightTol * mTOFFlightTol);
+      const float timeDev = reversed ? reversedDev : flightDev;
+      const float score = (c0.dy * c0.dy + c1.dy * c1.dy + dz0 * dz0 + dz1 * dz1) / (mRoadTOF * mRoadTOF) + timeDev * timeDev / (mTOFFlightTol * mTOFFlightTol);
+      if (reversed) {
+        if (bestReversedScore < 0.f || score < bestReversedScore) {
+          bestReversedScore = score;
+        }
+        continue;
+      }
       if (bestPairScore < 0.f || score < bestPairScore) {
         bestPairScore = score;
         best[0] = c0.index;
@@ -757,6 +769,8 @@ void CosmicsClusterCollectorSpec::roadTOF(const RecoContainer& data, const o2::t
       }
     }
   }
+  scoreTOFPair = bestPairScore;
+  scoreTOFReversed = bestReversedScore;
   const uint8_t flags = bestPairScore < 0.f ? o2::dataformats::HitRoad : (o2::dataformats::HitRoad | o2::dataformats::HitTOFFlight);
   for (int leg = 0; leg < 2; leg++) {
     if (best[leg] < 0) {
@@ -1096,7 +1110,7 @@ void CosmicsClusterCollectorSpec::writeDebug(const o2::dataformats::CosmicTrack&
                << "chi2Match=" << cosm.cosmic.getChi2Match() << "chi2Refit=" << cosm.cosmic.getChi2Refit() << "q2pt=" << cosm.cosmic.getQ2Pt()
                << "tgl=" << cosm.cosmic.getTgl() << "side0=" << side[0] << "side1=" << side[1] << "nAtt0=" << nAttached[0] << "nAtt1=" << nAttached[1]
                << "nRoad0=" << nRoad[0] << "nRoad1=" << nRoad[1] << "nITS=" << int(cosm.clITS.size()) << "nTOF=" << int(cosm.clTOF.size())
-               << "nTRD=" << int(cosm.trdTracklets.size()) << "tTOF=" << cosm.timeTOFMUS << "mcEvent=" << (cosm.label.isSet() ? cosm.label.getEventID() : -1)
+               << "nTRD=" << int(cosm.trdTracklets.size())  << "tTOF=" << cosm.timeTOFMUS << "scoreTOF=" << cosm.scoreTOFPair << "scoreTOFRev=" << cosm.scoreTOFReversed << "mcEvent=" << (cosm.label.isSet() ? cosm.label.getEventID() : -1)
                << "mcTrack=" << (cosm.label.isSet() ? cosm.label.getTrackID() : -1) << "\n";
 }
 

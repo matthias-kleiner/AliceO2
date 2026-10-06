@@ -98,8 +98,11 @@ struct CosmicTrack {
   std::vector<CosmicTOFCluster> clTOF;         ///< TOF clusters of the legs' matched tracks and on the road
   std::vector<CosmicTRDTracklet> trdTracklets; ///< TRD tracklets of the legs' matched tracks and on the road
   float timeTOFMUS = -1.f;                     ///< time of the cosmic [mus since the TF start] from its HitTOFFlight pair (< 0: none)
+  float scoreTOFPair = -1.f;                   ///< score of the HitTOFFlight pair: road and flight-time residuals squared in units of the cuts (< 0: none)
+  float scoreTOFReversed = -1.f;               ///< same for the best pair in the impossible order (bottom hit first) = an accidental coincidence:
+                                               ///< QA of the flag's background; comparable to scoreTOFPair = ambiguous TOF time (< 0: none)
   o2::MCCompLabel label{};                     ///< MC label of the cosmic (MC only)
-  ClassDefNV(CosmicTrack, 2);
+  ClassDefNV(CosmicTrack, 3);
 };
 
 /// per-TF quantities of the TPC transformation used in the reconstruction
