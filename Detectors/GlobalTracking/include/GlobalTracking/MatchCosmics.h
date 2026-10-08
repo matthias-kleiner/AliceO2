@@ -83,8 +83,8 @@ class MatchCosmics
     float chi2 = -1.f;   ///< matching chi2
     int next = MinusOne; ///< index of eventual next record
     float tCommon = 0.f; ///< common time [mus] fixed by z continuity of TPC-only legs on opposite TPC sides
-    float tCommonErr = -1.f; ///< its 1 sigma error [mus]; < 0: not fixed, the refit uses the centre of the time-bracket overlap and the cosmic's time error is the overlap's half-width
-    float tofScore = -1.f;   ///< score of the top / bottom TOF hit pair matching the muon's flight (tofFlightSelection; < 0: none); a pair with one wins against pairs without
+    float tCommonErr = -1.f;      ///< its 1 sigma error [mus]; < 0: not fixed, the refit uses the centre of the time-bracket overlap and the cosmic's time error is the overlap's half-width
+    float tofScore = -1.f;        ///< score of the top / bottom TOF hit pair matching the muon's flight (tofFlightSelection; < 0: none); a pair with one wins against pairs without
     float tCommonNoTOF = 0.f;     ///< tCommon before a TOF flight pair replaced it: the refit falls back to it if the refit at the TOF time fails
     float tCommonErrNoTOF = -1.f; ///< tCommonErr before a TOF flight pair replaced it
   };
