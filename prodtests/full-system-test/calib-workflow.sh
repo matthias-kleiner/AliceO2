@@ -79,7 +79,7 @@ if [[ $CALIB_ASYNC_EXTRACTTIMESERIES == 1 ]] ; then
   CONFIG_TPCTIMESERIES+=" --mult-max ${TPCTIMESERIES_MULT_MAX}"
   add_W o2-tpc-time-series-workflow "$DISABLE_ROOT_INPUT ${CONFIG_TPCTIMESERIES}"
 fi
-if [[ $CALIB_ASYNC_EXTRACTCOSMICS == 1 ]] ; then
+if [[ ${CALIB_ASYNC_EXTRACTCOSMICS:-0} == 1 ]] ; then
   # cosmic muons in collision data: TPC-only legs matched with the preset's selection, raw clusters of each cosmic -> o2_cosmics_full.root
   : ${COSMICS_PRESET:=physics-v1}
   COSMICS_ROAD_DETECTORS=
