@@ -30,7 +30,7 @@ namespace tpc
 class TPCUnbinnedResidualReader : public o2::framework::Task
 {
  public:
-  TPCUnbinnedResidualReader(bool trkInput, bool mcInput) : mTrackInput(trkInput), mMCInput(mcInput){};
+  TPCUnbinnedResidualReader(bool trkInput, bool mcInput) : mTrackInput(trkInput), mMCInput(mcInput) {};
   ~TPCUnbinnedResidualReader() override = default;
   void init(o2::framework::InitContext& ic) final;
   void run(o2::framework::ProcessingContext& pc) final;
