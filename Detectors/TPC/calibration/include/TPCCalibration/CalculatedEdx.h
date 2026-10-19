@@ -163,6 +163,15 @@ class CalculatedEdx
   /// \param debug use debug streamer and set debug vectors
   void setDebug(const bool debug) { mDebug = debug; }
 
+  /// \param keep keep the corrected cluster charges (incl. subthreshold fills) of the last calculatedEdx()/calculatedEdxMultipleSettings() call, e.g. to combine several tracks in one truncated mean
+  void setKeepClusterCharges(const bool keep) { mKeepClusterCharges = keep; }
+
+  /// \return corrected qTot of the accepted clusters of the last call, per settings entry; [0-3] per region (IROC, OROC1-3), [4] all, before truncation (filled if setKeepClusterCharges(true))
+  const std::vector<std::array<std::vector<float>, 5>>& getClusterChargesTot() const { return mClusterChargesTot; }
+
+  /// \return same as getClusterChargesTot() for qMax
+  const std::vector<std::array<std::vector<float>, 5>>& getClusterChargesMax() const { return mClusterChargesMax; }
+
   /// \param field magnetic field in kG, used for track propagation
   void setFieldNominalGPUBz(const float field) { mFieldNominalGPUBz = field; }
 
@@ -269,6 +278,7 @@ class CalculatedEdx
   void calculatedEdxMultipleSettings(TrackTPC& track, std::vector<dEdxInfo>& outputs, AverageOccupancy& averageOcc, const std::vector<dEdxSettings>& settingsList, const MCCompLabel* mcLabel = nullptr);
 
   /// same as calculatedEdx() above, but takes the track's clusters and per-cluster info directly instead of extracting them from the track via mTPCTrackClIdxVecInput/mClusterIndex
+  /// the refit (setRefit()) works on the track's cluster references, not on the supplied clusters: with setRefit() the track is propagated from its own parameters instead
   /// \param clusters clusters of the track, one entry per entry in clusterInfos
   /// \param clusterInfos per-cluster (sectorIndex, rowIndex, isShared), one entry per entry in clusters
   void calculatedEdx(TrackTPC& track, const std::vector<o2::tpc::ClusterNative>& clusters, const ClInfoVec& clusterInfos, dEdxInfo& output, AverageOccupancy& averageOcc, float low = 0.015f, float high = 0.6f, CorrectionFlags correctionMask = CorrectionFlags::TopologyPol | CorrectionFlags::dEdxResidual, ClusterFlags clusterMask = ClusterFlags::None, int subthresholdMethod = 0, int stackBoundaryMethod = 0, const char* debugRootFile = "dEdxDebug.root", float maxSubthresholdChargeTot = 100000.f, float maxSubthresholdChargeMax = 100000.f, int sameRowClusterMethod = 2);
@@ -477,6 +487,11 @@ class CalculatedEdx
   bool mPropagateTrack{false};                                                                  ///< propagating the track instead of performing a refit (faster than refit)
   bool mPropagateParams{false};                                                                 ///< propagating the parameters instead of full propagation (faster than track propagation)
   bool mDebug{false};                                                                           ///< use the debug streamer
+  bool mKeepClusterCharges{false};                                                              ///< keep the corrected cluster charges of the last call in mClusterChargesTot/Max
+  bool mWarnedNoTrackUpdate{false};                                                             ///< the warning that no refit/propagation mode is set was given
+  bool mWarnedRefitExternalClusters{false};                                                     ///< the warning that the refit is not used for externally supplied clusters was given
+  std::vector<std::array<std::vector<float>, 5>> mClusterChargesTot;                            ///< corrected qTot of the last call per settings entry (setKeepClusterCharges())
+  std::vector<std::array<std::vector<float>, 5>> mClusterChargesMax;                            ///< corrected qMax of the last call per settings entry (setKeepClusterCharges())
   CalibdEdxContainer mCalibCont;                                                                ///< calibration container
   std::unordered_map<std::string, std::unique_ptr<o2::utils::TreeStreamRedirector>> mStreamers; ///< debug streamers, keyed by output file name so each debugRootFile gets its own tree
   long mDebugTrackIndex{-1};                                                                    ///< running index of the track being processed, written to the debug trees so per-cluster rows can be grouped back into tracks

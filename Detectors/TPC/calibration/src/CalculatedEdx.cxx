@@ -447,6 +447,9 @@ void CalculatedEdx::gatherRowClusterDataForRow(o2::tpc::TrackTPC& track, const s
     if (!check) {
       static_cast<o2::track::TrackParCov&>(track) = trackBackup;
     }
+  } else if (!mWarnedNoTrackUpdate) {
+    LOGP(warning, "CalculatedEdx: neither setRefit(), setPropagateTrack() nor setPropagateParams() set, every row uses the input track parameters");
+    mWarnedNoTrackUpdate = true;
   }
 
   row.propagationFailed = (!check || std::isnan(track.getParam(1)));
@@ -501,7 +504,12 @@ void CalculatedEdx::gatherRowClusterData(o2::tpc::TrackTPC& track, const std::ve
 {
   rowData.clear();
 
-  const bool refitFailed = refitTrack(track);
+  // the refit reads the clusters via the track's cluster references in mClusterIndex, not the supplied ones: no refit, the rows are propagated from the track's own parameters
+  if (mRefit && !mWarnedRefitExternalClusters) {
+    LOGP(warning, "CalculatedEdx: no refit for externally supplied clusters, the track is propagated from its own parameters");
+    mWarnedRefitExternalClusters = true;
+  }
+  const bool refitFailed = false;
 
   // handle same (sector, row) clusters
   std::vector<std::pair<unsigned char, unsigned char>> rowOrder;
@@ -882,6 +890,14 @@ void CalculatedEdx::calculatedEdxFromRowData(const std::vector<RowClusterData>& 
   // copy corrected cluster charges
   auto chargeTotVector = mDebug ? chargeTotROC[4] : std::vector<float>();
   auto chargeMaxVector = mDebug ? chargeMaxROC[4] : std::vector<float>();
+  if (mKeepClusterCharges) {
+    if (mClusterChargesTot.size() <= settingsIndex) {
+      mClusterChargesTot.resize(settingsIndex + 1);
+      mClusterChargesMax.resize(settingsIndex + 1);
+    }
+    mClusterChargesTot[settingsIndex] = chargeTotROC;
+    mClusterChargesMax[settingsIndex] = chargeMaxROC;
+  }
 
   // calculate dEdx
   output.dEdxTotIROC = getTruncMean(chargeTotROC[0], settings.low, settings.high);
