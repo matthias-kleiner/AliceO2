@@ -197,14 +197,17 @@ LegResult calculateLeg(CalculatedEdx& calc, const TrackTPC& legTrack, const std:
 /// \param inFile o2_cosmics_full.root (tree cosmicsFull)
 /// \param outFile output file with the friend tree "dedx"
 /// \param runNumberOrTimeStamp run number (calibrations at the middle of the run) or time stamp for the CCDB
-/// \param maxEntries process at most this many TFs (-1: all; the friend tree then has fewer entries than cosmicsFull)
+/// \param firstEntry first TF (entry of cosmicsFull) to process
+/// \param lastEntry process the TFs up to this entry, exclusive (-1: to the end); pieces of consecutive ranges merged with hadd in
+///                  order form the friend tree of the whole file
 /// \param maxGapRows B: longest row gap between two attached clusters filled with road clusters
 /// \param maxDy B: max distance in pad direction of a road cluster to the interpolation [cm]
 /// \param maxDTime B: max distance in time of a road cluster to the interpolation [time bins]
 void cosmicsdEdx(const std::string inFile = "o2_cosmics_full.root",
                  const std::string outFile = "cosmics_dedx.root",
                  const long runNumberOrTimeStamp = 568041,
-                 const long long maxEntries = -1,
+                 const long long firstEntry = 0,
+                 const long long lastEntry = -1,
                  const int maxGapRows = 5,
                  const float maxDy = 0.3f,
                  const float maxDTime = 2.f)
@@ -281,10 +284,10 @@ void cosmicsdEdx(const std::string inFile = "o2_cosmics_full.root",
   treeOut.Branch("nGapFillTop", &nGapFillTop);
   treeOut.Branch("tofTime", &tofTime);
 
-  const long long nEntries = (maxEntries >= 0) ? std::min<long long>(maxEntries, treeIn->GetEntries()) : treeIn->GetEntries();
+  const long long endEntry = (lastEntry >= 0) ? std::min<long long>(lastEntry, treeIn->GetEntries()) : treeIn->GetEntries();
   long long nCosmics = 0;
   calc.resetDebugCounters();
-  for (long long iEntry = 0; iEntry < nEntries; iEntry++) {
+  for (long long iEntry = firstEntry; iEntry < endEntry; iEntry++) {
     treeIn->GetEntry(iEntry);
     for (auto* vec : {&totA, &maxA, &totBotA, &totTopA, &maxBotA, &maxTopA, &totB, &maxB, &totBotB, &totTopB, &maxBotB, &maxTopB}) {
       vec->clear();
@@ -323,11 +326,11 @@ void cosmicsdEdx(const std::string inFile = "o2_cosmics_full.root",
       nCosmics++;
     }
     treeOut.Fill();
-    if (iEntry % 1000 == 0) {
-      LOGP(info, "TF {} / {}: {} cosmics, rows {}, failed propagations {}", iEntry, nEntries, nCosmics, calc.getNRowsProcessed(), calc.getNPropagationFailed());
+    if ((iEntry - firstEntry) % 10000 == 0) {
+      LOGP(info, "TF {} / [{}, {}): {} cosmics, rows {}, failed propagations {}", iEntry, firstEntry, endEntry, nCosmics, calc.getNRowsProcessed(), calc.getNPropagationFailed());
     }
   }
-  LOGP(info, "Done: {} TFs, {} cosmics, rows {}, failed propagations {}", nEntries, nCosmics, calc.getNRowsProcessed(), calc.getNPropagationFailed());
+  LOGP(info, "Done: TFs [{}, {}), {} cosmics, rows {}, failed propagations {}", firstEntry, endEntry, nCosmics, calc.getNRowsProcessed(), calc.getNPropagationFailed());
   fileOut->cd();
   treeOut.Write();
 }
