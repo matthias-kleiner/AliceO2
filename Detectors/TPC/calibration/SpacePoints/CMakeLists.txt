@@ -54,6 +54,26 @@ o2_add_test_root_macro(macro/staticMapCreatorCPM.C
                                              O2::DetectorsBase
                        LABELS tpc COMPILE_ONLY)
 
+# GBL >= V04 includes the headers of Mille (Mille/MilleFactory.h), which GBL::GBL does not carry
+find_package(Mille CONFIG QUIET HINTS "$ENV{MILLE_ROOT}/cmake")
+
+o2_add_test_root_macro(macro/fineMapCreatorGBL.C
+                       PUBLIC_INCLUDE_DIRECTORIES ${Mille_INCLUDE_DIRS}
+                       PUBLIC_LINK_LIBRARIES O2::SpacePoints
+                                             O2::CCDB
+                                             O2::Algorithm
+                                             O2::Framework
+                                             O2::CommonConstants
+                                             O2::DataFormatsParameters
+                                             O2::DataFormatsCTP
+                                             O2::ReconstructionDataFormats
+                                             O2::DetectorsBase
+                                             O2::TPCCalibration
+                                             O2::TPCBaseRecSim
+                                             GBL::GBL
+                                             Eigen3::Eigen
+                       LABELS tpc COMPILE_ONLY)
+
 o2_add_test_root_macro(macro/SmoothingExtrapolate.C
                        PUBLIC_LINK_LIBRARIES O2::SpacePoints
                                              O2::Algorithm
@@ -73,6 +93,7 @@ install(FILES macro/staticMapCreator.C
         DESTINATION share/macro/)
 
 install(FILES macro/staticMapCreatorCPM.C
+              macro/fineMapCreatorGBL.C
               macro/SmoothingExtrapolate.C
               macro/voxResQA.C
         DESTINATION share/macro/)
