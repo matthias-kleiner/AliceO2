@@ -16,8 +16,10 @@
 /// boundaries) and optionally a ridge towards 0 (tau0). Nodes without data follow the penalties: a smooth continuation, linear in the
 /// direction without data and coherent between the neighbouring columns, e.g. through the innermost IROC rows, which the large radial
 /// distortion empties (trustFraction: those rows are no data). Replaces the Gaussian smoothing + per-column pol2 extrapolation of
-/// SmoothingExtrapolate.C (a leave-rows-out test on PbPb 2025 maps: tauRow 100 um, tauY2X = tauZ2X = 1000 um predicted the hidden
-/// rows best and is ~10-100 times smoother in the extrapolated rows).
+/// SmoothingExtrapolate.C. Defaults tuned on a PbPb 2025 map (568210, 22 kHz) by a leave-rows-out test (hide the first measured inner
+/// rows, predict them) and a hold-out cross-validation of the bulk (hide 10 % of the voxels): the curvature prior 1000 / 2000 / 1000
+/// um / cm^2 (rows / y/x / z/x) predicts within 2-3 % of the best scanned setting in both (hold-out rms 1.7-3.4 times smaller than
+/// SmoothingExtrapolate.C's, 1.2-1.5 in the OROCs) and is ~10-100 times smoother in the extrapolated rows.
 ///
 /// Input (source):
 /// - "voxResTree": D with the errors E (dX, dY correlated by EXYCorr) at the voxel's mean position (stat), for the fitted, unmasked voxels
@@ -31,9 +33,9 @@
 /// - "auto": fineSums if the file has them, else voxResTree.
 /// trustFraction > 0: per column the innermost IROC rows with fewer entries than trustFraction x the column's median entries in rows
 /// 10-30 (up to the first row at or above it) are no data. robust > 0: Tukey reweightings of the voxels by their excess chi2.
-/// curvaturePrior: the taus are the prior rms of the curvature (um / cm^2) averaged over 1 cm^3 instead of the second difference per bin
-/// (um): second derivatives from the bin centres' positions, each term weighted with its voxel's volume, so the prior does not depend
-/// on the binning (coarse map, fine pass, refined bins) nor on the radius (the y/x and z/x bins grow with x).
+/// curvaturePrior (default): the taus are the prior rms of the curvature (um / cm^2) averaged over 1 cm^3: second derivatives from the
+/// bin centres' positions, each term weighted with its voxel's volume, so the prior does not depend on the binning (coarse map, fine
+/// pass, refined bins) nor on the radius (the y/x and z/x bins grow with x); false: the taus are the second difference per bin (um).
 ///
 /// Output: voxResTree with every voxel of the grid, DS = the nodes, SmoothDone, entries at least 1 (TPCFastSpaceChargeCorrectionHelper
 /// takes voxels with entries as the map's points); D, E: the input's (voxResTree; with errorMode 1 the E used) or the voxel solve
@@ -604,8 +606,8 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
 
 void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     std::string outputFile = "voxResSmooth.root",
-                    float tauRow = 100.,       // prior rms (um) of the second difference along the pad rows (0: no penalty); curvaturePrior: um / cm^2
-                    float tauY2X = 1000.,      // ... along y/x
+                    float tauRow = 1000.,      // prior rms of the curvature (um / cm^2) along the pad rows (0: no penalty); !curvaturePrior: second difference (um)
+                    float tauY2X = 2000.,      // ... along y/x
                     float tauZ2X = 1000.,      // ... along z/x
                     float tau0 = 0.,           // prior rms (um) of a node: ridge towards 0 (0: none)
                     float trustFraction = 0.7, // the innermost IROC rows below this fraction of the column's plateau entries are no data (<= 0: off)
@@ -614,7 +616,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     int joinIDCs = -1,         // meanIDC / medianIDC from the CCDB scalers at the input's TFs: -1 if the input has none, 1 always, 0 never
                     int robust = 0,            // Tukey reweighting cycles
                     int nThreads = 8,
-                    bool curvaturePrior = false, // the taus as the prior rms of the curvature over 1 cm^3 (um / cm^2): the same for any binning (makeStencils)
+                    bool curvaturePrior = true,  // the taus as the prior rms of the curvature over 1 cm^3 (um / cm^2): the same for any binning (makeStencils)
                     std::string source = "auto") // "voxResTree", "fineSums" or "auto" (fineSums if present)
 {
   using namespace voxel_smoother;
