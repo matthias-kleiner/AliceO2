@@ -41,6 +41,11 @@
 /// block-Jacobi preconditioner); smoothRobust > 0: that many reweightings of the voxels with Tukey's bisquare of sqrt(excess chi2 / rank)
 /// at the solution (the voxel's chi2 there minus its own minimum).
 ///
+/// Two passes (nPasses = 2, needs the smoothing): the TFs split alternately in time; pass 1 on the even ones, smoothed: S1; pass 2 on the
+/// odd ones with S1 subtracted from the clusters (after a fineMapInput), smoothed: S2. Every track is fitted once. Output DS = S1 + S2,
+/// D = pass 2's voxel solve + S1 at its mean position (E and the entries pass 2's). Cross-validation (log and user info): the chi2 change
+/// of pass 2's residuals with pass 1's raw voxels and with S1, relative to no fine correction.
+///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
 /// scaler objects fetched from the CCDB in that order (each once); the IDC (mean of A and C side) and the lumi scale per TF go into a table.
@@ -962,6 +967,59 @@ bool smoothMap(const TrackResiduals& binning, const std::vector<std::array<Charg
   return nNotFinite == 0;
 }
 
+/// the cross-validation of pass 1 on the residuals of pass 2 (taken with pass 1's smoothed map S1 subtracted), per channel (y, z): the chi2
+/// change of pass 2's residuals with pass 1's raw voxels (where solved, else none) and with S1, relative to no fine correction; the
+/// corrections at the voxels' mean positions
+struct CrossValidation {
+  double entries = 0.;
+  std::array<double, 2> raw{};
+  std::array<double, 2> smoothed{};
+};
+
+CrossValidation crossValidate(const TrackResiduals& binning, const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<double>& passOne,
+                              const std::vector<float>& rawPassOne)
+{
+  using S = ChargeSums;
+  // chi2 of one channel's residuals at (dX, d) minus at (0, 0): sum w (r - d + s dX)^2 - sum w r^2
+  auto channelChi2 = [](const std::array<double, S::NSums>& channel, double dX, double d) {
+    return d * d * channel[S::W] + dX * dX * channel[S::WSS] - 2. * dX * d * channel[S::WS] - 2. * d * channel[S::WR] + 2. * dX * channel[S::WSR];
+  };
+  const int voxelsPerSector = binning.getNVoxelsPerSector();
+  CrossValidation result;
+  for (size_t voxel = 0; voxel < sums.size(); ++voxel) {
+    ChargeSums total = sums[voxel][0];
+    total.add(sums[voxel][1]);
+    if (total.entries <= 0. || total.y[S::W] <= 0. || total.z[S::W] <= 0.) {
+      continue;
+    }
+    const int sector = int(voxel / voxelsPerSector);
+    const int local = int(voxel % voxelsPerSector);
+    int nodes[4];
+    double weights[4];
+    const int nNodes = bilinearNodes(binning, local % binning.getNXBins(), total.y2x / total.entries, (sector < 18 ? 1. : -1.) * total.z2x / total.entries,
+                                     nodes, weights);
+    std::array<double, 3> smoothed{};
+    for (int j = 0; j < nNodes; ++j) {
+      for (int c = 0; c < 3; ++c) {
+        smoothed[c] += weights[j] * passOne[3 * (size_t(sector) * voxelsPerSector + nodes[j]) + c];
+      }
+    }
+    // relative to S1: no fine correction = -S1, the raw voxel = raw - S1, S1 = 0
+    std::array<double, 3> raw{};
+    for (int c = 0; c < 3; ++c) {
+      raw[c] = rawPassOne[3 * voxel + c] - smoothed[c];
+    }
+    const double noneY = channelChi2(total.y, -smoothed[0], -smoothed[1]);
+    const double noneZ = channelChi2(total.z, -smoothed[0], -smoothed[2]);
+    result.entries += total.entries;
+    result.raw[0] += channelChi2(total.y, raw[0], raw[1]) - noneY;
+    result.raw[1] += channelChi2(total.z, raw[0], raw[2]) - noneZ;
+    result.smoothed[0] -= noneY;
+    result.smoothed[1] -= noneZ;
+  }
+  return result;
+}
+
 /// GBL's parameters (q/p, snp, tgl, y, z) of a state: a scattering kink changes only snp and tgl
 std::array<double, 5> toGbl(const TrackParD& track)
 {
@@ -1177,6 +1235,7 @@ struct FitContext {
   GID::mask_t sources;
   const BaseCorrection* baseCorrection = nullptr; ///< nullptr: no base correction
   const FineMapInput* fineMap = nullptr;          ///< nullptr: no previous fine map
+  const FineMapInput* passOne = nullptr;          ///< pass 2: the smoothed map of pass 1, subtracted after fineMap
   const TrackResiduals* binning = nullptr;
   const RowGeometry* geometry = nullptr;
   float maxZ2X = 0.f;
@@ -1226,6 +1285,9 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     }
     if (context.fineMap) {
       context.fineMap->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z);
+    }
+    if (context.passOne) {
+      context.passOne->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z);
     }
     cluster.excluded = isExcludedFromFit(cluster.row, cluster.padY, *context.geometry);
     nFitClusters += !cluster.excluded;
@@ -1328,10 +1390,12 @@ struct SelectedTFs {
   std::vector<float> idc; ///< (A + C) / 2 of the TFs with IDC
 };
 
-/// voxResTree (with the binning, the CTP / IDC means and medians in the user info), OrbitLumiInfo and optionally fineSums; smoothed: the
-/// nodes of smoothMap (empty: DS = D)
+/// voxResTree (with the binning, the CTP / IDC means and medians in the user info), OrbitLumiInfo and optionally fineSums. smoothed: the
+/// nodes of the map (empty: DS = D); two passes: sums = pass 2's, passOne = S1 (added to pass 2's voxel solve at the mean position: D),
+/// sumsPassOne = pass 1's (if writeSums: fineSums, pass 2's in fineSumsPass2); extraInfo: more user info
 void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, const std::string& y2xBinning, const std::string& z2xBinning, float maxZ2X,
-                 const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<double>& smoothed, const std::string& smoothing, long nTracks,
+                 const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<double>& smoothed, const std::vector<double>& passOne,
+                 const std::vector<std::array<ChargeSums, 2>>& sumsPassOne, const std::vector<std::pair<std::string, std::string>>& extraInfo, long nTracks,
                  double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected)
 {
   // CTP luminosity and IDC of the selected TFs, as staticMapCreatorCPM.C (PbPb: mean CTP luminosity x 2.414)
@@ -1388,7 +1452,9 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
   userInfo->Add(new TNamed("runNumber", std::to_string(runNumber).data()));
   userInfo->Add(new TNamed("firstTFTime", std::to_string(firstTFTime).data()));
   userInfo->Add(new TNamed("lastTFTime", std::to_string(lastTFTime).data()));
-  userInfo->Add(new TNamed("smoothing", smoothing.data()));
+  for (const auto& [key, value] : extraInfo) {
+    userInfo->Add(new TNamed(key.data(), value.data()));
+  }
   if (!selected.timeMS.empty()) {
     const auto [minTimeMS, maxTimeMS] = std::minmax_element(selected.timeMS.begin(), selected.timeMS.end());
     userInfo->Add(new TNamed("minTimeMS", std::to_string(*minTimeMS).data()));
@@ -1419,6 +1485,17 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
           VoxelSolution solution;
           if (solveVoxel(total, minEntries, solution)) {
             ++nSolved;
+            if (!passOne.empty()) {
+              int nodes[4];
+              double weights[4];
+              const int nNodes = bilinearNodes(binning, binX, result.stat[TrackResiduals::VoxF], (sector < 18 ? 1. : -1.) * result.stat[TrackResiduals::VoxZ],
+                                               nodes, weights);
+              for (int j = 0; j < nNodes; ++j) {
+                for (int coordinate = 0; coordinate < 3; ++coordinate) {
+                  solution.value[coordinate] += weights[j] * passOne[3 * (size_t(sector) * voxelsPerSector + nodes[j]) + coordinate];
+                }
+              }
+            }
             for (int coordinate = 0; coordinate < 3; ++coordinate) {
               result.D[coordinate] = solution.value[coordinate];
               result.DS[coordinate] = solution.value[coordinate];
@@ -1443,7 +1520,7 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
     }
   }
   voxTree.Write();
-  LOGP(info, "{}: {} voxels, {} solved (min entries {}), smoothing: {}", fileOutput, sums.size(), nSolved, minEntries, smoothing);
+  LOGP(info, "{}: {} voxels, {} solved (min entries {}), {}", fileOutput, sums.size(), nSolved, minEntries, smoothed.empty() ? "not smoothed" : "smoothed");
 
   TTree orbitLumiTree("OrbitLumiInfo", "Orbit and Lumi Info");
   int64_t orbitResetTimeMS = orbitResetMS;
@@ -1469,8 +1546,8 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
   orbitLumiTree.Fill();
   orbitLumiTree.Write();
 
-  if (writeSums) {
-    TTree sumsTree("fineSums", "per voxel and charge the sums of the unbiased TPC-only residuals");
+  auto writeSumsTree = [&](const char* name, const char* title, const std::vector<std::array<ChargeSums, 2>>& treeSums) {
+    TTree sumsTree(name, title);
     for (const char* key : {"y2xBinning", "z2xBinning", "maxZ2X", "nTracks"}) {
       sumsTree.GetUserInfo()->Add(userInfo->FindObject(key)->Clone());
     }
@@ -1484,13 +1561,13 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
     sumsTree.Branch("position", position, "position[2][3]/F");
     sumsTree.Branch("y", channelY, "y[2][6]/F");
     sumsTree.Branch("z", channelZ, "z[2][6]/F");
-    for (size_t voxel = 0; voxel < sums.size(); ++voxel) {
-      if (sums[voxel][0].entries + sums[voxel][1].entries <= 0.) {
+    for (size_t voxel = 0; voxel < treeSums.size(); ++voxel) {
+      if (treeSums[voxel][0].entries + treeSums[voxel][1].entries <= 0.) {
         continue;
       }
       voxelIndex = int(voxel);
       for (int charge = 0; charge < 2; ++charge) {
-        const auto& chargeSums = sums[voxel][charge];
+        const auto& chargeSums = treeSums[voxel][charge];
         entries[charge] = chargeSums.entries;
         position[charge][0] = chargeSums.x;
         position[charge][1] = chargeSums.y2x;
@@ -1503,6 +1580,12 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
       sumsTree.Fill();
     }
     sumsTree.Write();
+  };
+  if (writeSums && sumsPassOne.empty()) {
+    writeSumsTree("fineSums", "per voxel and charge the sums of the unbiased TPC-only residuals", sums);
+  } else if (writeSums) {
+    writeSumsTree("fineSums", "pass 1: per voxel and charge the sums of the unbiased TPC-only residuals", sumsPassOne);
+    writeSumsTree("fineSumsPass2", "pass 2: per voxel and charge the sums of the unbiased TPC-only residuals with pass 1's smoothed map subtracted", sums);
   }
 
   const std::filesystem::path outputPath(fileOutput);
@@ -1595,6 +1678,104 @@ struct InputFile {
   }
 };
 
+/// one pass over the TFs (in the order given; a file is reopened when the next TF is in another one): this thread reads them, the fit
+/// threads take chunks of their tracks, the residuals summed per voxel and charge in batches; the TFs read are appended to selected;
+/// returns the tracks fitted
+long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::string>& files, const FitContext& context, int nThreads,
+             std::vector<std::array<ChargeSums, 2>>& sums, SelectedTFs& selected, const std::string& label)
+{
+  std::mutex sumsMutex;
+  std::array<std::atomic<long>, NCounters> counters{};
+  TFQueue queue;
+  auto worker = [&]() {
+    std::vector<Contribution> batch;
+    batch.reserve(SumsBatchSize);
+    std::vector<Cluster> clusters;
+    std::array<long, NCounters> localCounters{};
+    auto flush = [&]() {
+      std::lock_guard<std::mutex> lock(sumsMutex);
+      for (const auto& contribution : batch) {
+        sums[contribution.voxel][contribution.charge].add(contribution);
+      }
+      batch.clear();
+    };
+    std::shared_ptr<TFTask> task;
+    size_t firstTrack = 0;
+    size_t lastTrack = 0;
+    while (queue.next(task, firstTrack, lastTrack)) {
+      for (size_t track = firstTrack; track < lastTrack; ++track) {
+        processTrack(*task, track, context, localCounters, clusters, batch);
+        if (batch.size() >= SumsBatchSize) {
+          flush();
+        }
+      }
+      task.reset();
+      for (int counter = 0; counter < NCounters; ++counter) {
+        counters[counter] += localCounters[counter];
+        localCounters[counter] = 0;
+      }
+    }
+    flush();
+  };
+  std::vector<std::thread> threads;
+  for (int thread = 0; thread < nThreads; ++thread) {
+    threads.emplace_back(worker);
+  }
+
+  long nTFs = 0;
+  long nTFsReadError = 0;
+  InputFile input;
+  int openFile = -1;
+  bool fileOpen = false;
+  for (const TFInfo* tf : passTFs) {
+    if (tf->file != openFile) {
+      openFile = tf->file;
+      LOGP(info, "Reading {}", files[tf->file]);
+      fileOpen = input.open(files[tf->file]);
+    }
+    auto task = std::make_shared<TFTask>();
+    task->info = tf;
+    if (!fileOpen || !input.read(tf->entry, *task)) {
+      if (fileOpen) {
+        LOGP(warning, "Skipping entry {} of {}: read error", tf->entry, files[tf->file]);
+      }
+      ++nTFsReadError;
+      continue;
+    }
+    queue.push(std::move(task));
+    ++nTFs;
+    selected.timeMS.push_back(static_cast<long>(tf->timeMS));
+    selected.orbits.push_back(tf->orbit);
+    selected.ctpLumi.push_back(tf->ctpLumi);
+    selected.idcA.push_back(tf->idcA);
+    selected.idcC.push_back(tf->idcC);
+    selected.lumiScale.push_back(tf->lumiScale);
+    if (tf->hasIDC) {
+      selected.idc.push_back(0.5f * (tf->idcA + tf->idcC));
+    }
+    if (nTFs % 20 == 0) {
+      LOGP(info, "TF {}{}: {} tracks selected, {} fitted, {} residuals, resident memory {:.2f} GB", nTFs, label, counters[Selected].load(),
+           counters[Fitted].load(), counters[Residuals].load(), residentMemoryGB());
+    }
+  }
+  queue.setDone();
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  input.close();
+
+  const long nFitted = counters[Fitted];
+  LOGP(info,
+       "fineMapCreatorGBL{}: TFs {} (read errors {}); tracks selected {}, fitted {} (failed {}); clusters out of row order {}; "
+       "residuals {} (of de-weighted clusters {}), unbiased pull > {} {}, edge pads {}, outside the grid {}, without a residual {}",
+       label, nTFs, nTFsReadError, counters[Selected].load(), nFitted, counters[FitFailed].load(), counters[OutOfRowOrder].load(), counters[Residuals].load(),
+       counters[ResidualsExcluded].load(), OutlierSigma, counters[Outliers].load(), counters[EdgePadResiduals].load(), counters[OutsideGrid].load(),
+       counters[NoResidual].load());
+  LOGP(info, "fineMapCreatorGBL{}: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", label,
+       nFitted ? double(counters[FitPasses]) / nFitted : 0., nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
+  return nFitted;
+}
+
 } // namespace fine_map
 
 void fineMapCreatorGBL(std::string fileInput = "files.txt",                                          // one residual file, or a .txt file with one file per line (local or alien://)
@@ -1616,7 +1797,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        int nThreads = 8,                                                             // fit threads; one more thread reads the input
                        float smoothTau = 1000.f,                                                     // [um] prior rms of the second differences of the smoothed map (DS); 0: no smoothing, DS = D
                        float smoothTau0 = 1000.f,                                                    // [um] prior rms of a node of the smoothed map (the ridge towards 0)
-                       int smoothRobust = 0)                                                         // Tukey reweightings of the voxels in the smoothing
+                       int smoothRobust = 0,                                                         // Tukey reweightings of the voxels in the smoothing
+                       int nPasses = 1)                                                              // 2: pass 1 on the even TFs in time, pass 2 on the odd ones with pass 1's smoothed map subtracted
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -1627,6 +1809,12 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   nThreads = std::max(1, nThreads);
   if (smoothTau > 0.f && !(smoothTau0 > 0.f)) {
     LOGP(fatal, "smoothTau0 must be > 0 (the ridge keeps the voxels without entries defined)");
+  }
+  if (nPasses != 1 && nPasses != 2) {
+    LOGP(fatal, "nPasses {}: 1 or 2", nPasses);
+  }
+  if (nPasses == 2 && !(smoothTau > 0.f)) {
+    LOGP(fatal, "Two passes need the smoothing (smoothTau > 0): pass 2 subtracts pass 1's smoothed map");
   }
   // a local CCDB snapshot keeps one object per path: the time-dependent TPC scalers need the server
   if (gSystem->Getenv("ALICEO2_CCDB_LOCALCACHE")) {
@@ -1707,11 +1895,33 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     nTFsNoIDC += !tf.hasIDC;
   }
   const bool needIDC = baseCorrection.derivative != nullptr;
-  LOGP(info, "fineMapCreatorGBL: {} files, {} TFs ({} without IDC{}); correction map {}, derivative {}, fine map {}; grid y/x {}, z/x {} up to {} ({} voxels per sector); {} fit threads",
+  LOGP(info, "fineMapCreatorGBL: {} files, {} TFs ({} without IDC{}); correction map {}, derivative {}, fine map {}; grid y/x {}, z/x {} up to {} ({} voxels per sector); {} fit threads, {} passes",
        files.size(), tfs.size(), nTFsNoIDC, needIDC ? ": skipped" : "", corrMap.empty() ? "none" : corrMap, corrMapDerivative.empty() ? "none" : corrMapDerivative,
-       fineMapInput.empty() ? "none" : fineMapInput, y2xBinning, z2xBinning, maxZ2X, voxelsPerSector, nThreads);
+       fineMapInput.empty() ? "none" : fineMapInput, y2xBinning, z2xBinning, maxZ2X, voxelsPerSector, nThreads, nPasses);
 
-  // the fit threads: chunks of the TFs' tracks, the residuals summed per voxel and charge in batches
+  // the TFs to fit (with a derivative map those with IDC) in input order; two passes: pass 1 the even TFs in time, pass 2 the odd ones
+  std::vector<const TFInfo*> fitTFs;
+  for (const auto& tf : tfs) {
+    if (!needIDC || tf.hasIDC) {
+      fitTFs.push_back(&tf);
+    }
+  }
+  std::array<std::vector<const TFInfo*>, 2> passTFs;
+  if (nPasses == 2) {
+    std::vector<const TFInfo*> byTime = fitTFs;
+    std::stable_sort(byTime.begin(), byTime.end(), [](const TFInfo* first, const TFInfo* second) { return first->timeMS < second->timeMS; });
+    std::vector<char> isOdd(tfs.size(), 0);
+    for (size_t rank = 1; rank < byTime.size(); rank += 2) {
+      isOdd[byTime[rank] - tfs.data()] = 1;
+    }
+    for (const TFInfo* tf : fitTFs) {
+      passTFs[isOdd[tf - tfs.data()]].push_back(tf);
+    }
+    LOGP(info, "Two passes: {} TFs (even in time) in pass 1, {} (odd) in pass 2", passTFs[0].size(), passTFs[1].size());
+  } else {
+    passTFs[0] = fitTFs;
+  }
+
   FitContext context;
   context.sources = GID::getSourcesMask(trackSources);
   context.baseCorrection = baseCorrection.map ? &baseCorrection : nullptr;
@@ -1721,113 +1931,69 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.maxZ2X = maxZ2X;
   context.voxelsPerSector = voxelsPerSector;
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
-  std::mutex sumsMutex;
-  std::array<std::atomic<long>, NCounters> counters{};
-  TFQueue queue;
-  auto worker = [&]() {
-    std::vector<Contribution> batch;
-    batch.reserve(SumsBatchSize);
-    std::vector<Cluster> clusters;
-    std::array<long, NCounters> localCounters{};
-    auto flush = [&]() {
-      std::lock_guard<std::mutex> lock(sumsMutex);
-      for (const auto& contribution : batch) {
-        sums[contribution.voxel][contribution.charge].add(contribution);
-      }
-      batch.clear();
-    };
-    std::shared_ptr<TFTask> task;
-    size_t firstTrack = 0;
-    size_t lastTrack = 0;
-    while (queue.next(task, firstTrack, lastTrack)) {
-      for (size_t track = firstTrack; track < lastTrack; ++track) {
-        processTrack(*task, track, context, localCounters, clusters, batch);
-        if (batch.size() >= SumsBatchSize) {
-          flush();
+  SelectedTFs selected;
+  long nFitted = runPass(passTFs[0], files, context, nThreads, sums, selected, nPasses == 2 ? " pass 1" : "");
+
+  // the smoothing; two passes: S1 of pass 1, pass 2 with S1 subtracted, S2 of pass 2, DS = S1 + S2
+  auto smooth = [&](const std::vector<std::array<ChargeSums, 2>>& passSums, std::vector<double>& nodes, const std::string& label) {
+    const auto smoothStart = std::chrono::steady_clock::now();
+    const bool ok = smoothMap(*binning, passSums, minEntries, smoothTau * 1e-4, smoothTau0 * 1e-4, smoothRobust, nThreads, nodes);
+    LOGP(info, "fineMapCreatorGBL{}: smoothing {:.1f} s", label, std::chrono::duration<double>(std::chrono::steady_clock::now() - smoothStart).count());
+    return ok;
+  };
+  std::vector<std::pair<std::string, std::string>> extraInfo;
+  std::vector<double> smoothed;
+  std::vector<double> passOne;
+  std::vector<std::array<ChargeSums, 2>> sumsPassOne;
+  if (nPasses == 2) {
+    if (!smooth(sums, passOne, " pass 1")) {
+      LOGP(fatal, "Smoothing of pass 1 failed");
+    }
+    // pass 1's raw voxels for the cross-validation; its smoothed map subtracted in pass 2
+    std::vector<float> rawPassOne(3 * sums.size(), 0.f);
+    for (size_t voxel = 0; voxel < sums.size(); ++voxel) {
+      ChargeSums total = sums[voxel][0];
+      total.add(sums[voxel][1]);
+      VoxelSolution solution;
+      if (solveVoxel(total, minEntries, solution)) {
+        for (int coordinate = 0; coordinate < 3; ++coordinate) {
+          rawPassOne[3 * voxel + coordinate] = solution.value[coordinate];
         }
       }
-      task.reset();
-      for (int counter = 0; counter < NCounters; ++counter) {
-        counters[counter] += localCounters[counter];
-        localCounters[counter] = 0;
-      }
     }
-    flush();
-  };
-  std::vector<std::thread> threads;
-  for (int thread = 0; thread < nThreads; ++thread) {
-    threads.emplace_back(worker);
+    FineMapInput passOneMap;
+    passOneMap.binning = makeBinning(y2xBinning, z2xBinning, maxZ2X);
+    passOneMap.voxelsPerSector = voxelsPerSector;
+    passOneMap.nodes.assign(passOne.begin(), passOne.end());
+    context.passOne = &passOneMap;
+    if (writeSums) {
+      sumsPassOne = sums;
+    }
+    std::fill(sums.begin(), sums.end(), std::array<ChargeSums, 2>{});
+    nFitted += runPass(passTFs[1], files, context, nThreads, sums, selected, " pass 2");
+    std::vector<double> passTwo;
+    if (!smooth(sums, passTwo, " pass 2")) {
+      LOGP(fatal, "Smoothing of pass 2 failed");
+    }
+    smoothed.resize(passOne.size());
+    for (size_t node = 0; node < smoothed.size(); ++node) {
+      smoothed[node] = passOne[node] + passTwo[node];
+    }
+    const auto validation = crossValidate(*binning, sums, passOne, rawPassOne);
+    const double perMillion = 1e6 / std::max(1., validation.entries);
+    const std::string validationText = fmt::format("pass 1 on pass 2's {:.0f} residuals, chi2 change per 1e6 residuals y / z: raw voxels {:.1f} / {:.1f}, smoothed {:.1f} / {:.1f}",
+                                                   validation.entries, validation.raw[0] * perMillion, validation.raw[1] * perMillion,
+                                                   validation.smoothed[0] * perMillion, validation.smoothed[1] * perMillion);
+    LOGP(info, "Cross-validation: {}", validationText);
+    extraInfo.emplace_back("nPasses", "2");
+    extraInfo.emplace_back("passTFs", fmt::format("{} {}", passTFs[0].size(), passTFs[1].size()));
+    extraInfo.emplace_back("crossValidation", validationText);
+  } else if (smoothTau > 0.f && !smooth(sums, smoothed, "")) {
+    LOGP(error, "Smoothing failed: DS = D");
+    smoothed.clear();
   }
-
-  // this thread reads the TFs, file by file
-  SelectedTFs selected;
-  long nTFs = 0;
-  long nTFsReadError = 0;
-  InputFile input;
-  int openFile = -1;
-  bool fileOpen = false;
-  for (const auto& tf : tfs) {
-    if (needIDC && !tf.hasIDC) {
-      continue;
-    }
-    if (tf.file != openFile) {
-      openFile = tf.file;
-      LOGP(info, "Reading {}", files[tf.file]);
-      fileOpen = input.open(files[tf.file]);
-    }
-    auto task = std::make_shared<TFTask>();
-    task->info = &tf;
-    if (!fileOpen || !input.read(tf.entry, *task)) {
-      if (fileOpen) {
-        LOGP(warning, "Skipping entry {} of {}: read error", tf.entry, files[tf.file]);
-      }
-      ++nTFsReadError;
-      continue;
-    }
-    queue.push(std::move(task));
-    ++nTFs;
-    selected.timeMS.push_back(static_cast<long>(tf.timeMS));
-    selected.orbits.push_back(tf.orbit);
-    selected.ctpLumi.push_back(tf.ctpLumi);
-    selected.idcA.push_back(tf.idcA);
-    selected.idcC.push_back(tf.idcC);
-    selected.lumiScale.push_back(tf.lumiScale);
-    if (tf.hasIDC) {
-      selected.idc.push_back(0.5f * (tf.idcA + tf.idcC));
-    }
-    if (nTFs % 20 == 0) {
-      LOGP(info, "TF {}: {} tracks selected, {} fitted, {} residuals, resident memory {:.2f} GB", nTFs, counters[Selected].load(), counters[Fitted].load(),
-           counters[Residuals].load(), residentMemoryGB());
-    }
-  }
-  queue.setDone();
-  for (auto& thread : threads) {
-    thread.join();
-  }
-  input.close();
-
-  const long nFitted = counters[Fitted];
-  LOGP(info,
-       "fineMapCreatorGBL: TFs {} (without IDC {}, read errors {}); tracks selected {}, fitted {} (failed {}); clusters out of row order {}; "
-       "residuals {} (of de-weighted clusters {}), unbiased pull > {} {}, edge pads {}, outside the grid {}, without a residual {}",
-       nTFs, needIDC ? nTFsNoIDC : 0, nTFsReadError, counters[Selected].load(), nFitted, counters[FitFailed].load(), counters[OutOfRowOrder].load(),
-       counters[Residuals].load(), counters[ResidualsExcluded].load(), OutlierSigma, counters[Outliers].load(), counters[EdgePadResiduals].load(),
-       counters[OutsideGrid].load(), counters[NoResidual].load());
-  LOGP(info, "fineMapCreatorGBL: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", nFitted ? double(counters[FitPasses]) / nFitted : 0.,
-       nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
-  std::vector<double> smoothed;
-  std::string smoothing = "none";
-  if (smoothTau > 0.f) {
-    const auto smoothStart = std::chrono::steady_clock::now();
-    if (smoothMap(*binning, sums, minEntries, smoothTau * 1e-4, smoothTau0 * 1e-4, smoothRobust, nThreads, smoothed)) {
-      smoothing = fmt::format("tau {} um, tau0 {} um, robust {}", smoothTau, smoothTau0, smoothRobust);
-    } else {
-      LOGP(error, "Smoothing failed: DS = D");
-      smoothed.clear();
-    }
-    LOGP(info, "fineMapCreatorGBL: smoothing {:.1f} s", std::chrono::duration<double>(std::chrono::steady_clock::now() - smoothStart).count());
-  }
-  writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, smoothed, smoothing, nFitted, minEntries, writeSums, runNumber, orbitResetMS,
-              isPbPb, firstTFTime, lastTFTime, selected);
+  extraInfo.emplace_back("smoothing", smoothed.empty() ? std::string("none") : fmt::format("tau {} um, tau0 {} um, robust {}", smoothTau, smoothTau0, smoothRobust));
+  writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, smoothed, passOne, sumsPassOne, extraInfo, nFitted, minEntries, writeSums, runNumber,
+              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected);
   LOGP(info, "fineMapCreatorGBL: {:.1f} s", std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime).count());
 }
