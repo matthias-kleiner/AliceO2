@@ -1281,6 +1281,7 @@ void doFileProcessing(const int iThread,
     // Do not disable res.dy/dz/y/z/row/sec/rejected or trackInfo.idxFirstResidual/nResiduals/sourceId --
     // all of those are read below. Note trackInfo.filterFlag (on TrackDataCompact) is unused, while the
     // separate trk.filterFlag (on TrackData, read further down) is used; they are different fields.
+    // res.tgSlp stays 0: the residual slope method takes its slopes from the propagated track.
     {
       TTree* residTree = treeUnbinnedResiduals->GetTree();
       for (const char* br : {"res.tgSlp", "res.channel", "trackInfo.multStack*",
@@ -1683,7 +1684,7 @@ void doFileProcessing(const int iThread,
           //-----------------------------------------
           trkPar.rotate(o2::math_utils::sector2Angle(sec));
 
-          propagator->PropagateToXBxByBz(trkPar, xPos, 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT); // USEMatCorrTGeo, USEMatCorrLUT, USEMatCorrNONE
+          const bool propagatedToRow = propagator->PropagateToXBxByBz(trkPar, xPos, 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT); // USEMatCorrTGeo, USEMatCorrLUT, USEMatCorrNONE
           trackPosAtRow_worker[iWorker].SetXYZ(trkPar.getX(), trkPar.getY(), trkPar.getZ());
 
           float sna, csa;
@@ -1699,9 +1700,11 @@ void doFileProcessing(const int iThread,
             continue;
           }
 
-          // residual slope method: the cluster's residual to the reference track, the reference's tgSlp, the track's tgl
-          if (!slopeSums.empty()) {
-            const float tgSlp = residIn.tgSlp * param::MaxTgSlp / 0x7fff;
+          // residual slope method: the cluster's residual to the reference track; the slopes from the ITS track propagated to the row
+          // (independent of the TPC clusters; res.tgSlp is not read, see the branch status above)
+          if (!slopeSums.empty() && propagatedToRow) {
+            const float snp = trkPar.getSnp();
+            const float tgSlp = snp / std::sqrt((1.f - snp) * (1.f + snp));
             const float tgl = trkPar.getTgl();
             double sigmaY = 0.;
             double sigmaZ = 0.;
