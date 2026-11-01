@@ -52,6 +52,8 @@
 /// in front of the TPC clusters, a scatterer at every point before the TPC and scatterer points every GapStep in the gap to the TPC, the
 /// reference from the vertex (or the innermost ITS cluster) on; only the TPC clusters' unbiased residuals are summed. The track's kinks are
 /// then fitted: the reference does not follow them, so the slopes of the voxel model should be the fitted track's (fitSlopes).
+/// kinkQAEvery > 0 (with itsInFit): per sampled track the kink residuals of the scatterers before the TPC with their prior (Highland) and
+/// post-fit errors: unit Gaussian pulls residual / error if the modelled scattering is right (tree kinkQA in <output stem>.kinkQA.root).
 ///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
@@ -113,6 +115,7 @@
 #include "CCDB/BasicCCDBManager.h"
 #include "CommonConstants/LHCConstants.h"
 #include "CommonUtils/ConfigurableParam.h"
+#include "CommonUtils/TreeStreamRedirector.h"
 #include "CorrectionMapsHelper.h"
 #include "DataFormatsCTP/LumiInfo.h"
 #include "DataFormatsParameters/GRPLHCIFData.h"
@@ -1310,6 +1313,8 @@ enum Counter { Selected,
                OutsideGrid,
                NoResidual,
                NoInnerPoints,
+               KinkQAWritten,
+               KinkQASkipped,
                NCounters };
 
 /// what the fit threads share read-only
@@ -1322,9 +1327,78 @@ struct FitContext {
   const RowGeometry* geometry = nullptr;
   float maxZ2X = 0.f;
   int voxelsPerSector = 0;
-  int itsInFit = 0;       ///< 1: the ITS clusters in the fit, 2: also the primary vertex
-  bool fitSlopes = false; ///< the slopes of the voxel model from the fitted track instead of the reference
+  int itsInFit = 0;                                  ///< 1: the ITS clusters in the fit, 2: also the primary vertex
+  bool fitSlopes = false;                            ///< the slopes of the voxel model from the fitted track instead of the reference
+  o2::utils::TreeStreamRedirector* kinkQA = nullptr; ///< kink QA (itsInFit): one streamer for all fit threads
+  std::mutex* kinkQAMutex = nullptr;
+  int kinkQAEvery = 0;
 };
+
+/// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track, per scatterer and direction (snp, tgl) GBL's kink residual
+/// (0 - fitted kink), its prior error (Highland) and its error after the fit: residual / error is unit Gaussian if the scattering model is
+/// right; the summed (residual / prior)^2 of the gap and its expectation sum (error / prior)^2. An entry is skipped while another thread writes.
+void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, const FitContext& context, std::array<long, NCounters>& counters)
+{
+  std::vector<float> x;
+  std::vector<int> type;
+  std::array<std::vector<float>, 2> residual;
+  std::array<std::vector<float>, 2> prior;
+  std::array<std::vector<float>, 2> error;
+  double chi2Gap = 0.;
+  double expectedGap = 0.;
+  double chi2Inner = 0.;
+  double expectedInner = 0.;
+  // GBL fills these without resizing them: two directions of a thin scatterer
+  Eigen::VectorXd residuals(2);
+  Eigen::VectorXd priorErrors(2);
+  Eigen::VectorXd errors(2);
+  Eigen::VectorXd downWeights(2);
+  for (size_t point = 1; point + 1 < fit.active.size(); ++point) {
+    const auto& cluster = clusters[fit.active[point]];
+    if (cluster.type == Cluster::TPC) {
+      break;
+    }
+    unsigned int numData = 0;
+    if (fit.trajectory->getScatResults(point + 1, numData, residuals, priorErrors, errors, downWeights) != 0 || numData < 2) {
+      continue;
+    }
+    x.push_back(cluster.x);
+    type.push_back(cluster.type);
+    for (int direction = 0; direction < 2; ++direction) {
+      residual[direction].push_back(residuals(direction));
+      prior[direction].push_back(priorErrors(direction));
+      error[direction].push_back(errors(direction));
+      const double chi2 = std::pow(residuals(direction) / priorErrors(direction), 2);
+      const double expected = std::pow(errors(direction) / priorErrors(direction), 2);
+      chi2Inner += chi2;
+      expectedInner += expected;
+      if (cluster.type == Cluster::Material) {
+        chi2Gap += chi2;
+        expectedGap += expected;
+      }
+    }
+  }
+  if (x.empty()) {
+    return;
+  }
+  std::unique_lock<std::mutex> lock(*context.kinkQAMutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    ++counters[KinkQASkipped];
+    return;
+  }
+  const auto& first = fit.reference.front();
+  float p = first.getP();
+  float pt = first.getPt();
+  float tgl = first.getTgl();
+  int charge = fit.qOverPt > 0. ? 1 : -1;
+  int pid = first.getPID().getID();
+  (*context.kinkQA) << "kinkQA"
+                    << "p=" << p << "pt=" << pt << "tgl=" << tgl << "charge=" << charge << "pid=" << pid << "x=" << x << "type=" << type
+                    << "residualSnp=" << residual[0] << "residualTgl=" << residual[1] << "priorSnp=" << prior[0] << "priorTgl=" << prior[1]
+                    << "errorSnp=" << error[0] << "errorTgl=" << error[1] << "chi2Gap=" << chi2Gap << "expectedGap=" << expectedGap
+                    << "chi2Inner=" << chi2Inner << "expectedInner=" << expectedInner << "\n";
+  ++counters[KinkQAWritten];
+}
 
 /// itsInFit: the track's ITS clusters (2: and its primary vertex) in front of its TPC clusters, from the inside out, and scatterer points in
 /// the gap between the last of them and the first TPC cluster (in that cluster's frame, centres of equal steps of at most GapStep); false
@@ -1455,6 +1529,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     return;
   }
   ++counters[Fitted];
+  if (context.kinkQA) {
+    thread_local long nKinkQA = 0;
+    if (++nKinkQA % context.kinkQAEvery == 0) {
+      writeKinkQA(fit, clusters, context, counters);
+    }
+  }
   counters[FitPasses] += fit.passes;
   counters[AtMaxPasses] += fit.passes >= MaxFitPasses;
   const int charge = fit.qOverPt > 0. ? 1 : 0;
@@ -1934,6 +2014,9 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
        label, nTFs, nTFsReadError, counters[Selected].load(), nFitted, counters[FitFailed].load(), counters[OutOfRowOrder].load(), counters[Residuals].load(),
        counters[ResidualsExcluded].load(), OutlierSigma, counters[Outliers].load(), counters[EdgePadResiduals].load(), counters[OutsideGrid].load(),
        counters[NoResidual].load(), counters[NoInnerPoints].load());
+  if (context.kinkQA) {
+    LOGP(info, "fineMapCreatorGBL{}: kink QA entries {} (skipped while busy {})", label, counters[KinkQAWritten].load(), counters[KinkQASkipped].load());
+  }
   LOGP(info, "fineMapCreatorGBL{}: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", label,
        nFitted ? double(counters[FitPasses]) / nFitted : 0., nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
   return nFitted;
@@ -1963,7 +2046,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        int smoothRobust = 0,                                                         // Tukey reweightings of the voxels in the smoothing
                        int nPasses = 1,                                                              // 2: pass 1 on the even TFs in time, pass 2 on the odd ones with pass 1's smoothed map subtracted
                        int itsInFit = 0,                                                             // tests: 1 the ITS clusters in the track fit, 2 also the primary vertex; 0 TPC clusters only
-                       bool fitSlopes = false)                                                       // the slopes of the voxel model from the fitted track at the cluster instead of the reference
+                       bool fitSlopes = false,                                                       // the slopes of the voxel model from the fitted track at the cluster instead of the reference
+                       int kinkQAEvery = 0)                                                          // with itsInFit: the kinks before the TPC of every n-th fitted track (per thread) to <output stem>.kinkQA.root; 0 off
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2115,6 +2199,18 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.voxelsPerSector = voxelsPerSector;
   context.itsInFit = itsInFit;
   context.fitSlopes = fitSlopes;
+  // the kink QA: one streamer for the fit threads, <output stem>.kinkQA.root
+  std::unique_ptr<o2::utils::TreeStreamRedirector> kinkQA;
+  std::mutex kinkQAMutex;
+  if (kinkQAEvery > 0 && itsInFit > 0) {
+    const std::filesystem::path outputPath(fileOutput);
+    const std::string kinkQAFile = ((outputPath.parent_path().empty() ? std::filesystem::path(".") : outputPath.parent_path()) / (outputPath.stem().string() + ".kinkQA.root")).string();
+    kinkQA = std::make_unique<o2::utils::TreeStreamRedirector>(kinkQAFile.c_str(), "recreate");
+    context.kinkQA = kinkQA.get();
+    context.kinkQAMutex = &kinkQAMutex;
+    context.kinkQAEvery = kinkQAEvery;
+    LOGP(info, "Kink QA of every {}th fitted track per fit thread: {}", kinkQAEvery, kinkQAFile);
+  }
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
   SelectedTFs selected;
   long nFitted = runPass(passTFs[0], files, context, nThreads, sums, selected, nPasses == 2 ? " pass 1" : "");
@@ -2176,6 +2272,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   } else if (smoothTau > 0.f && !smooth(sums, smoothed, "")) {
     LOGP(error, "Smoothing failed: DS = D");
     smoothed.clear();
+  }
+  if (kinkQA) {
+    kinkQA->Close();
   }
   extraInfo.emplace_back("smoothing", smoothed.empty() ? std::string("none") : fmt::format("tau {} um, tau0 {} um, robust {}", smoothTau, smoothTau0, smoothRobust));
   writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, smoothed, passOne, sumsPassOne, extraInfo, nFitted, minEntries, writeSums, runNumber,
