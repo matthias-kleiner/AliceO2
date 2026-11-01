@@ -660,6 +660,107 @@ struct VoxelData {
   int counterZAll = 0;                  // was vec_residuals_counterZAll_thread
 };
 
+// Residual slope method (the voxel model of fineMapCreatorGBL.C): per cluster dy = dY - s_y dX with s_y = tgSlp and
+// dz = dZ - s_z dX with s_z = tgl / cos(phi). Per voxel and charge the entries, the position sums and per channel (y, z) the sums
+// w, w s, w s^2, w r, w s r, w r^2 (r = dy or dz, w = 1 / sigma^2 of the cluster); filled next to the CPM pools (same voxel mutex),
+// layout and voxel solve as in fineMapCreatorGBL.C, so the tree fineSums can be read by the same tools.
+struct ChargeSums {
+  enum Sum { W,
+             WS,
+             WSS,
+             WR,
+             WSR,
+             WRR,
+             NSums };
+  double entries = 0.;
+  double x = 0.;
+  double y2x = 0.;
+  double z2x = 0.;
+  std::array<double, NSums> y{};
+  std::array<double, NSums> z{};
+
+  static void fill(std::array<double, NSums>& channel, double slope, double residual, double weight)
+  {
+    channel[W] += weight;
+    channel[WS] += weight * slope;
+    channel[WSS] += weight * slope * slope;
+    channel[WR] += weight * residual;
+    channel[WSR] += weight * slope * residual;
+    channel[WRR] += weight * residual * residual;
+  }
+
+  void add(const ChargeSums& other)
+  {
+    entries += other.entries;
+    x += other.x;
+    y2x += other.y2x;
+    z2x += other.z2x;
+    for (int sum = 0; sum < NSums; ++sum) {
+      y[sum] += other.y[sum];
+      z[sum] += other.z[sum];
+    }
+  }
+};
+
+struct VoxelSolution {
+  std::array<double, 3> value{}; ///< dX, dY, dZ
+  std::array<double, 3> error{}; ///< scaled by sqrt(chi2Scale)
+  double correlationXY = 0.;
+  double rmsY = 0.;
+  double rmsZ = 0.;
+  double chi2Scale = 1.; ///< max(1, chi2 / ndf)
+};
+
+/// the voxel solve: dX, dY from the y channel (2 x 2), then dZ = <r_z> + <s_z> dX; false below minEntries or singular
+bool solveVoxel(const ChargeSums& sums, double minEntries, VoxelSolution& solution)
+{
+  using S = ChargeSums;
+  if (sums.entries < minEntries || sums.y[S::W] <= 0. || sums.z[S::W] <= 0.) {
+    return false;
+  }
+  // normal matrix ((WSS, -WS), (-WS, W)) of (dX, dY) and its inverse
+  const double determinant = sums.y[S::WSS] * sums.y[S::W] - sums.y[S::WS] * sums.y[S::WS];
+  if (!(determinant > 1e-12 * sums.y[S::WSS] * sums.y[S::W])) {
+    return false;
+  }
+  const double covarianceXX = sums.y[S::W] / determinant;
+  const double covarianceXY = sums.y[S::WS] / determinant;
+  const double covarianceYY = sums.y[S::WSS] / determinant;
+  const double dX = -covarianceXX * sums.y[S::WSR] + covarianceXY * sums.y[S::WR];
+  const double dY = -covarianceXY * sums.y[S::WSR] + covarianceYY * sums.y[S::WR];
+  const double meanSlopeZ = sums.z[S::WS] / sums.z[S::W];
+  const double dZ = sums.z[S::WR] / sums.z[S::W] + meanSlopeZ * dX;
+  const double chi2Y = sums.y[S::WRR] + dY * dY * sums.y[S::W] + dX * dX * sums.y[S::WSS] - 2. * dY * sums.y[S::WR] + 2. * dX * sums.y[S::WSR] - 2. * dX * dY * sums.y[S::WS];
+  const double chi2Z = sums.z[S::WRR] + dZ * dZ * sums.z[S::W] + dX * dX * sums.z[S::WSS] - 2. * dZ * sums.z[S::WR] + 2. * dX * sums.z[S::WSR] - 2. * dX * dZ * sums.z[S::WS];
+  const int ndf = int(2. * sums.entries + 0.5) - 3;
+  const double chi2 = std::max(0., chi2Y) + std::max(0., chi2Z);
+  const double scale = ndf > 0 ? std::max(1., chi2 / ndf) : 1.;
+  solution.value = {dX, dY, dZ};
+  solution.error[0] = std::sqrt(std::max(0., covarianceXX) * scale);
+  solution.error[1] = std::sqrt(std::max(0., covarianceYY) * scale);
+  solution.error[2] = std::sqrt(std::max(0., 1. / sums.z[S::W] + meanSlopeZ * meanSlopeZ * covarianceXX) * scale);
+  solution.correlationXY = covarianceXX * covarianceYY > 0. ? covarianceXY / std::sqrt(covarianceXX * covarianceYY) : 0.;
+  solution.rmsY = std::sqrt(std::max(0., chi2Y) / sums.y[S::W]);
+  solution.rmsZ = std::sqrt(std::max(0., chi2Z) / sums.z[S::W]);
+  solution.chi2Scale = scale;
+  return std::isfinite(dX) && std::isfinite(dY) && std::isfinite(dZ);
+}
+
+/// TPC cluster errors (cm) as in fineMapCreatorGBL.C: per pad-row region, track angles and drift length
+void clusterErrors(int row, double z, double tgSlp, double tgl, double& sigmaY, double& sigmaZ)
+{
+  constexpr double ErrorsY[3] = {0.06, 0.24, 0.12};
+  constexpr double ErrorsZ[3] = {0.06, 0.24, 0.15};
+  constexpr double PadHeight[4] = {0.75, 1.0, 1.2, 1.5};
+  constexpr double DriftLength = 250.;
+  const double padHeight = PadHeight[row < 63 ? 0 : (row < 97 ? 1 : (row < 127 ? 2 : 3))];
+  const double drift = DriftLength - std::abs(z);
+  const double angleY2 = tgSlp * tgSlp;
+  const double angleZ2 = tgl * tgl * (1. + tgSlp * tgSlp);
+  sigmaY = std::sqrt(ErrorsY[0] * ErrorsY[0] + ErrorsY[1] * ErrorsY[1] * padHeight * angleY2 + ErrorsY[2] * ErrorsY[2] / DriftLength / padHeight * drift);
+  sigmaZ = std::sqrt(ErrorsZ[0] * ErrorsZ[0] + ErrorsZ[1] * ErrorsZ[1] * padHeight * angleZ2 + ErrorsZ[2] * ErrorsZ[2] / DriftLength / padHeight * drift);
+}
+
 // One TimeFrame's data, fully OWNED (copied out of the TTreeReaderValues rather than referencing them).
 // TTreeReaderValue::operator* reuses the same underlying storage on every SetEntry -- a background
 // producer thread reading TF N+1 into that storage while the consumer is still processing TF N's tracks
@@ -774,7 +875,8 @@ void doFileProcessing(const int iThread,
                       const float maxDistIntCls,
                       const int nY2XBins,
                       const int nZ2XBins,
-                      std::vector<VoxelData>& voxels, // flat [sec*152*nY2XBins*nZ2XBins + ix*nY2XBins*nZ2XBins + iy*nZ2XBins + iz] -- shared across threads, one instance per voxel
+                      std::vector<VoxelData>& voxels,                    // flat [sec*152*nY2XBins*nZ2XBins + ix*nY2XBins*nZ2XBins + iy*nZ2XBins + iz] -- shared across threads, one instance per voxel
+                      std::vector<std::array<ChargeSums, 2>>& slopeSums, // same index as voxels, [charge]; guarded by the voxel's mutex; empty: residual slope method off
                       std::vector<Long64_t>& totalBytesReadPerf_thread,
                       std::vector<size_t>& lumiEntriesCTP_thread,
                       std::vector<double>& lumiSumCTP_thread,
@@ -1552,7 +1654,8 @@ void doFileProcessing(const int iThread,
           }
 
           // circle pool for this voxel is shared across threads -> lock for the rest of this iteration
-          auto& vox = voxels[((sec * NRows + bvox[2]) * nY2XBins + bvox[1]) * nZ2XBins + bvox[0]];
+          const size_t voxelIndex = ((sec * NRows + bvox[2]) * nY2XBins + bvox[1]) * nZ2XBins + bvox[0];
+          auto& vox = voxels[voxelIndex];
           std::unique_lock<std::mutex> voxLock(vox.mtx);
 
           // XALEX
@@ -1594,6 +1697,22 @@ void doFileProcessing(const int iThread,
 
           if ((trackPosAtRow_worker[iWorker] - clsPosWorker[iWorker]).Perp() > maxDistIntCls) {
             continue;
+          }
+
+          // residual slope method: the cluster's residual to the reference track, the reference's tgSlp, the track's tgl
+          if (!slopeSums.empty()) {
+            const float tgSlp = residIn.tgSlp * param::MaxTgSlp / 0x7fff;
+            const float tgl = trkPar.getTgl();
+            double sigmaY = 0.;
+            double sigmaZ = 0.;
+            clusterErrors(residIn.row, zPos, tgSlp, tgl, sigmaY, sigmaZ);
+            auto& sums = slopeSums[voxelIndex][charge];
+            sums.entries += 1.;
+            sums.x += xPos;
+            sums.y2x += yPos / xPos;
+            sums.z2x += zPos / xPos;
+            ChargeSums::fill(sums.y, tgSlp, residIn.dy * param::MaxResid / 0x7fff, 1. / (sigmaY * sigmaY));
+            ChargeSums::fill(sums.z, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, 1. / (sigmaZ * sigmaZ));
           }
 
           //-----------------------------------------
@@ -1889,9 +2008,13 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                                                                 // auto-detects via hardware_concurrency(), which reports the machine's core
                                                                 // count rather than the cores actually allocated to a batch job -- pass the
                                                                 // real allocation explicitly when running on a batch system or the GRID
-                         int nThreads = 8)                      // number of file-level threads, i.e. how many input files are processed
+                         int nThreads = 8,                      // number of file-level threads, i.e. how many input files are processed
                                                                 // concurrently. Forced to 1 for alien:// input regardless, since TGrid is
                                                                 // not thread-safe (see below)
+                         int voxelMethod = 0,                   // voxResTree from 0: CPM, 1: the residual slope method (D with the errors E,
+                                                                // EXYCorr, at the voxel's mean position; see ChargeSums)
+                         bool writeSlopeSums = false)           // also write the residual slope method's per-voxel sums (tree fineSums, the
+                                                                // layout of fineMapCreatorGBL.C); either option costs ~260 B per voxel
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2116,6 +2239,14 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
 
   // residualsAll/NP/PP/NN + their counters now live directly in VoxelData (shared, per-voxel mutex), so no per-thread copies or later merge pass are needed for them.
 
+  // residual slope method: allocated only if used
+  if (voxelMethod != 0 && voxelMethod != 1) {
+    LOGP(fatal, "voxelMethod {}: 0 (CPM) or 1 (residual slope method)", voxelMethod);
+  }
+  const bool useSlopeSums = voxelMethod == 1 || writeSlopeSums;
+  std::vector<std::array<ChargeSums, 2>> slopeSums(useSlopeSums ? voxels.size() : 0);
+  LOGP(info, "voxResTree from the {}{}", voxelMethod == 1 ? "residual slope method" : "CPM", writeSlopeSums ? ", residual slope sums written (fineSums)" : "");
+
   // The per-file input handles (TFile, TTreeReaders, TTreeReaderValues) and the I/O-rate sampling state
   // are plain locals inside doFileProcessing: each thread only ever used its own slot, so they never
   // needed to be shared vectors here. Only totalBytesReadPerf is still per-thread, because it is summed
@@ -2167,6 +2298,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              nY2XBins,
                              nZ2XBins,
                              std::ref(voxels),
+                             std::ref(slopeSums),
                              std::ref(totalBytesReadPerf_thread),
                              std::ref(lumiEntriesCTP_thread),
                              std::ref(lumiSumCTP_thread),
@@ -2355,11 +2487,48 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   if (isBadCalib) {
     userInfo->Add(new TNamed("badCalib", "1"));
   }
+  userInfo->Add(new TNamed("voxelMethod", voxelMethod == 1 ? "slope" : "CPM"));
 
+  long nSlopeSolved = 0;
   for (int isec = 0; isec < NSectors; isec++) {
     for (int iz = 0; iz < nZ2XBins; iz++) {
       for (int iy = 0; iy < nY2XBins; iy++) {
         for (int ix = 0; ix < NRows; ix++) {
+          if (voxelMethod == 1) {
+            // residual slope method: the voxel solve of both charges' sums, at the voxel's mean position
+            ChargeSums total = slopeSums[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][0];
+            total.add(slopeSums[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][1]);
+            VoxelSolution solution;
+            const bool solved = solveVoxel(total, params.minEntriesPerVoxel, solution);
+            nSlopeSolved += solved;
+            mVoxelResultsOut = TrackResiduals::VoxRes();
+            for (int ixyz = 0; ixyz < 3; ixyz++) {
+              mVoxelResultsOut.D[ixyz] = solved ? solution.value[ixyz] : 0.;
+              mVoxelResultsOut.DS[ixyz] = mVoxelResultsOut.D[ixyz];
+              mVoxelResultsOut.DC[ixyz] = mVoxelResultsOut.D[ixyz];
+              mVoxelResultsOut.E[ixyz] = solved ? solution.error[ixyz] : 0.;
+            }
+            float centreX = 0.f;
+            float centreY2X = 0.f;
+            float centreZ2X = 0.f;
+            trackResiduals.getVoxelCoordinates(isec, ix, iy, iz, centreX, centreY2X, centreZ2X);
+            mVoxelResultsOut.stat[TrackResiduals::VoxZ] = total.entries > 0. ? total.z2x / total.entries : centreZ2X;
+            mVoxelResultsOut.stat[TrackResiduals::VoxF] = total.entries > 0. ? total.y2x / total.entries : centreY2X;
+            mVoxelResultsOut.stat[TrackResiduals::VoxX] = total.entries > 0. ? total.x / total.entries : centreX;
+            mVoxelResultsOut.stat[TrackResiduals::VoxV] = total.entries;
+            mVoxelResultsOut.EXYCorr = solution.correlationXY;
+            mVoxelResultsOut.dYSigMAD = solution.rmsY;
+            mVoxelResultsOut.dZSigLTM = solution.rmsZ;
+            mVoxelResultsOut.D[TrackResiduals::ResD] = solution.rmsY;
+            mVoxelResultsOut.DS[TrackResiduals::ResD] = solution.rmsY;
+            mVoxelResultsOut.bvox[0] = iz;
+            mVoxelResultsOut.bvox[1] = iy;
+            mVoxelResultsOut.bvox[2] = ix;
+            mVoxelResultsOut.bsec = isec;
+            mVoxelResultsOut.flags = solved ? (TrackResiduals::DistDone | TrackResiduals::DispDone | TrackResiduals::SmoothDone) : 0;
+            mTreeOut->Fill();
+            continue;
+          }
           for (int ixyz = 0; ixyz < 3; ixyz++) {
             mVoxelResultsOut.D[ixyz] = vec_residualsAll[isec][ix][iy][iz][ixyz];
             mVoxelResultsOut.DS[ixyz] = vec_residualsAll[isec][ix][iy][iz][ixyz];
@@ -2409,6 +2578,54 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   tOrbitLumi.Branch("medianTimeMS", &medianTimeMS);
   tOrbitLumi.Fill();
   tOrbitLumi.Write();
+
+  if (voxelMethod == 1) {
+    LOGP(info, "residual slope method: {} of {} voxels solved (min entries {})", nSlopeSolved, slopeSums.size(), params.minEntriesPerVoxel);
+  }
+  if (writeSlopeSums) {
+    // per voxel with entries and charge the residual slope method's sums, as fineMapCreatorGBL.C's tree fineSums (voxel = sector x
+    // voxels per sector + getGlbVoxBin(row, y/x bin, z/x bin))
+    TTree sumsTree("fineSums", "per voxel and charge the residual slope method's sums of the residuals to the reference track (staticMapCreatorCPM.C)");
+    for (const char* key : {"y2xBinning", "z2xBinning", "maxZ2X"}) {
+      sumsTree.GetUserInfo()->Add(userInfo->FindObject(key)->Clone());
+    }
+    sumsTree.GetUserInfo()->Add(new TNamed("nTracks", std::to_string(nTracksProcessed_final).data()));
+    int voxelIndex = 0;
+    float entries[2] = {};
+    float position[2][3] = {};
+    float channelY[2][ChargeSums::NSums] = {};
+    float channelZ[2][ChargeSums::NSums] = {};
+    sumsTree.Branch("voxel", &voxelIndex);
+    sumsTree.Branch("entries", entries, "entries[2]/F");
+    sumsTree.Branch("position", position, "position[2][3]/F");
+    sumsTree.Branch("y", channelY, "y[2][6]/F");
+    sumsTree.Branch("z", channelZ, "z[2][6]/F");
+    for (int isec = 0; isec < NSectors; isec++) {
+      for (int iz = 0; iz < nZ2XBins; iz++) {
+        for (int iy = 0; iy < nY2XBins; iy++) {
+          for (int ix = 0; ix < NRows; ix++) {
+            const auto& voxelSums = slopeSums[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz];
+            if (voxelSums[0].entries + voxelSums[1].entries <= 0.) {
+              continue;
+            }
+            voxelIndex = isec * trackResiduals.getNVoxelsPerSector() + trackResiduals.getGlbVoxBin(ix, iy, iz);
+            for (int charge = 0; charge < 2; ++charge) {
+              entries[charge] = voxelSums[charge].entries;
+              position[charge][0] = voxelSums[charge].x;
+              position[charge][1] = voxelSums[charge].y2x;
+              position[charge][2] = voxelSums[charge].z2x;
+              for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+                channelY[charge][sum] = voxelSums[charge].y[sum];
+                channelZ[charge][sum] = voxelSums[charge].z[sum];
+              }
+            }
+            sumsTree.Fill();
+          }
+        }
+      }
+    }
+    sumsTree.Write();
+  }
 
   {
     TTree tMetaData("MetaData", "Meta data information");
