@@ -22,10 +22,10 @@
 ///   errors x ExcludedSigmaScale: they hardly pull the track, and their unbiased residuals are summed like the others;
 /// - reference: the ITS track propagated cluster to cluster with the PropagatorD (field map, LUT energy loss, the mass hypothesis of the
 ///   tracking = the stored track's PID); one GBL point per cluster with the step Jacobian (helix in the mean local Bz, central
-///   differences) and a thin scatterer every ScatterEvery points with the x/X0 of its steps (Highland with the PID's mass and the charge,
-///   the log term of the whole track); the seed takes GBL's correction at the first cluster every pass; from FirstOutlierPass on,
-///   measurements beyond OutlierSigma of the previous pass's fit are dropped; a track stops once no new outlier appears and GBL's
-///   correction is negligible;
+///   differences) and a thin scatterer every ScatterEvery points with the x/X0 of its steps (Highland with the PID's mass, the charge and
+///   the momentum of the pass's seed, the log term of the whole track); the seed takes GBL's correction at the first cluster every
+///   pass; from FirstOutlierPass on, measurements beyond OutlierSigma of the previous pass's fit are dropped; a track stops once no new
+///   outlier appears and GBL's correction is negligible;
 /// - per cluster the unbiased residual r m^2 / e^2 (m: its error in the fit, e: GBL's residual error) with the variance sigma^2 + u,
 ///   u = v m^2 / (m^2 - v), v = m^2 - e^2 (sigma: the cluster's own error); the voxel from the best position y - r sigma^2 / (sigma^2 + u)
 ///   (cluster and prediction combined: binning by the measured position is Berkson); unbiased pull > OutlierSigma and the outermost
@@ -1135,13 +1135,14 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
   // gap: tens of um, proportional to the track slope)
   const bool kinkedReference = clusters.front().type != Cluster::TPC;
   std::vector<std::array<double, 2>> kinks(clusters.size(), {0., 0.});
-  // multiple scattering with the mass hypothesis of the tracking (the PID of the stored track) and the charge
-  const double momentum = seed.getP();
-  const double mass = seed.getPID().getMass();
-  const double beta = momentum / std::sqrt(momentum * momentum + mass * mass);
   Eigen::VectorXd residuals(2);
   Eigen::VectorXd measurementErrors(2);
   for (int pass = 0; pass < MaxFitPasses; ++pass) {
+    // multiple scattering with the momentum of the current seed (pass 0: the ITS track, then GBL's fit), the mass hypothesis of the
+    // tracking (the PID of the stored track) and the charge
+    const double momentum = seed.getP();
+    const double mass = seed.getPID().getMass();
+    const double beta = momentum / std::sqrt(momentum * momentum + mass * mass);
     // reference from the seed through the clusters still active (not reached: dropped; flagged by the previous pass: dropped)
     std::vector<int> kept;
     std::vector<TrackParD> reference; ///< at each point, in front of its kink
