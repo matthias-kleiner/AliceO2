@@ -159,10 +159,9 @@ constexpr int ScatterEvery = 5;            ///< a scatterer every n points with 
 constexpr int MinFitClusters = 60;         ///< clusters not de-weighted
 constexpr double ExcludedSigmaScale = 10.; ///< errors of the de-weighted clusters in the fit
 // clusters de-weighted in the fit, on the pad plane
-constexpr int StackRows = 2;     ///< rows on each side of a stack boundary
-constexpr int EdgeRows = 4;      ///< the first / last rows
-constexpr double EdgePads = 2.;  ///< pads from the pad plane's edge
-constexpr double EdgeY2X = 0.14; ///< |y/x| above
+constexpr int StackRows = 2;    ///< rows on each side of a stack boundary
+constexpr int EdgeRows = 4;     ///< the first / last rows
+constexpr double EdgePads = 2.; ///< pads from the pad plane's edge, in every row
 // residuals not summed
 constexpr double SkipEdgePads = 1.; ///< the outermost pads of the row, at the best position
 // threading
@@ -271,7 +270,7 @@ struct RowGeometry {
 };
 
 /// the clusters de-weighted in the track fit: stack boundaries (first rows of OROC1 / 2 / 3) and the first / last rows, within EdgePads of
-/// the pad plane's edge, |y/x| above EdgeY2X
+/// the pad plane's edge (counted in pads per row: the pad plane's edge does not follow a constant y/x)
 bool isExcludedFromFit(int row, double padY, const RowGeometry& geometry)
 {
   for (int boundary : {63, 97, 127}) {
@@ -283,7 +282,7 @@ bool isExcludedFromFit(int row, double padY, const RowGeometry& geometry)
     return true;
   }
   const double absY = std::abs(padY);
-  return absY > geometry.padPlaneEdge[row] - EdgePads * geometry.padWidth[row] || absY > EdgeY2X * geometry.x[row];
+  return absY > geometry.padPlaneEdge[row] - EdgePads * geometry.padWidth[row];
 }
 
 /// TPC cluster errors (GPUParam's parametrisation)
