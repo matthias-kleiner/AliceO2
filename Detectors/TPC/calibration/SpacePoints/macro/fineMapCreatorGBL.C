@@ -1335,12 +1335,14 @@ struct FitContext {
   int kinkQAEvery = 0;
 };
 
-/// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track, per scatterer and direction (snp, tgl) GBL's kink residual
+/// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
+/// on tgl, with the vertex z spread), per scatterer and direction (snp, tgl) GBL's kink residual
 /// (0 - fitted kink), its prior error (Highland) and its error after the fit: residual / error is unit Gaussian if the scattering model is
 /// right; the summed (residual / prior)^2 of the gap and its expectation sum (error / prior)^2. An entry is skipped while another thread writes.
 void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, const FitContext& context, std::array<long, NCounters>& counters)
 {
   std::vector<float> x;
+  std::vector<float> z;
   std::vector<int> type;
   std::array<std::vector<float>, 2> residual;
   std::array<std::vector<float>, 2> prior;
@@ -1364,6 +1366,7 @@ void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, con
       continue;
     }
     x.push_back(cluster.x);
+    z.push_back(fit.reference[point].getZ());
     type.push_back(cluster.type);
     for (int direction = 0; direction < 2; ++direction) {
       residual[direction].push_back(residuals(direction));
@@ -1394,7 +1397,7 @@ void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, con
   int charge = fit.qOverPt > 0. ? 1 : -1;
   int pid = first.getPID().getID();
   (*context.kinkQA) << "kinkQA"
-                    << "p=" << p << "pt=" << pt << "tgl=" << tgl << "charge=" << charge << "pid=" << pid << "x=" << x << "type=" << type
+                    << "p=" << p << "pt=" << pt << "tgl=" << tgl << "charge=" << charge << "pid=" << pid << "x=" << x << "z=" << z << "type=" << type
                     << "residualSnp=" << residual[0] << "residualTgl=" << residual[1] << "priorSnp=" << prior[0] << "priorTgl=" << prior[1]
                     << "errorSnp=" << error[0] << "errorTgl=" << error[1] << "chi2Gap=" << chi2Gap << "expectedGap=" << expectedGap
                     << "chi2Inner=" << chi2Inner << "expectedInner=" << expectedInner << "\n";
