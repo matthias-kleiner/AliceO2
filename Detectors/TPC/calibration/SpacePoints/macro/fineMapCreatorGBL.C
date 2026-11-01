@@ -52,6 +52,11 @@
 /// in front of the TPC clusters, a scatterer at every point before the TPC and scatterer points every GapStep in the gap to the TPC, the
 /// reference from the vertex (or the innermost ITS cluster) on; only the TPC clusters' unbiased residuals are summed. The track's kinks are
 /// then fitted: the reference does not follow them, so the slopes of the voxel model should be the fitted track's (fitSlopes).
+/// The scattering before the TPC has non-Gaussian tails (single large-angle and nuclear scatters; in MC 3-5 % of the gap kinks beyond 3
+/// sigma of Highland): from the first outlier pass on, a kink there with |residual / error| > KinkTailPull (the larger of its two
+/// directions) gets its variance x (pull / KinkTailPull)^2 for this track and the fit continues until no kink is beyond. Otherwise a hard
+/// scatter in the gap bends the TPC part of the track towards the ITS direction, a bias of the slope regressor (in no-dist MC a radial dX
+/// tilt OROC1 - OROC3 of 16 um, 7 um with the inflation; a scaled Gaussian core in the gap on top changes it by ~1 um).
 /// kinkQAEvery > 0 (with itsInFit): per sampled track the kink residuals of the scatterers before the TPC with their prior (Highland) and
 /// post-fit errors: unit Gaussian pulls residual / error if the modelled scattering is right (tree kinkQA in <output stem>.kinkQA.root).
 ///
@@ -177,6 +182,8 @@ constexpr double VertexSigmaY = 0.002;                 ///< [cm] primary vertex 
 constexpr double VertexSigmaZ = 0.005;                 ///< [cm]
 constexpr double GapStep = 5.;                         ///< [cm] scatterers in the gap from the ITS to the TPC: one per step of at most this length
 constexpr long IdealGeometryTimeStamp = 1704063600000; ///< GLO/Config/Geometry of MC (the ideal geometry)
+constexpr double KinkTailPull = 3.;                    ///< a kink before the TPC beyond this pull gets its scattering variance x (pull / KinkTailPull)^2
+constexpr double MaxKinkInflation = 1e4;               ///< at most
 // smoothing
 constexpr double SmoothTukey = 4.685;        ///< Tukey's bisquare constant of the robust reweighting
 constexpr double SmoothCGTolerance = 1e-8;   ///< relative residual norm of the conjugate gradients
@@ -1121,6 +1128,7 @@ struct FitResult {
   std::unique_ptr<gbl::GblTrajectory> trajectory;
   double qOverPt = 0.;
   int passes = 0;
+  std::vector<float> kinkInflation; ///< per active point: the tail inflation of its scattering variance (1: none)
 };
 
 bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
@@ -1134,8 +1142,14 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
   // gap: tens of um, proportional to the track slope)
   const bool kinkedReference = clusters.front().type != Cluster::TPC;
   std::vector<std::array<double, 2>> kinks(clusters.size(), {0., 0.});
+  std::vector<double> kinkInflation(clusters.size(), 1.);
   Eigen::VectorXd residuals(2);
   Eigen::VectorXd measurementErrors(2);
+  // GBL fills these without resizing them: two directions of a thin scatterer
+  Eigen::VectorXd kinkResiduals(2);
+  Eigen::VectorXd kinkPriors(2);
+  Eigen::VectorXd kinkErrors(2);
+  Eigen::VectorXd kinkDownWeights(2);
   for (int pass = 0; pass < MaxFitPasses; ++pass) {
     // multiple scattering with the momentum of the current seed (pass 0: the ITS track, then GBL's fit), the mass hypothesis of the
     // tracking (the PID of the stored track) and the charge
@@ -1235,8 +1249,9 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
         const double snp = reference[point].getSnp();
         const double secLambda2 = 1. + reference[point].getTgl() * reference[point].getTgl();
         const auto& kink = kinks[result.active[point]];
+        const double inflatedTheta2 = theta2 * (point < nInner ? kinkInflation[result.active[point]] : 1.);
         gblPoint.addScatterer(kinked ? Eigen::Vector2d(-kink[0], -kink[1]) : Eigen::Vector2d::Zero(),
-                              Eigen::Vector2d(1. / (theta2 * (1. - snp * snp) * secLambda2), 1. / (theta2 * secLambda2 * secLambda2)));
+                              Eigen::Vector2d(1. / (inflatedTheta2 * (1. - snp * snp) * secLambda2), 1. / (inflatedTheta2 * secLambda2 * secLambda2)));
       }
       points.push_back(gblPoint);
     }
@@ -1258,6 +1273,27 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
                                                  std::abs(residuals(1)) > OutlierSigma * measurementErrors(1));
         flagged[result.active[point]] = result.outlier[point];
         newOutliers |= result.outlier[point] != 0;
+      }
+    }
+    // tail kinks before the TPC: variance x (pull / KinkTailPull)^2 for the next pass
+    bool newInflation = false;
+    if (pass + 1 >= FirstOutlierPass) {
+      for (size_t point = 1; point < nInner && point + 1 < nPoints; ++point) {
+        unsigned int numData = 0;
+        if (result.trajectory->getScatResults(point + 1, numData, kinkResiduals, kinkPriors, kinkErrors, kinkDownWeights) != 0 || numData < 2) {
+          continue;
+        }
+        double pull = 0.;
+        for (int direction = 0; direction < 2; ++direction) {
+          if (kinkErrors(direction) > 0.) {
+            pull = std::max(pull, std::abs(kinkResiduals(direction) / kinkErrors(direction)));
+          }
+        }
+        auto& inflation = kinkInflation[result.active[point]];
+        if (pull > KinkTailPull && inflation < MaxKinkInflation) {
+          inflation = std::min(MaxKinkInflation, inflation * (pull / KinkTailPull) * (pull / KinkTailPull));
+          newInflation = true;
+        }
       }
     }
     // the seed: the first point's reference plus GBL's correction there
@@ -1289,14 +1325,18 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
     }
     result.reference.swap(reference);
     result.passes = pass + 1;
-    // converged: from the first outlier pass on, no new outlier and GBL's correction at the first point negligible (1 um in y / z, 1e-6 in
-    // snp / tgl, 1e-4 of q/p): the reference is the fit, further passes change nothing
-    if (pass >= FirstOutlierPass && !newOutliers && std::abs(corrections(3)) < 1e-4 && std::abs(corrections(4)) < 1e-4 &&
+    // converged: from the first outlier pass on, no new outlier or inflated kink and GBL's correction at the first point negligible (1 um
+    // in y / z, 1e-6 in snp / tgl, 1e-4 of q/p): the reference is the fit, further passes change nothing
+    if (pass >= FirstOutlierPass && !newOutliers && !newInflation && std::abs(corrections(3)) < 1e-4 && std::abs(corrections(4)) < 1e-4 &&
         std::abs(corrections(1)) < 1e-6 && std::abs(corrections(2)) < 1e-6 && std::abs(corrections(0)) < 1e-4 * std::abs(parameters[0]) && kinkUpdate < 1e-6) {
       break;
     }
   }
   result.qOverPt = seed.getQ2Pt();
+  result.kinkInflation.clear();
+  for (int index : result.active) {
+    result.kinkInflation.push_back(kinkInflation[index]);
+  }
   return true;
 }
 
@@ -1337,12 +1377,14 @@ struct FitContext {
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
 /// on tgl, with the vertex z spread), per scatterer and direction (snp, tgl) GBL's kink residual
 /// (0 - fitted kink), its prior error (Highland) and its error after the fit: residual / error is unit Gaussian if the scattering model is
-/// right; the summed (residual / prior)^2 of the gap and its expectation sum (error / prior)^2. An entry is skipped while another thread writes.
+/// right; the summed (residual / prior)^2 of the gap and its expectation sum (error / prior)^2; the prior includes the tail inflation
+/// (inflation per scatterer, 1: none). An entry is skipped while another thread writes.
 void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, const FitContext& context, std::array<long, NCounters>& counters)
 {
   std::vector<float> x;
   std::vector<float> z;
   std::vector<int> type;
+  std::vector<float> inflation;
   std::array<std::vector<float>, 2> residual;
   std::array<std::vector<float>, 2> prior;
   std::array<std::vector<float>, 2> error;
@@ -1367,6 +1409,7 @@ void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, con
     x.push_back(cluster.x);
     z.push_back(fit.reference[point].getZ());
     type.push_back(cluster.type);
+    inflation.push_back(fit.kinkInflation[point]);
     for (int direction = 0; direction < 2; ++direction) {
       residual[direction].push_back(residuals(direction));
       prior[direction].push_back(priorErrors(direction));
@@ -1396,7 +1439,7 @@ void writeKinkQA(const FitResult& fit, const std::vector<Cluster>& clusters, con
   int charge = fit.qOverPt > 0. ? 1 : -1;
   int pid = first.getPID().getID();
   (*context.kinkQA) << "kinkQA"
-                    << "p=" << p << "pt=" << pt << "tgl=" << tgl << "charge=" << charge << "pid=" << pid << "x=" << x << "z=" << z << "type=" << type
+                    << "p=" << p << "pt=" << pt << "tgl=" << tgl << "charge=" << charge << "pid=" << pid << "x=" << x << "z=" << z << "inflation=" << inflation << "type=" << type
                     << "residualSnp=" << residual[0] << "residualTgl=" << residual[1] << "priorSnp=" << prior[0] << "priorTgl=" << prior[1]
                     << "errorSnp=" << error[0] << "errorTgl=" << error[1] << "chi2Gap=" << chi2Gap << "expectedGap=" << expectedGap
                     << "chi2Inner=" << chi2Inner << "expectedInner=" << expectedInner << "\n";
@@ -2152,8 +2195,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
       LOGP(fatal, "No geometry for the ITS sensors");
     }
     o2::its::GeometryTGeo::Instance();
-    LOGP(info, "ITS clusters{} in the track fit, {} geometry; slopes from the {}", itsInFit > 1 ? " and the primary vertex" : "",
-         isMC ? "ideal (MC)" : "aligned", fitSlopes ? "fitted track" : "reference");
+    LOGP(info, "ITS clusters{} in the track fit, {} geometry; slopes from the {}; kinks before the TPC beyond {} sigma inflated",
+         itsInFit > 1 ? " and the primary vertex" : "", isMC ? "ideal (MC)" : "aligned", fitSlopes ? "fitted track" : "reference", KinkTailPull);
   }
   long nTFsNoIDC = 0;
   for (auto& tf : tfs) {
