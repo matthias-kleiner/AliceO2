@@ -366,7 +366,9 @@ struct FineMapInput {
       auto* object = tree ? tree->GetUserInfo()->FindObject(key) : nullptr;
       return object ? object->GetTitle() : "";
     };
-    if (!tree || info("y2xBinning").empty() || info("z2xBinning").empty() || info("maxZ2X").empty()) {
+    // an empty binning string is the default binning (staticMapCreatorCPM.C writes the arguments as given)
+    auto has = [&](const char* key) { return tree->GetUserInfo()->FindObject(key) != nullptr; };
+    if (!tree || !has("y2xBinning") || !has("z2xBinning") || info("maxZ2X").empty()) {
       LOGP(error, "Fine map {}: no voxResTree with the binning in its user info", fileName);
       return false;
     }
@@ -567,9 +569,9 @@ void fillIDCs(std::vector<TFInfo>& tfs, const o2::tpc::TPCScalerWeights* weights
       }
     }
     if (scaler && tf.timeMS >= scaler->getStartTimeStampMS() - 1e3 && tf.timeMS <= scaler->getEndTimeStampMS(o2::tpc::Side::A) + 1e3) {
-      tf.hasIDC = true;
       tf.idcA = scaler->getMeanScaler(tf.timeMS, o2::tpc::Side::A);
       tf.idcC = scaler->getMeanScaler(tf.timeMS, o2::tpc::Side::C);
+      tf.hasIDC = tf.idcA > 0.f && tf.idcC > 0.f; // getMeanScaler: -1 without values, 0 with zero weights
     }
   }
   const long nWithIDC = std::count_if(tfs.begin(), tfs.end(), [](const TFInfo& tf) { return tf.hasIDC; });
