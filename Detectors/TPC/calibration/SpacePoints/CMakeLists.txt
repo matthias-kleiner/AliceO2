@@ -91,7 +91,6 @@ o2_add_test_root_macro(macro/smoothVoxelMap.C
                                              O2::CCDB
                                              O2::TPCCalibration
                                              O2::TPCBaseRecSim
-                                             Eigen3::Eigen
                        LABELS tpc COMPILE_ONLY)
 
 o2_add_test_root_macro(macro/voxResQA.C
