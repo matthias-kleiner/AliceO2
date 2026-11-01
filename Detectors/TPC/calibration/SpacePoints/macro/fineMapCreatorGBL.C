@@ -20,11 +20,12 @@
 ///   beyond the previous one is dropped);
 /// - clusters near the stack boundaries, on the first / last rows and at the sector edges (on the pad plane) stay in the fit with their
 ///   errors x ExcludedSigmaScale: they hardly pull the track, and their unbiased residuals are summed like the others;
-/// - reference: the ITS track propagated cluster to cluster with the PropagatorD (field map, LUT energy loss, pion); one GBL point per
-///   cluster with the step Jacobian (helix in the mean local Bz, central differences) and a thin scatterer every ScatterEvery points
-///   with the x/X0 of its steps (Highland, the log term of the whole track); the seed takes GBL's correction at the first cluster every
-///   pass; from FirstOutlierPass on, measurements beyond OutlierSigma of the previous pass's fit are dropped; a track stops once no new
-///   outlier appears and GBL's correction is negligible;
+/// - reference: the ITS track propagated cluster to cluster with the PropagatorD (field map, LUT energy loss, the mass hypothesis of the
+///   tracking = the stored track's PID); one GBL point per cluster with the step Jacobian (helix in the mean local Bz, central
+///   differences) and a thin scatterer every ScatterEvery points with the x/X0 of its steps (Highland with the PID's mass and the charge,
+///   the log term of the whole track); the seed takes GBL's correction at the first cluster every pass; from FirstOutlierPass on,
+///   measurements beyond OutlierSigma of the previous pass's fit are dropped; a track stops once no new outlier appears and GBL's
+///   correction is negligible;
 /// - per cluster the unbiased residual r m^2 / e^2 (m: its error in the fit, e: GBL's residual error) with the variance sigma^2 + u,
 ///   u = v m^2 / (m^2 - v), v = m^2 - e^2 (sigma: the cluster's own error); the voxel from the best position y - r sigma^2 / (sigma^2 + u)
 ///   (cluster and prediction combined: binning by the measured position is Berkson); unbiased pull > OutlierSigma and the outermost
@@ -1045,9 +1046,11 @@ std::array<double, 5> toGbl(const TrackParD& track)
   return {track.getQ2Pt() / std::sqrt(1. + tgl * tgl), track.getSnp(), tgl, track.getY(), track.getZ()};
 }
 
-TrackParD fromGbl(const std::array<double, 5>& parameters, double alpha, double x)
+/// a state from GBL's parameters with the charge and mass hypothesis of track
+TrackParD fromGbl(const std::array<double, 5>& parameters, double alpha, double x, const TrackParD& track)
 {
-  return TrackParD(x, alpha, {parameters[3], parameters[4], parameters[1], parameters[2], parameters[0] * std::sqrt(1. + parameters[2] * parameters[2])}, 1, o2::track::PID::Pion);
+  return TrackParD(x, alpha, {parameters[3], parameters[4], parameters[1], parameters[2], parameters[0] * std::sqrt(1. + parameters[2] * parameters[2])},
+                   track.getAbsCharge(), track.getPID());
 }
 
 bool rotateTo(TrackParD& track, double alpha)
@@ -1066,7 +1069,7 @@ bool stepJacobian(const TrackParD& from, double alpha, double x, double bz, Eige
     for (int sign = 0; sign < 2; ++sign) {
       auto parameters = base;
       parameters[column] += (sign ? -1. : 1.) * steps[column];
-      TrackParD track = fromGbl(parameters, from.getAlpha(), from.getX());
+      TrackParD track = fromGbl(parameters, from.getAlpha(), from.getX(), from);
       if (!rotateTo(track, alpha) || !track.propagateParamTo(x, bz)) {
         return false;
       }
@@ -1129,8 +1132,9 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
   // gap: tens of um, proportional to the track slope)
   const bool kinkedReference = clusters.front().type != Cluster::TPC;
   std::vector<std::array<double, 2>> kinks(clusters.size(), {0., 0.});
-  const double momentum = std::sqrt(1. + seed.getTgl() * seed.getTgl()) / std::abs(seed.getQ2Pt());
-  const double mass = o2::track::PID::getMass(o2::track::PID::Pion);
+  // multiple scattering with the mass hypothesis of the tracking (the PID of the stored track) and the charge
+  const double momentum = seed.getP();
+  const double mass = seed.getPID().getMass();
   const double beta = momentum / std::sqrt(momentum * momentum + mass * mass);
   Eigen::VectorXd residuals(2);
   Eigen::VectorXd measurementErrors(2);
@@ -1155,7 +1159,7 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
         auto parameters = toGbl(next);
         parameters[1] += kinks[index][0];
         parameters[2] += kinks[index][1];
-        next = fromGbl(parameters, next.getAlpha(), next.getX());
+        next = fromGbl(parameters, next.getAlpha(), next.getX(), next);
       }
       leaving.push_back(next);
       state = next;
@@ -1184,7 +1188,7 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
       stepXOverX0[point] = propagator->getMatBudget(MatCorrType::USEMatCorrLUT, reference[point - 1].getXYZGlo(), reference[point].getXYZGlo()).meanX2X0;
       totalXOverX0 += stepXOverX0[point];
     }
-    const double theta0 = 0.0136 / (beta * momentum) * (1. + 0.038 * std::log(std::max(totalXOverX0, 1e-12)));
+    const double theta0 = 0.0136 * seed.getAbsCharge() / (beta * momentum) * (1. + 0.038 * std::log(std::max(totalXOverX0, 1e-12)));
     // before the TPC a scatterer at every point with half of the steps on either side (the step after the first point to the second, the
     // step into the TPC to the last point before it); in the TPC a scatterer every ScatterEvery points, carrying the x/X0 of its
     // ScatterEvery steps (centred)
@@ -1263,7 +1267,7 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
     for (int parameter = 0; parameter < 5; ++parameter) {
       parameters[parameter] += corrections(parameter);
     }
-    seed = fromGbl(parameters, reference.front().getAlpha(), reference.front().getX());
+    seed = fromGbl(parameters, reference.front().getAlpha(), reference.front().getX(), reference.front());
     // the kinks before the TPC for the next reference: + the fitted change of the direction across each point
     double kinkUpdate = 0.;
     if (kinkedReference) {
@@ -1441,7 +1445,8 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     return;
   }
   // the seed: the ITS track's outer parameters at the first point
-  TrackParD seed(itsTrack.getX(), itsTrack.getAlpha(), {itsTrack.getY(), itsTrack.getZ(), itsTrack.getSnp(), itsTrack.getTgl(), itsTrack.getQ2Pt()}, 1, o2::track::PID::Pion);
+  TrackParD seed(itsTrack.getX(), itsTrack.getAlpha(), {itsTrack.getY(), itsTrack.getZ(), itsTrack.getSnp(), itsTrack.getTgl(), itsTrack.getQ2Pt()},
+                 itsTrack.getAbsCharge(), itsTrack.getPID());
   FitResult fit;
   if (!rotateTo(seed, clusters.front().alpha) ||
       !o2::base::PropagatorD::Instance()->PropagateToXBxByBz(seed, clusters.front().x, 0.999, 2., MatCorrType::USEMatCorrLUT) ||
