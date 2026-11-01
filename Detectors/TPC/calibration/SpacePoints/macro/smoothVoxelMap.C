@@ -32,7 +32,8 @@
 /// - "fineSums": per voxel and charge the sums of the residual slope method (staticMapCreatorCPM.C writeSlopeSums, fineMapCreatorGBL.C
 ///   writeSums), solved here: D, E from the voxel solve; every voxel with entries enters with its chi2 scaled by max(1, chi2 / ndf) of its
 ///   solve (the median of the solved voxels below minEntries);
-/// - "auto": fineSums if the file has them, else voxResTree.
+/// - "auto": voxResTree if the file has one, else fineSums (a file with both is the voxResTree's map: a CPM map with the slope sums,
+///   or a two-pass fineMapCreatorGBL.C map, whose fineSums hold pass 1 only).
 /// trustFraction > 0: per column the innermost IROC rows with fewer entries than trustFraction x the column's median entries in rows
 /// 10-30 (up to the first row at or above it) are no data; -1 (default): 0.7 with the s / sqrt(entries) errors (errorMode 1: the large
 /// radial distortion empties these rows and biases them, the stand-in errors do not weight them down: without the cut the map follows them
@@ -42,7 +43,8 @@
 /// bin centres' positions, each term weighted with its voxel's volume, so the prior does not depend on the binning (coarse map, fine
 /// pass, refined bins) nor on the radius (the y/x and z/x bins grow with x); false: the taus are the second difference per bin (um).
 ///
-/// Output: voxResTree with every voxel of the grid, DS = the nodes, SmoothDone, entries at least 1 (TPCFastSpaceChargeCorrectionHelper
+/// Output: voxResTree with every voxel of the grid, DS = the nodes interpolated bilinearly to the voxel's position stat for the voxels that
+/// are data, the voxel's node and stat = the bin centre for the others, SmoothDone, entries at least 1 (TPCFastSpaceChargeCorrectionHelper
 /// takes voxels with entries as the map's points); D, E: the input's (voxResTree; with errorMode 1 the E used) or the voxel solve
 /// (fineSums). User info: the input voxResTree's (else the binning and nTracks of fineSums) + "smoothing"; the input's other trees
 /// (OrbitLumiInfo, MetaData) copied. joinIDC: meanIDC / medianIDC = mean / median of the TPC scalers (A + C) / 2 at the TFs of the
@@ -146,11 +148,13 @@ bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
     return false;
   }
   orbitLumiTree->GetEntry(0);
-  if (!times || times->empty()) {
+  std::vector<long> sortedTimes(times ? *times : std::vector<long>());
+  orbitLumiTree->ResetBranchAddresses();
+  delete times;
+  if (sortedTimes.empty()) {
     LOGP(warning, "IDC join: no TF times in OrbitLumiInfo");
     return false;
   }
-  std::vector<long> sortedTimes(*times);
   std::sort(sortedTimes.begin(), sortedTimes.end());
   auto& manager = o2::ccdb::BasicCCDBManager::instance();
   manager.setCaching(true);
@@ -170,8 +174,9 @@ bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
     return false;
   }
   meanIDC = std::accumulate(idcs.begin(), idcs.end(), 0.) / idcs.size();
-  std::nth_element(idcs.begin(), idcs.begin() + idcs.size() / 2, idcs.end());
-  medianIDC = idcs[idcs.size() / 2];
+  std::sort(idcs.begin(), idcs.end()); // the median as TMath::Median (SmoothingExtrapolate.C): the mean of the central two for an even number
+  const size_t middle = idcs.size() / 2;
+  medianIDC = idcs.size() % 2 ? idcs[middle] : 0.5f * (idcs[middle - 1] + idcs[middle]);
   LOGP(info, "IDC join: {} of {} TFs with a valid scaler, meanIDC {}, medianIDC {}", idcs.size(), sortedTimes.size(), meanIDC, medianIDC);
   return true;
 }
@@ -792,7 +797,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   auto* voxResTree = input->Get<TTree>("voxResTree");
   auto* sumsTree = input->Get<TTree>("fineSums");
   if (source == "auto") {
-    source = sumsTree && errorMode != 2 ? "fineSums" : "voxResTree";
+    source = voxResTree ? "voxResTree" : "fineSums";
   }
   const bool useSums = source == "fineSums";
   if ((useSums && !sumsTree) || (!useSums && (source != "voxResTree" || !voxResTree))) {
@@ -803,12 +808,16 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     LOGP(error, "{}: errorMode 2 needs a voxResTree input and the fineSums in the same file", inputFile);
     return;
   }
+  if (useSums && errorMode >= 0) {
+    LOGP(warning, "{}: errorMode {} ignored: the fineSums input has the errors of its voxel solve", inputFile, errorMode);
+  }
   TTree* infoTree = useSums ? sumsTree : voxResTree;
   auto info = [&](const char* key) -> std::string {
     auto* object = infoTree->GetUserInfo()->FindObject(key);
     return object ? object->GetTitle() : "";
   };
-  if (info("y2xBinning").empty() || info("z2xBinning").empty() || info("maxZ2X").empty()) {
+  // an empty binning string is the default binning (staticMapCreatorCPM.C writes the arguments as given)
+  if (!infoTree->GetUserInfo()->FindObject("y2xBinning") || !infoTree->GetUserInfo()->FindObject("z2xBinning") || info("maxZ2X").empty()) {
     LOGP(error, "{}: {} without the binning in its user info (y2xBinning, z2xBinning, maxZ2X)", inputFile, source);
     return;
   }
@@ -903,11 +912,26 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   } else {
     TrackResiduals::VoxRes* result = nullptr;
     voxResTree->SetBranchAddress("voxRes", &result);
+    std::vector<bool> read(nVoxels, false);
+    long nDuplicates = 0;
     for (long entry = 0; entry < voxResTree->GetEntries(); ++entry) {
       voxResTree->GetEntry(entry);
-      results[size_t(result->bsec) * voxelsPerSector + binning->getGlbVoxBin(result->bvox)] = *result;
+      if (result->bsec >= NSectors || result->bvox[TrackResiduals::VoxX] >= binning->getNXBins() || result->bvox[TrackResiduals::VoxF] >= binning->getNY2XBins() ||
+          result->bvox[TrackResiduals::VoxZ] >= binning->getNZ2XBins()) {
+        LOGP(error, "{}: voxel (sector {}, bins {} / {} / {}) outside the binning of its user info", inputFile, int(result->bsec), int(result->bvox[TrackResiduals::VoxX]),
+             int(result->bvox[TrackResiduals::VoxF]), int(result->bvox[TrackResiduals::VoxZ]));
+        return;
+      }
+      const size_t voxel = size_t(result->bsec) * voxelsPerSector + binning->getGlbVoxBin(result->bvox);
+      nDuplicates += read[voxel];
+      read[voxel] = true;
+      results[voxel] = *result;
     }
     voxResTree->ResetBranchAddresses();
+    delete result;
+    if (nDuplicates) {
+      LOGP(warning, "{}: {} voxels appear more than once in the voxResTree (merged maps?): the last entry is used", inputFile, nDuplicates);
+    }
   }
 
   // the errors of a voxResTree: the input's, or s / sqrt(entries) (CPM placeholders)
@@ -974,6 +998,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     }
   }
   std::vector<std::vector<DataVoxel>> data(NSectors);
+  std::vector<bool> isData(nVoxels, false);
   long nData = 0;
   for (size_t voxel = 0; voxel < nVoxels; ++voxel) {
     if (untrusted[voxel]) {
@@ -1019,7 +1044,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       covariance[2][2] = result.E[2] * result.E[2];
       dataVoxel.a = inverseSymmetric(covariance);
       dataVoxel.b = multiply(dataVoxel.a, {result.D[0], result.D[1], result.D[2]});
-      z2xSide = std::abs(result.stat[TrackResiduals::VoxZ]);
+      z2xSide = (sector < NSectors / 2 ? 1. : -1.) * result.stat[TrackResiduals::VoxZ];
     }
     int nodeIndices[4];
     double nodeWeights[4];
@@ -1029,6 +1054,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       dataVoxel.nodeWeight[j] = nodeWeights[j];
     }
     data[sector].push_back(dataVoxel);
+    isData[voxel] = true;
     ++nData;
   }
   const std::string description = fmt::format(
@@ -1055,7 +1081,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     return;
   }
 
-  // the output: the voxels with DS = the nodes, the input's user info and other trees
+  // the output: the voxels with DS = the nodes at the voxel positions, the input's user info and other trees
   TFile output(outputFile.data(), "recreate");
   TTree tree("voxResTree", "voxRes map results and statistics, smoothed by smoothVoxelMap.C");
   TrackResiduals::VoxRes result;
@@ -1063,7 +1089,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   tree.Branch("voxRes", &resultPointer);
   for (auto* object : *treeWithInfo->GetUserInfo()) {
     const std::string name = object->GetName();
-    if (!joinedIDC || (name != "meanIDC" && name != "medianIDC")) {
+    if (name != "smoothing" && (!joinedIDC || (name != "meanIDC" && name != "medianIDC"))) {
       tree.GetUserInfo()->Add(object->Clone());
     }
   }
@@ -1086,8 +1112,21 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
         for (int binX = 0; binX < binning->getNXBins(); ++binX) {
           const size_t voxel = size_t(sector) * voxelsPerSector + binning->getGlbVoxBin(binX, binY2X, binZ2X);
           result = results[voxel];
+          // DS where the transform puts it, at stat: the nodes are the values at the bin centres. The voxels that are no data (empty, below
+          // minEntries, untrusted) at their bin centre, DS = their node: a few clusters' mean position in a data-free region is arbitrary
+          if (!isData[voxel]) {
+            binning->getVoxelCoordinates(sector, binX, binY2X, binZ2X, result.stat[TrackResiduals::VoxX], result.stat[TrackResiduals::VoxF], result.stat[TrackResiduals::VoxZ]);
+          }
+          int nodeIndices[4];
+          double nodeWeights[4];
+          const double z2xSide = (sector < NSectors / 2 ? 1. : -1.) * result.stat[TrackResiduals::VoxZ];
+          const int nNodes = bilinearNodes(*binning, binX, result.stat[TrackResiduals::VoxF], z2xSide, nodeIndices, nodeWeights);
           for (int coordinate = 0; coordinate < 3; ++coordinate) {
-            result.DS[coordinate] = nodes[3 * voxel + coordinate];
+            double value = 0.;
+            for (int j = 0; j < nNodes; ++j) {
+              value += nodeWeights[j] * nodes[3 * (size_t(sector) * voxelsPerSector + nodeIndices[j]) + coordinate];
+            }
+            result.DS[coordinate] = value;
           }
           result.flags |= TrackResiduals::SmoothDone;
           result.stat[TrackResiduals::VoxV] = std::max(result.stat[TrackResiduals::VoxV], 1.f);
@@ -1105,5 +1144,5 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       static_cast<TTree*>(object)->CloneTree(-1, "fast")->Write();
     }
   }
-  LOGP(info, "{} written: {} voxels, DS = the smoothed nodes", outputFile, nVoxels);
+  LOGP(info, "{} written: {} voxels, DS = the smoothed map at the voxels' positions", outputFile, nVoxels);
 }
