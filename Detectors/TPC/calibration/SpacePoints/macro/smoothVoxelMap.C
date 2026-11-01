@@ -34,7 +34,10 @@
 ///   solve (the median of the solved voxels below minEntries);
 /// - "auto": fineSums if the file has them, else voxResTree.
 /// trustFraction > 0: per column the innermost IROC rows with fewer entries than trustFraction x the column's median entries in rows
-/// 10-30 (up to the first row at or above it) are no data. robust > 0: Tukey reweightings of the voxels by their excess chi2.
+/// 10-30 (up to the first row at or above it) are no data; -1 (default): 0.7 with the s / sqrt(entries) errors (errorMode 1: the large
+/// radial distortion empties these rows and biases them, the stand-in errors do not weight them down: without the cut the map follows them
+/// by up to ~3 mm), else 0 (with real errors they hardly pull: <= 0.3 mm in the rows with clusters, the bulk unchanged).
+/// robust > 0: Tukey reweightings of the voxels by their excess chi2.
 /// curvaturePrior (default): the taus are the prior rms of the curvature (um / cm^2) averaged over 1 cm^3: second derivatives from the
 /// bin centres' positions, each term weighted with its voxel's volume, so the prior does not depend on the binning (coarse map, fine
 /// pass, refined bins) nor on the radius (the y/x and z/x bins grow with x); false: the taus are the second difference per bin (um).
@@ -612,7 +615,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     float tauY2X = 2000.,      // ... along y/x
                     float tauZ2X = 1000.,      // ... along z/x
                     float tau0 = 0.,           // prior rms (um) of a node: ridge towards 0 (0: none)
-                    float trustFraction = 0.7, // the innermost IROC rows below this fraction of the column's plateau entries are no data (<= 0: off)
+                    float trustFraction = -1., // the innermost IROC rows below this fraction of the column's plateau entries are no data (0: off; -1: auto)
                     float minEntries = 20.,    // voxResTree: voxels with fewer entries are no data; fineSums: the voxel solve's minimum
                     int errorMode = -1,        // voxResTree: -1 auto, 0 the input's E and EXYCorr, 1 s / sqrt(entries), 2 from fineSums (see the file description)
                     int joinIDCs = -1,         // meanIDC / medianIDC from the CCDB scalers at the input's TFs: -1 if the input has none, 1 always, 0 never
@@ -791,7 +794,10 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     }
   }
 
-  // the data per sector
+  // the data per sector (the trust cut only with the stand-in errors, see the file description)
+  if (trustFraction < 0.f) {
+    trustFraction = !useSums && errorMode == 1 ? 0.7f : 0.f;
+  }
   long nUntrusted = 0;
   const auto untrusted = untrustedRows(*binning, results, trustFraction, nUntrusted);
   double medianScale = 1.;
