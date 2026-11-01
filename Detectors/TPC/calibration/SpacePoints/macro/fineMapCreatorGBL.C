@@ -46,6 +46,12 @@
 /// D = pass 2's voxel solve + S1 at its mean position (E and the entries pass 2's). Cross-validation (log and user info): the chi2 change
 /// of pass 2's residuals with pass 1's raw voxels and with S1, relative to no fine correction.
 ///
+/// ITS clusters and primary vertex in the fit (itsInFit, for tests; ITS-TPC tracks with at least MinITSClusters ITS clusters): the points
+/// of the residual stream (reference + residual; ITS in the sensor's tracking frame of the ideal geometry for MC, the aligned one for data)
+/// in front of the TPC clusters, a scatterer at every point before the TPC and scatterer points every GapStep in the gap to the TPC, the
+/// reference from the vertex (or the innermost ITS cluster) on; only the TPC clusters' unbiased residuals are summed. The track's kinks are
+/// then fitted: the reference does not follow them, so the slopes of the voxel model should be the fitted track's (fitSlopes).
+///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
 /// scaler objects fetched from the CCDB in that order (each once); the IDC (mean of A and C side) and the lumi scale per TF go into a table.
@@ -93,6 +99,7 @@
 #include "GblTrajectory.h"
 
 #include "TFile.h"
+#include "TGeoManager.h"
 #include "TGrid.h"
 #include "TNamed.h"
 #include "TROOT.h"
@@ -112,6 +119,7 @@
 #include "DetectorsBase/MatLayerCylSet.h"
 #include "DetectorsBase/Propagator.h"
 #include "Framework/Logger.h"
+#include "ITSBase/GeometryTGeo.h"
 #include "MathUtils/Utils.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
 #include "ReconstructionDataFormats/TrackParametrization.h"
@@ -157,6 +165,15 @@ constexpr double SkipEdgePads = 1.; ///< the outermost pads of the row, at the b
 constexpr size_t TFQueueDepth = 2;       ///< TFs read ahead of the fit
 constexpr size_t TracksPerChunk = 16;    ///< tracks a fit thread takes at once
 constexpr size_t SumsBatchSize = 100000; ///< contributions of a fit thread added to the shared sums at once
+// ITS clusters and primary vertex in the track fit (itsInFit)
+constexpr int RowVertex = 190;                         ///< the primary vertex in the residual stream (UnbinnedResid::isITS() is true for it too)
+constexpr int MinITSClusters = 3;                      ///< for a track to be fitted
+constexpr double ITSSigmaY = 0.0012;                   ///< [cm] ITS cluster errors
+constexpr double ITSSigmaZ = 0.0036;                   ///< [cm]
+constexpr double VertexSigmaY = 0.002;                 ///< [cm] primary vertex errors
+constexpr double VertexSigmaZ = 0.005;                 ///< [cm]
+constexpr double GapStep = 5.;                         ///< [cm] scatterers in the gap from the ITS to the TPC: one per step of at most this length
+constexpr long IdealGeometryTimeStamp = 1704063600000; ///< GLO/Config/Geometry of MC (the ideal geometry)
 // smoothing
 constexpr double SmoothTukey = 4.685;        ///< Tukey's bisquare constant of the robust reweighting
 constexpr double SmoothCGTolerance = 1e-8;   ///< relative residual norm of the conjugate gradients
@@ -443,9 +460,9 @@ struct TFInfo {
 };
 
 /// the TFs of the input files with their time as staticMapCreatorCPM.C (orbit reset + firstTForbit of the records tree; in data the
-/// CTPLumi orbit is firstTForbit + 1, in MC equal to it) and their CTPLumi orbit and luminosity
+/// CTPLumi orbit is firstTForbit + 1, in MC equal to it) and their CTPLumi orbit and luminosity; isMC: a file has the MC truth (trkMC)
 std::vector<TFInfo> scanTFs(const std::vector<std::string>& files, long firstEntry, long entriesPerFile, double orbitResetMS, long firstTFTime, long lastTFTime,
-                            long& nOutsideWindow)
+                            long& nOutsideWindow, bool& isMC)
 {
   std::vector<TFInfo> tfs;
   for (size_t fileIndex = 0; fileIndex < files.size(); ++fileIndex) {
@@ -457,6 +474,7 @@ std::vector<TFInfo> scanTFs(const std::vector<std::string>& files, long firstEnt
       LOGP(warning, "Skipping {}: no unbinnedResid / trackData / records or different entries", files[fileIndex]);
       continue;
     }
+    isMC |= trackTree->GetBranch("trkMC") != nullptr;
     // the first orbits of the TFs, in TF order (MC files can have several records entries, one per merged chunk)
     std::vector<uint32_t> firstOrbits;
     TTreeReader recordsReader(recordsTree);
@@ -1069,10 +1087,17 @@ double localBz(const TrackParD& track)
   return field[2];
 }
 
+/// a point of the track fit: a TPC cluster, or with itsInFit an ITS cluster, the primary vertex or a scatterer without measurement
 struct Cluster {
+  enum Type { TPC,
+              ITS,
+              Vertex,
+              Material };
+  int type = TPC;
   int sector = 0;
-  int row = 0;
-  double x = 0.; ///< corrected
+  int row = 0;       ///< TPC pad row, ITS layer, -1 vertex
+  double alpha = 0.; ///< the frame
+  double x = 0.;     ///< TPC: corrected
   double y = 0.;
   double z = 0.;
   double padY = 0.; ///< measured y on the pad plane, before any correction
@@ -1099,6 +1124,11 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
   result.active.resize(clusters.size());
   std::iota(result.active.begin(), result.active.end(), 0);
   std::vector<char> flagged(clusters.size(), 0);
+  // with points before the TPC (itsInFit) the reference follows the kinks fitted there: per point the kink (snp, tgl) of the previous pass,
+  // the reference continues with it (Gauss-Newton on the kinked track; a smooth reference misses ~kink^2 x lever arm, mrad kinks over the
+  // gap: tens of um, proportional to the track slope)
+  const bool kinkedReference = clusters.front().type != Cluster::TPC;
+  std::vector<std::array<double, 2>> kinks(clusters.size(), {0., 0.});
   const double momentum = std::sqrt(1. + seed.getTgl() * seed.getTgl()) / std::abs(seed.getQ2Pt());
   const double mass = o2::track::PID::getMass(o2::track::PID::Pion);
   const double beta = momentum / std::sqrt(momentum * momentum + mass * mass);
@@ -1107,29 +1137,40 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
   for (int pass = 0; pass < MaxFitPasses; ++pass) {
     // reference from the seed through the clusters still active (not reached: dropped; flagged by the previous pass: dropped)
     std::vector<int> kept;
-    std::vector<TrackParD> reference;
+    std::vector<TrackParD> reference; ///< at each point, in front of its kink
+    std::vector<TrackParD> leaving;   ///< at each point, after its kink
     TrackParD state = seed;
     for (int index : result.active) {
       if (pass >= FirstOutlierPass && flagged[index]) {
         continue;
       }
       TrackParD next = state;
-      if (!rotateTo(next, o2::math_utils::sector2Angle(clusters[index].sector % 18)) ||
-          !propagator->PropagateToXBxByBz(next, clusters[index].x, 0.999, 2., MatCorrType::USEMatCorrLUT) || std::abs(next.getSnp()) > MaxSnp) {
+      if (!rotateTo(next, clusters[index].alpha) || !propagator->PropagateToXBxByBz(next, clusters[index].x, 0.999, 2., MatCorrType::USEMatCorrLUT) ||
+          std::abs(next.getSnp()) > MaxSnp) {
         continue;
       }
       kept.push_back(index);
       reference.push_back(next);
+      if (kinkedReference && kept.size() > 1 && clusters[index].type != Cluster::TPC && (kinks[index][0] != 0. || kinks[index][1] != 0.)) {
+        auto parameters = toGbl(next);
+        parameters[1] += kinks[index][0];
+        parameters[2] += kinks[index][1];
+        next = fromGbl(parameters, next.getAlpha(), next.getX());
+      }
+      leaving.push_back(next);
       state = next;
     }
     result.active.swap(kept);
     const size_t nPoints = result.active.size();
-    if (int(nPoints) < MinMeasurements) {
+    if (std::count_if(result.active.begin(), result.active.end(), [&](int index) { return clusters[index].type != Cluster::Material; }) < MinMeasurements) {
       return false;
     }
-    // the cluster errors from the first reference (the stored tgSlp where valid)
+    // the points before the first TPC cluster (vertex, ITS, gap)
+    const size_t nInner = std::find_if(result.active.begin(), result.active.end(), [&](int index) { return clusters[index].type == Cluster::TPC; }) -
+                          result.active.begin();
+    // the TPC cluster errors from the first reference (the stored tgSlp where valid)
     if (pass == 0) {
-      for (size_t point = 0; point < nPoints; ++point) {
+      for (size_t point = nInner; point < nPoints; ++point) {
         auto& cluster = clusters[result.active[point]];
         const double snp = reference[point].getSnp();
         clusterErrors(cluster.row, cluster.z, cluster.tgSlpValid ? cluster.tgSlp : snp / std::sqrt((1. - snp) * (1. + snp)), reference[point].getTgl(),
@@ -1144,11 +1185,25 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
       totalXOverX0 += stepXOverX0[point];
     }
     const double theta0 = 0.0136 / (beta * momentum) * (1. + 0.038 * std::log(std::max(totalXOverX0, 1e-12)));
-    // a scatterer every ScatterEvery points, carrying the x/X0 of its ScatterEvery steps (centred)
+    // before the TPC a scatterer at every point with half of the steps on either side (the step after the first point to the second, the
+    // step into the TPC to the last point before it); in the TPC a scatterer every ScatterEvery points, carrying the x/X0 of its
+    // ScatterEvery steps (centred)
     std::vector<double> scattererXOverX0(nPoints, 0.);
+    for (size_t point = 1; point <= nInner && point < nPoints; ++point) {
+      if (point == 1) {
+        scattererXOverX0[1] += stepXOverX0[1];
+      } else if (point == nInner) {
+        scattererXOverX0[point - 1] += stepXOverX0[point];
+      } else {
+        scattererXOverX0[point - 1] += 0.5 * stepXOverX0[point];
+        scattererXOverX0[point] += 0.5 * stepXOverX0[point];
+      }
+    }
     constexpr size_t Every = ScatterEvery;
-    for (size_t point = 1; point < nPoints; ++point) {
-      const size_t scatterer = Every == 1 ? point : std::clamp<size_t>(((point - 1) / Every) * Every + (Every + 1) / 2, 1, nPoints > 2 ? nPoints - 2 : 1);
+    const size_t nTPC = nPoints - nInner;
+    for (size_t point = nInner + 1; point < nPoints; ++point) {
+      const size_t step = point - nInner;
+      const size_t scatterer = nInner + (Every == 1 ? step : std::clamp<size_t>(((step - 1) / Every) * Every + (Every + 1) / 2, 1, nTPC > 2 ? nTPC - 2 : 1));
       scattererXOverX0[scatterer] += stepXOverX0[point];
     }
     std::vector<gbl::GblPoint> points;
@@ -1156,19 +1211,25 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
     for (size_t point = 0; point < nPoints; ++point) {
       const auto& cluster = clusters[result.active[point]];
       Eigen::Matrix<double, 5, 5> jacobian = Eigen::Matrix<double, 5, 5>::Identity();
-      if (point > 0 && !stepJacobian(reference[point - 1], reference[point].getAlpha(), reference[point].getX(),
-                                     0.5 * (localBz(reference[point - 1]) + localBz(reference[point])), jacobian)) {
+      if (point > 0 && !stepJacobian(leaving[point - 1], reference[point].getAlpha(), reference[point].getX(),
+                                     0.5 * (localBz(leaving[point - 1]) + localBz(reference[point])), jacobian)) {
         return false;
       }
       gbl::GblPoint gblPoint(jacobian);
-      const double scale = cluster.excluded ? ExcludedSigmaScale : 1.;
-      gblPoint.addMeasurement(Eigen::Vector2d(cluster.y - reference[point].getY(), cluster.z - reference[point].getZ()),
-                              Eigen::Vector2d(1. / std::pow(cluster.sigmaY * scale, 2), 1. / std::pow(cluster.sigmaZ * scale, 2)));
-      const double theta2 = theta0 * theta0 * scattererXOverX0[point];
+      if (cluster.type != Cluster::Material) {
+        const double scale = cluster.excluded ? ExcludedSigmaScale : 1.;
+        gblPoint.addMeasurement(Eigen::Vector2d(cluster.y - reference[point].getY(), cluster.z - reference[point].getZ()),
+                                Eigen::Vector2d(1. / std::pow(cluster.sigmaY * scale, 2), 1. / std::pow(cluster.sigmaZ * scale, 2)));
+      }
+      // a kinked point before the TPC keeps its scatterer (residual = minus the reference's kink) even without material in its steps
+      const bool kinked = kinkedReference && point < nInner;
+      const double theta2 = theta0 * theta0 * (kinked ? std::max(scattererXOverX0[point], 1e-9) : scattererXOverX0[point]);
       if (point > 0 && point + 1 < nPoints && theta2 > 0.) {
         const double snp = reference[point].getSnp();
         const double secLambda2 = 1. + reference[point].getTgl() * reference[point].getTgl();
-        gblPoint.addScatterer(Eigen::Vector2d::Zero(), Eigen::Vector2d(1. / (theta2 * (1. - snp * snp) * secLambda2), 1. / (theta2 * secLambda2 * secLambda2)));
+        const auto& kink = kinks[result.active[point]];
+        gblPoint.addScatterer(kinked ? Eigen::Vector2d(-kink[0], -kink[1]) : Eigen::Vector2d::Zero(),
+                              Eigen::Vector2d(1. / (theta2 * (1. - snp * snp) * secLambda2), 1. / (theta2 * secLambda2 * secLambda2)));
       }
       points.push_back(gblPoint);
     }
@@ -1203,12 +1264,28 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result)
       parameters[parameter] += corrections(parameter);
     }
     seed = fromGbl(parameters, reference.front().getAlpha(), reference.front().getX());
+    // the kinks before the TPC for the next reference: + the fitted change of the direction across each point
+    double kinkUpdate = 0.;
+    if (kinkedReference) {
+      Eigen::VectorXd before;
+      Eigen::VectorXd after;
+      for (size_t point = 1; point < nInner && point + 1 < nPoints; ++point) {
+        if (result.trajectory->getResults(-int(point + 1), before, covariance) != 0 || result.trajectory->getResults(int(point + 1), after, covariance) != 0) {
+          return false;
+        }
+        auto& kink = kinks[result.active[point]];
+        for (int direction = 0; direction < 2; ++direction) {
+          kink[direction] += after(direction + 1) - before(direction + 1);
+          kinkUpdate = std::max(kinkUpdate, std::abs(after(direction + 1) - before(direction + 1)));
+        }
+      }
+    }
     result.reference.swap(reference);
     result.passes = pass + 1;
     // converged: from the first outlier pass on, no new outlier and GBL's correction at the first point negligible (1 um in y / z, 1e-6 in
     // snp / tgl, 1e-4 of q/p): the reference is the fit, further passes change nothing
     if (pass >= FirstOutlierPass && !newOutliers && std::abs(corrections(3)) < 1e-4 && std::abs(corrections(4)) < 1e-4 &&
-        std::abs(corrections(1)) < 1e-6 && std::abs(corrections(2)) < 1e-6 && std::abs(corrections(0)) < 1e-4 * std::abs(parameters[0])) {
+        std::abs(corrections(1)) < 1e-6 && std::abs(corrections(2)) < 1e-6 && std::abs(corrections(0)) < 1e-4 * std::abs(parameters[0]) && kinkUpdate < 1e-6) {
       break;
     }
   }
@@ -1228,6 +1305,7 @@ enum Counter { Selected,
                EdgePadResiduals,
                OutsideGrid,
                NoResidual,
+               NoInnerPoints,
                NCounters };
 
 /// what the fit threads share read-only
@@ -1240,7 +1318,67 @@ struct FitContext {
   const RowGeometry* geometry = nullptr;
   float maxZ2X = 0.f;
   int voxelsPerSector = 0;
+  int itsInFit = 0;       ///< 1: the ITS clusters in the fit, 2: also the primary vertex
+  bool fitSlopes = false; ///< the slopes of the voxel model from the fitted track instead of the reference
 };
+
+/// itsInFit: the track's ITS clusters (2: and its primary vertex) in front of its TPC clusters, from the inside out, and scatterer points in
+/// the gap between the last of them and the first TPC cluster (in that cluster's frame, centres of equal steps of at most GapStep); false
+/// with fewer than MinITSClusters ITS clusters or without the vertex
+bool addInnerPoints(const TFTask& task, const o2::tpc::TrackDataCompact& trackRef, int itsInFit, std::vector<Cluster>& clusters)
+{
+  auto decode = [](short value, float maximum) { return value * maximum / 0x7fff; };
+  std::vector<Cluster> inner;
+  const unsigned int firstExternal = trackRef.idxFirstResidual + trackRef.nResiduals;
+  for (unsigned int residualIndex = firstExternal; residualIndex < firstExternal + trackRef.nExtDetResid; ++residualIndex) {
+    const auto& residual = task.residuals[residualIndex];
+    Cluster point;
+    // reference + residual, in the frame of the sensor (ITS) or of the track at its closest approach (vertex)
+    point.y = decode(residual.y, o2::tpc::param::MaxY) + decode(residual.dy, o2::tpc::param::MaxResid);
+    point.z = decode(residual.z, o2::tpc::param::MaxZ) + decode(residual.dz, o2::tpc::param::MaxResid);
+    if (residual.row == RowVertex) {
+      if (itsInFit < 2) {
+        continue;
+      }
+      point.type = Cluster::Vertex;
+      point.row = -1;
+      point.alpha = decode(residual.tgSlp, o2::tpc::param::MaxTgSlp) * M_PI;
+      point.x = decode(residual.channel, o2::tpc::param::MaxVtxX);
+      point.sigmaY = VertexSigmaY;
+      point.sigmaZ = VertexSigmaZ;
+    } else if (residual.isITS()) {
+      point.type = Cluster::ITS;
+      point.row = residual.getITSLayer();
+      point.alpha = residual.getAlpha();
+      point.x = residual.getX();
+      point.sigmaY = ITSSigmaY;
+      point.sigmaZ = ITSSigmaZ;
+    } else {
+      continue;
+    }
+    inner.push_back(point);
+  }
+  std::sort(inner.begin(), inner.end(), [](const Cluster& first, const Cluster& second) { return first.row < second.row || (first.row == second.row && first.x < second.x); });
+  const long nITS = std::count_if(inner.begin(), inner.end(), [](const Cluster& point) { return point.type == Cluster::ITS; });
+  if (nITS < MinITSClusters || (itsInFit >= 2 && inner.front().type != Cluster::Vertex)) {
+    return false;
+  }
+  const Cluster& last = inner.back();
+  const Cluster& first = clusters.front();
+  const double start = last.x * std::cos(last.alpha - first.alpha) - last.y * std::sin(last.alpha - first.alpha);
+  const int nSteps = std::max(1, int(std::ceil((first.x - start) / GapStep)));
+  for (int step = 0; step < nSteps; ++step) {
+    Cluster point;
+    point.type = Cluster::Material;
+    point.sector = first.sector;
+    point.row = -1;
+    point.alpha = first.alpha;
+    point.x = start + (step + 0.5) * (first.x - start) / nSteps;
+    inner.push_back(point);
+  }
+  clusters.insert(clusters.begin(), inner.begin(), inner.end());
+  return true;
+}
 
 /// fit one track of a TF and append the contributions of its clusters
 void processTrack(const TFTask& task, size_t trackIndex, const FitContext& context, std::array<long, NCounters>& counters,
@@ -1249,7 +1387,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   const auto& trackRef = task.trackRefs[trackIndex];
   const auto& itsTrack = task.tracks[trackIndex].par;
   if (!GID::includesSource(trackRef.sourceId, context.sources) || trackRef.filterFlag > 0 || std::abs(itsTrack.getQ2Pt()) < 1e-9 ||
-      trackRef.idxFirstResidual + trackRef.nResiduals > task.residuals.size()) {
+      trackRef.idxFirstResidual + trackRef.nResiduals + (context.itsInFit ? trackRef.nExtDetResid : 0) > task.residuals.size()) {
     return;
   }
   auto decodeResidual = [](short value) { return value * o2::tpc::param::MaxResid / 0x7fff; };
@@ -1263,6 +1401,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     Cluster cluster;
     cluster.sector = residual.sec;
     cluster.row = residual.row;
+    cluster.alpha = o2::math_utils::sector2Angle(cluster.sector % 18);
     if (!clusters.empty() && cluster.row <= clusters.back().row) {
       ++counters[OutOfRowOrder];
       continue;
@@ -1297,10 +1436,14 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     return;
   }
   ++counters[Selected];
-  // the seed: the ITS track's outer parameters at the first cluster
+  if (context.itsInFit && !addInnerPoints(task, trackRef, context.itsInFit, clusters)) {
+    ++counters[NoInnerPoints];
+    return;
+  }
+  // the seed: the ITS track's outer parameters at the first point
   TrackParD seed(itsTrack.getX(), itsTrack.getAlpha(), {itsTrack.getY(), itsTrack.getZ(), itsTrack.getSnp(), itsTrack.getTgl(), itsTrack.getQ2Pt()}, 1, o2::track::PID::Pion);
   FitResult fit;
-  if (!rotateTo(seed, o2::math_utils::sector2Angle(clusters.front().sector % 18)) ||
+  if (!rotateTo(seed, clusters.front().alpha) ||
       !o2::base::PropagatorD::Instance()->PropagateToXBxByBz(seed, clusters.front().x, 0.999, 2., MatCorrType::USEMatCorrLUT) ||
       !fitTrack(clusters, seed, fit)) {
     ++counters[FitFailed];
@@ -1314,11 +1457,13 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   Eigen::VectorXd measurementErrors(2);
   Eigen::VectorXd residualErrors(2);
   Eigen::VectorXd downWeights(2);
+  Eigen::VectorXd corrections;
+  Eigen::MatrixXd covariance;
   for (size_t point = 0; point < fit.active.size(); ++point) {
-    if (fit.outlier[point]) {
+    const auto& cluster = clusters[fit.active[point]];
+    if (fit.outlier[point] || cluster.type != Cluster::TPC) {
       continue;
     }
-    const auto& cluster = clusters[fit.active[point]];
     unsigned int numData = 0;
     fit.trajectory->getMeasResults(point + 1, numData, residuals, measurementErrors, residualErrors, downWeights);
     double unbiased[2] = {0., 0.};
@@ -1359,7 +1504,14 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       ++counters[OutsideGrid];
       continue;
     }
-    const double snp = fit.reference[point].getSnp();
+    // the slopes: the reference's, or the fitted track's arriving at the cluster: with the kinks fitted (the ITS in the fit), only these
+    // are uncorrelated with the cluster's unbiased residual
+    double snp = fit.reference[point].getSnp();
+    double tgl = fit.reference[point].getTgl();
+    if (context.fitSlopes && fit.trajectory->getResults(-int(point + 1), corrections, covariance) == 0) {
+      snp += corrections(1);
+      tgl += corrections(2);
+    }
     const double cosPhi = std::sqrt(std::max(1e-6, (1. - snp) * (1. + snp)));
     Contribution contribution;
     contribution.voxel = size_t(cluster.sector) * context.voxelsPerSector + context.binning->getGlbVoxBin(cluster.row, binY2X, binZ2X);
@@ -1370,7 +1522,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     contribution.slopeY = snp / cosPhi;
     contribution.residualY = unbiased[0];
     contribution.weightY = weight[0];
-    contribution.slopeZ = fit.reference[point].getTgl() / cosPhi;
+    contribution.slopeZ = tgl / cosPhi;
     contribution.residualZ = unbiased[1];
     contribution.weightZ = weight[1];
     batch.push_back(contribution);
@@ -1619,7 +1771,8 @@ struct InputFile {
     file.reset();
   }
 
-  bool open(const std::string& fileName)
+  /// externalDetectors: also what the ITS clusters and the vertex need
+  bool open(const std::string& fileName, bool externalDetectors)
   {
     close();
     file.reset(TFile::Open(fileName.c_str()));
@@ -1642,7 +1795,11 @@ struct InputFile {
       tree->SetCacheSize(256LL * 1024 * 1024);
       tree->AddBranchToCache("*", true);
     }
-    for (const char* branch : {"res.channel", "trackInfo.multStack*", "trackInfo.nExtDetResid", "detInfo*"}) {
+    std::vector<const char*> unused{"trackInfo.multStack*", "detInfo*"};
+    if (!externalDetectors) {
+      unused.insert(unused.end(), {"res.channel", "trackInfo.nExtDetResid"});
+    }
+    for (const char* branch : unused) {
       residualReader->GetTree()->SetBranchStatus(branch, 0);
     }
     for (const char* branch : {"trk.gid*", "trk.chi2TRD", "trk.deltaTOF", "trk.nTrkltsTRD", "trk.clAvailTOF", "trk.TRDTrkltSlope*", "trk.nExtDetResid",
@@ -1731,7 +1888,7 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     if (tf->file != openFile) {
       openFile = tf->file;
       LOGP(info, "Reading {}", files[tf->file]);
-      fileOpen = input.open(files[tf->file]);
+      fileOpen = input.open(files[tf->file], context.itsInFit > 0);
     }
     auto task = std::make_shared<TFTask>();
     task->info = tf;
@@ -1767,10 +1924,11 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
   const long nFitted = counters[Fitted];
   LOGP(info,
        "fineMapCreatorGBL{}: TFs {} (read errors {}); tracks selected {}, fitted {} (failed {}); clusters out of row order {}; "
-       "residuals {} (of de-weighted clusters {}), unbiased pull > {} {}, edge pads {}, outside the grid {}, without a residual {}",
+       "residuals {} (of de-weighted clusters {}), unbiased pull > {} {}, edge pads {}, outside the grid {}, without a residual {}; without the ITS "
+       "clusters / vertex for the fit {}",
        label, nTFs, nTFsReadError, counters[Selected].load(), nFitted, counters[FitFailed].load(), counters[OutOfRowOrder].load(), counters[Residuals].load(),
        counters[ResidualsExcluded].load(), OutlierSigma, counters[Outliers].load(), counters[EdgePadResiduals].load(), counters[OutsideGrid].load(),
-       counters[NoResidual].load());
+       counters[NoResidual].load(), counters[NoInnerPoints].load());
   LOGP(info, "fineMapCreatorGBL{}: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", label,
        nFitted ? double(counters[FitPasses]) / nFitted : 0., nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
   return nFitted;
@@ -1798,7 +1956,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        float smoothTau = 1000.f,                                                     // [um] prior rms of the second differences of the smoothed map (DS); 0: no smoothing, DS = D
                        float smoothTau0 = 1000.f,                                                    // [um] prior rms of a node of the smoothed map (the ridge towards 0)
                        int smoothRobust = 0,                                                         // Tukey reweightings of the voxels in the smoothing
-                       int nPasses = 1)                                                              // 2: pass 1 on the even TFs in time, pass 2 on the odd ones with pass 1's smoothed map subtracted
+                       int nPasses = 1,                                                              // 2: pass 1 on the even TFs in time, pass 2 on the odd ones with pass 1's smoothed map subtracted
+                       int itsInFit = 0,                                                             // tests: 1 the ITS clusters in the track fit, 2 also the primary vertex; 0 TPC clusters only
+                       bool fitSlopes = false)                                                       // the slopes of the voxel model from the fitted track at the cluster instead of the reference
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -1812,6 +1972,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   if (nPasses != 1 && nPasses != 2) {
     LOGP(fatal, "nPasses {}: 1 or 2", nPasses);
+  }
+  if (itsInFit < 0 || itsInFit > 2) {
+    LOGP(fatal, "itsInFit {}: 0, 1 or 2", itsInFit);
   }
   if (nPasses == 2 && !(smoothTau > 0.f)) {
     LOGP(fatal, "Two passes need the smoothing (smoothTau > 0): pass 2 subtracts pass 1's smoothed map");
@@ -1880,11 +2043,26 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
 
   // the TFs, their time and IDC (all CCDB access before the fit threads start)
   long nTFsOutsideWindow = 0;
-  auto tfs = scanTFs(files, std::max(0L, firstEntry), entriesPerFile, orbitResetMS, firstTFTime, lastTFTime, nTFsOutsideWindow);
+  bool isMC = false;
+  auto tfs = scanTFs(files, std::max(0L, firstEntry), entriesPerFile, orbitResetMS, firstTFTime, lastTFTime, nTFsOutsideWindow, isMC);
   if (firstTFTime > 0) {
     LOGP(info, "TF time window [{}, {}] ms: {} TFs inside, {} outside", firstTFTime, lastTFTime, tfs.size(), nTFsOutsideWindow);
   }
   fillIDCs(tfs, scalerWeights);
+  // the ITS sensors' tracking frames (UnbinnedResid::getX / getAlpha), built before the fit threads start: MC is reconstructed with the ideal
+  // geometry, data with the aligned one
+  if (itsInFit > 0) {
+    if (isMC) {
+      ccdb.getForTimeStamp<TGeoManager>("GLO/Config/Geometry", IdealGeometryTimeStamp);
+    }
+    o2::tpc::UnbinnedResid::init(midRunTime);
+    if (!gGeoManager) {
+      LOGP(fatal, "No geometry for the ITS sensors");
+    }
+    o2::its::GeometryTGeo::Instance();
+    LOGP(info, "ITS clusters{} in the track fit, {} geometry; slopes from the {}", itsInFit > 1 ? " and the primary vertex" : "",
+         isMC ? "ideal (MC)" : "aligned", fitSlopes ? "fitted track" : "reference");
+  }
   long nTFsNoIDC = 0;
   for (auto& tf : tfs) {
     if (baseCorrection.derivative && tf.hasIDC) {
@@ -1930,6 +2108,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.geometry = &geometry;
   context.maxZ2X = maxZ2X;
   context.voxelsPerSector = voxelsPerSector;
+  context.itsInFit = itsInFit;
+  context.fitSlopes = fitSlopes;
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
   SelectedTFs selected;
   long nFitted = runPass(passTFs[0], files, context, nThreads, sums, selected, nPasses == 2 ? " pass 1" : "");

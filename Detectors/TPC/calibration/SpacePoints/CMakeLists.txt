@@ -68,6 +68,7 @@ o2_add_test_root_macro(macro/fineMapCreatorGBL.C
                                              O2::DataFormatsCTP
                                              O2::ReconstructionDataFormats
                                              O2::DetectorsBase
+                                             O2::ITSBase
                                              O2::TPCCalibration
                                              O2::TPCBaseRecSim
                                              GBL::GBL
