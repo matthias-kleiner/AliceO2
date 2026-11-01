@@ -54,6 +54,16 @@ Severity is given as high / medium / low. Findings are ranked within each catego
 - **P-C4:** linear combination of inverse maps (an approximation, unchanged from the legacy code), and edge effects of the derivative
   merge.
 
+### Follow-up (section 4)
+
+- **Merging maps with different spline grids.** The merge pins every extra map to the main map's grid. Outside that grid the extra
+  map's correction is frozen at the edge value, and in z it is faded out with the main map's fade. For the M-shape map this is certain;
+  for the sector-edge map it depends on that map's grid.
+- **`initInverse`.** It resets the inverse's (real-coordinate) grid to the measured grid and clamps points onto the edges. The error
+  concentrates in the last knot interval of each row.
+- **How to check.** The macro `docs/checkCorrMapMerge.C` runs these checks on the real CCDB maps. The numbers in section 4 come from a 1D
+  model (`docs/spline_merge_model.py`).
+
 ### Performance
 
 - **PERF1:** with M-shape enabled, the Poisson solve and the spline fit run **every TF**.
@@ -290,3 +300,112 @@ only on change.
 8. **Message alignment.** Consumers keep a pointer into the DPL message (`TPCFastTransformPOD::get(raw)`). The POD needs 8-byte
    alignment, and its spline parameters assume 16 (`getParameterAlignmentBytes`) relative to the buffer start. Add an assertion on
    the message alignment in `get()`, or document the guarantee.
+
+---
+
+## 4. Follow-up: `addCorrections` with different spline grids, and `initInverse`
+
+### 4.1 Which grids the maps actually have [certain, from the creation code]
+
+- **Maps made from residuals** (`TPCFastSpaceChargeCorrectionHelper::createFromTrackResiduals`, l. 399-509): main, reference and
+  derivative.
+  - Knots sit at every second y/x and z/x bin centre, with both boundary bins always included.
+  - Per row, the y grid spans `rowX · y2x(first bin centre) … rowX · y2x(last bin centre)`, and the z grid
+    `rowX · z2x(first centre) … rowX · z2x(last centre)`.
+  - The correction fades to 0 between `zOut = min(zMax, 250 cm)` and the readout. `gridReal` is the same as `gridMeasured`.
+  - So these maps share a grid exactly when they were made with the same `TrackResiduals` binning (y/x and z/x bins, `maxZ2X`).
+- **M-shape map** (`createFromGlobalCorrection` → `createFromLocalCorrection`, with `n-knots-y` / `n-knots-z` = 4 by default): uniform
+  knots over the full pad row and over z = 0 … 250 cm. It keeps the default grid of `setNoCorrection`, so it has no fade. Its grid is
+  therefore **always different** from that of a residual map.
+- **Sector-edge map** (`TPC/Calib/CorrectionMapSecEdgeFluc`): this repository has no code that creates it, so its grid is unknown.
+
+### 4.2 What the merge does when the grids differ [certain]
+
+`addCorrections` evaluates the extra map's value, first derivatives and mixed derivative at the **main map's knots**, and the main map's
+Hermite splines then interpolate between them. The legacy runtime composition evaluated every map with **its own** spline. The two
+agree exactly only where both of these hold:
+
+- the main map's cell contains no knot line of the extra map (inside one cell of each, both are bicubic);
+- the point lies inside the main grid, before the fade.
+
+Otherwise:
+
+1. **A main cell crosses a knot line of the extra map.** The extra map is a compact spline, continuous only in its first derivatives,
+   so it cannot be reproduced exactly within that cell.
+2. **The point is outside the main grid.**
+   - In y, this is the strip between the outermost bin centre and the pad edge: 0.9 cm in row 0 and 1.8 cm in row 151 with 20 y/x
+     bins.
+   - In z, it covers z/x beyond the last bin centre (for example z > 117 cm in row 0 with 28 bins up to 1.4) and the region near the
+     central electrode.
+   - There the main map clamps u and v, so the **extra map is frozen at the main grid's edge value**. In z it is also multiplied by the
+     main map's fade, `s_main(z)`, instead of following its own z profile.
+3. **Main knots outside the extra map's grid.** There the extra map's slope at its own edge is copied onto the main knots, which
+   creates a spurious slope.
+
+### 4.3 Size, from the 1D model (`docs/spline_merge_model.py`, illustrative profiles)
+
+| Extra map | Region | max \|merged − legacy\| |
+|---|---|---|
+| Derivative map with the main map's binning | everywhere | 0 (exact) |
+| M-shape-like, 1 mm amplitude, 4 knots; main map with 28 z/x bins up to 1.4 | inside the main grid (row x = 85 / 200 cm) | 0.3 µm / 20 µm |
+| same | row x = 85 cm, z beyond the main grid (z > 117 cm, z/x > 1.375) | **450 µm** |
+| same, main map with 5 z/x bins up to 1.0 | row x = 85 cm, z > 77 cm | **930 µm** |
+| Sector-edge-like, 1 mm at the pad edge, 1 cm decay, 40 knots over the full row; main map with 20 y/x bins | within 3 cm inside the main grid edge (x = 85 / 245 cm) | 16 µm / 85 µm |
+| same | between the outermost bin centre and the pad edge | **600-820 µm** (most of the edge correction is lost) |
+| same | interior, x = 245 cm (main knots 8 cm apart) | up to 90 µm of ripple |
+
+**Conclusions.**
+
+- **M-shape (certain).** Merging changes the M-shape correction for inner-row clusters at large |z|/x, i.e. forward tracks: there it is
+  frozen at the main grid's edge and faded towards the readout. Inside the main grid the merge is essentially exact.
+- **Sector-edge correction (plausible).** If its CCDB map has a finer grid, or one that reaches the pad edges, the merged per-TF map
+  loses most of the correction in the last 1-2 cm of each pad row, which is exactly where it is meant to act. If it was made with the
+  main map's binning, the merge is exact.
+- **How to tell.** `docs/checkCorrMapMerge.C` prints the knots of both maps and compares merged against legacy over the whole area, so
+  one run on the real objects decides it.
+- **Possible fixes.**
+  - Merge onto a grid that covers the union of the inputs, in coverage and resolution.
+  - Or keep maps with incompatible grids as a separate runtime term, as the legacy `ref2` path did.
+  - Or at least give the residual maps grids that reach the pad edges and the readout.
+  - Refitting the sum on the main grid would fix only point 1, not the coverage.
+
+### 4.4 `initInverse` (`TPCFastSpaceChargeCorrectionHelper.cxx:886-1014`)
+
+**I1 [certain mechanism, plausible size; medium] The real grid is the measured grid, and points outside are clamped.**
+
+- **What the code does.**
+  - l. 905-908 sets `gridReal = gridMeasured` for every row.
+  - The inverse is sampled on the *measured* grid (ten points per knot interval). Each sample is placed at
+    `real = measured + d` and clamped into the grid (`convRealLocalToGrid`).
+- **The consequences.**
+  - Where the distortion points outward at an edge, those samples pile up on the edge line with full weight and with their own values
+    of `d`.
+  - Where it points inward, the strip of the real grid that no sample reaches is fixed only by the `1e-8` smoothness of
+    `approximateDataPoints`.
+  - The `gridReal` field exists to describe the real-coordinate domain, but this setting throws that away.
+- **Size in the 1D model** (row x = 85 cm, 20 y/x bins):
+  - a 2-5 mm shift plus a 2 % gradient: 45-70 µm in the last knot interval, ≤ 6 µm further inside;
+  - a 3-5 mm edge bump with 2 cm decay (a sector-edge-like distortion): **470-690 µm** in the last knot interval and 40-55 µm further
+    inside.
+- **Visibility.** `testInverse` sees most of this, because the large errors occur where both the measured and the real point lie inside
+  the grid. The creation macros print its maximum, so the map producers can check their logs. It does skip real points whose measured
+  partner lies outside the grid (≈ 50 µm in the model).
+- **Fix.**
+  - Set `gridReal` per row from the actual range of `measured + d`.
+  - Also sample measured points beyond the measured grid (the direct map is constant there), so that the real grid is fully covered.
+  - Drop points that fall outside instead of clamping them.
+
+**I2 [certain; low] The fade factor is applied twice in the inverse.** Each inverse data point is stored as
+`scale · d` (l. 974-976), with `scale` the fade factor at the real z, and `getCorrectionXatRealYZ` / `getCorrectionYZatRealYZ` multiply
+by the fade factor again. This only affects samples whose real z passes `zOut`, at the ≲ 0.5 % level. Store `d`.
+
+**I3 [certain; low] Every interior knot line is sampled twice.** `for (double s = 1.; s > 0.; s -= 0.1)` (l. 931, 944) runs **11** times:
+the last value is s = 1.4·10⁻¹⁶ (checked with IEEE doubles). Harmless double weight; use an integer loop.
+
+**I4 [certain; low] A related dead check in `fillSpaceChargeCorrectionFromMap`** (l. 157-160). It is used for the direct fit and for the
+inverse from an inverse voxel tree. `if (scale - 1.f > 1.e-6) continue; // point is outside the grid` can never be true, because the fade
+scale is ≤ 1. Points outside the grid are therefore not skipped but clamped onto the edges. The intended test is probably
+`!correction.isLocalInsideGrid(...)`, or `1.f - scale > 1.e-6` for the fade region.
+
+**I5 [low]** Inside the sampling loop, `float gridU, gridV` (l. 970) shadow the `std::vector<double> gridU, gridV` of the enclosing
+scope. This is legal, but confusing.
