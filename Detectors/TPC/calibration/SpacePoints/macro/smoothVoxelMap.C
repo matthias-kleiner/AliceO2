@@ -25,8 +25,10 @@
 /// - "voxResTree": D with the errors E (dX, dY correlated by EXYCorr) at the voxel's mean position (stat), for the fitted, unmasked voxels
 ///   with >= minEntries entries (staticMapCreator.C, staticMapCreatorCPM.C, fineMapCreatorGBL.C). errorMode 0: the input's E, EXYCorr;
 ///   1: E = s / sqrt(entries), EXYCorr = 0, with s per coordinate from the scatter of the rows' second differences in the IROC bulk (an
-///   upper bound: it includes the curvature differences between columns); -1: 1 if the input has the placeholders of
-///   staticMapCreatorCPM.C's CPM maps (E = 0.1, EXYCorr = 1), else 0;
+///   upper bound: it includes the curvature differences between columns); 2: E, EXYCorr from the residual slope method's voxel solve of
+///   the same file's fineSums (staticMapCreatorCPM.C voxelMethod 0 + writeSlopeSums: the CPM values weighted with the slope method's
+///   errors; voxels it does not solve are no data); -1: 1 if the input has the placeholders of staticMapCreatorCPM.C's CPM maps (E = 0.1,
+///   EXYCorr = 1), else 0;
 /// - "fineSums": per voxel and charge the sums of the residual slope method (staticMapCreatorCPM.C writeSlopeSums, fineMapCreatorGBL.C
 ///   writeSums), solved here: D, E from the voxel solve; every voxel with entries enters with its chi2 scaled by max(1, chi2 / ndf) of its
 ///   solve (the median of the solved voxels below minEntries);
@@ -612,7 +614,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     float tau0 = 0.,           // prior rms (um) of a node: ridge towards 0 (0: none)
                     float trustFraction = 0.7, // the innermost IROC rows below this fraction of the column's plateau entries are no data (<= 0: off)
                     float minEntries = 20.,    // voxResTree: voxels with fewer entries are no data; fineSums: the voxel solve's minimum
-                    int errorMode = -1,        // voxResTree: -1 auto, 0 the input's E and EXYCorr, 1 s / sqrt(entries) (see the file description)
+                    int errorMode = -1,        // voxResTree: -1 auto, 0 the input's E and EXYCorr, 1 s / sqrt(entries), 2 from fineSums (see the file description)
                     int joinIDCs = -1,         // meanIDC / medianIDC from the CCDB scalers at the input's TFs: -1 if the input has none, 1 always, 0 never
                     int robust = 0,            // Tukey reweighting cycles
                     int nThreads = 8,
@@ -628,11 +630,15 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   auto* voxResTree = input->Get<TTree>("voxResTree");
   auto* sumsTree = input->Get<TTree>("fineSums");
   if (source == "auto") {
-    source = sumsTree ? "fineSums" : "voxResTree";
+    source = sumsTree && errorMode != 2 ? "fineSums" : "voxResTree";
   }
   const bool useSums = source == "fineSums";
   if ((useSums && !sumsTree) || (!useSums && (source != "voxResTree" || !voxResTree))) {
     LOGP(error, "{}: no input {} (source: voxResTree, fineSums or auto)", inputFile, source);
+    return;
+  }
+  if (errorMode == 2 && (useSums || !sumsTree)) {
+    LOGP(error, "{}: errorMode 2 needs a voxResTree input and the fineSums in the same file", inputFile);
     return;
   }
   TTree* infoTree = useSums ? sumsTree : voxResTree;
@@ -670,9 +676,10 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       }
     }
   }
-  std::vector<std::array<ChargeSums, 2>> sums;
-  if (useSums) {
-    sums.resize(nVoxels);
+  // the fineSums per voxel, both charges added
+  std::vector<ChargeSums> sums;
+  auto readSums = [&]() {
+    sums.assign(nVoxels, ChargeSums());
     int voxelIndex = 0;
     float entries[2] = {};
     float position[2][3] = {};
@@ -687,32 +694,29 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       sumsTree->GetEntry(entry);
       if (voxelIndex < 0 || size_t(voxelIndex) >= nVoxels) {
         LOGP(error, "{}: fineSums voxel {} outside the grid", inputFile, voxelIndex);
-        return;
+        return false;
       }
+      auto& total = sums[voxelIndex];
       for (int charge = 0; charge < 2; ++charge) {
-        auto& chargeSums = sums[voxelIndex][charge];
-        chargeSums.entries = entries[charge];
-        chargeSums.x = position[charge][0];
-        chargeSums.y2x = position[charge][1];
-        chargeSums.z2x = position[charge][2];
+        total.entries += entries[charge];
+        total.x += position[charge][0];
+        total.y2x += position[charge][1];
+        total.z2x += position[charge][2];
         for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
-          chargeSums.y[sum] = channelY[charge][sum];
-          chargeSums.z[sum] = channelZ[charge][sum];
+          total.y[sum] += channelY[charge][sum];
+          total.z[sum] += channelZ[charge][sum];
         }
       }
     }
     sumsTree->ResetBranchAddresses();
+    return true;
+  };
+  if (useSums) {
+    if (!readSums()) {
+      return;
+    }
     for (size_t voxel = 0; voxel < nVoxels; ++voxel) {
-      ChargeSums total = sums[voxel][0];
-      for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
-        total.y[sum] += sums[voxel][1].y[sum];
-        total.z[sum] += sums[voxel][1].z[sum];
-      }
-      total.entries += sums[voxel][1].entries;
-      total.x += sums[voxel][1].x;
-      total.y2x += sums[voxel][1].y2x;
-      total.z2x += sums[voxel][1].z2x;
-      sums[voxel][0] = total; // the charges are not needed separately below
+      const auto& total = sums[voxel];
       auto& result = results[voxel];
       result.stat[TrackResiduals::VoxV] = total.entries;
       if (total.entries <= 0.) {
@@ -756,7 +760,23 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       }
       errorMode = placeholders ? 1 : 0;
     }
-    if (errorMode == 1) {
+    if (errorMode == 2) {
+      if (!readSums()) {
+        return;
+      }
+      long nSolved = 0;
+      for (size_t voxel = 0; voxel < nVoxels; ++voxel) {
+        auto& result = results[voxel];
+        VoxelSolution solution;
+        const bool solved = solveVoxel(sums[voxel], minEntries, solution);
+        nSolved += solved;
+        for (int coordinate = 0; coordinate < 3; ++coordinate) {
+          result.E[coordinate] = solved ? solution.error[coordinate] : 0.;
+        }
+        result.EXYCorr = solved ? solution.correlationXY : 0.;
+      }
+      LOGP(info, "Errors: the residual slope method's voxel solve of the fineSums ({} voxels solved, the others no data)", nSolved);
+    } else if (errorMode == 1) {
       const auto noise = estimateNoise(*binning, results, minEntries);
       LOGP(info, "Errors: s / sqrt(entries), s = {:.4f} / {:.4f} / {:.4f} cm (dX / dY / dZ, from the rows' scatter in the IROC bulk)", noise[0], noise[1], noise[2]);
       for (auto& result : results) {
@@ -779,7 +799,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     std::vector<double> scales;
     for (size_t voxel = 0; voxel < nVoxels; ++voxel) {
       VoxelSolution solution;
-      if (solveVoxel(sums[voxel][0], minEntries, solution)) {
+      if (solveVoxel(sums[voxel], minEntries, solution)) {
         scales.push_back(solution.chi2Scale);
       }
     }
@@ -801,7 +821,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     double z2xSide = 0.;
     if (useSums) {
       using S = ChargeSums;
-      const auto& total = sums[voxel][0];
+      const auto& total = sums[voxel];
       if (total.entries <= 0. || total.y[S::W] <= 0. || total.z[S::W] <= 0.) {
         continue;
       }
@@ -845,7 +865,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     "penalised node fit (smoothVoxelMap.C): input {}, tau rows / y/x / z/x {} / {} / {} {}, tau0 {} um, trustFraction {} "
     "({} untrusted inner IROC voxels), minEntries {}, errors {}, robust {}",
     source, tauRow, tauY2X, tauZ2X, curvaturePrior ? "um / cm^2 (curvature over 1 cm^3)" : "um (second difference per bin)", tau0, trustFraction, nUntrusted, minEntries,
-    useSums ? std::string("voxel solve") : (errorMode == 1 ? std::string("s / sqrt(entries)") : std::string("input")), robust);
+    useSums ? std::string("voxel solve") : (errorMode == 1 ? std::string("s / sqrt(entries)") : (errorMode == 2 ? std::string("from the fineSums voxel solve") : std::string("input"))), robust);
   LOGP(info, "{}: {} of {} voxels are data; {}", inputFile, nData, nVoxels, description);
 
   // the IDC join (staticMapCreatorCPM.C leaves meanIDC / medianIDC 0)
