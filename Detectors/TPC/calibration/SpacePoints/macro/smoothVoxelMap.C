@@ -275,9 +275,585 @@ struct SectorStatistics {
   long nZeroWeight = 0; ///< ... at 0
 };
 
+// The preconditioner of solveSector: a multigrid V-cycle. The normal matrix couples the nodes within +-2 pad rows (row penalty), +-2 y/x
+// bins (y/x penalty), +-2 z/x bins (z/x penalty) and the bilinear neighbours in y/x and z/x within a pad row (data); the row penalty is by
+// far the stiffest term (the rows ~1 cm apart, the y/x and z/x bins several cm), then the y/x penalty. The smoother is a block
+// Gauss-Seidel sweep over the columns (the nodes of one y/x and z/x bin) with the column's block of the matrix (the row penalty, the data
+// at the nodes and the diagonal of the other terms) solved exactly by its block L D L^T: the rows are smoothed exactly. The coarse levels
+// keep the rows and halve y/x and / or z/x (linear interpolation P; only the stiff direction(s), see coarseLevel) with the Galerkin
+// matrix P^T A P, down to <= MultigridCoarsestColumns columns, solved by a banded Cholesky. The forward sweep before and the backward
+// sweep after the coarse correction make it symmetric positive definite (a preconditioner for CG). Every level in the layout of the
+// sector's nodes: node = row + nRows (y/x bin + nY2X z/x bin), 3 values (dX, dY, dZ) per node.
+constexpr int MultigridCoarsestColumns = 4; ///< the coarsest level of the multigrid: at most this many columns
+constexpr double MultigridStiffness = 0.25; ///< semi-coarsening: a direction whose penalty is >= this x the stiffer direction's is coarsened
+constexpr int MaxNodeOffset = 2;            ///< the matrix couples the nodes within +-2 pad rows, y/x bins and z/x bins (on all levels)
+
+/// the difference of two nodes' pad row, y/x bin and z/x bin
+struct NodeOffset {
+  int row = 0;
+  int y2x = 0;
+  int z2x = 0;
+};
+
+/// one level of the multigrid: the matrix on a grid of nRows x nY2X x nZ2X nodes (node = row + nRows (y/x bin + nY2X z/x bin), as in the
+/// sector) per coupling offset (both directions and the diagonal) and node, the penalty part (the same for dX, dY, dZ) and the data part
+/// (3 x 3); the block LDL^T of its columns (or, on the coarsest level, the banded Cholesky factor of the whole matrix); work vectors
+struct MultigridLevel {
+  int nRows = 0;
+  int nY2X = 0;
+  int nZ2X = 0;
+  std::vector<NodeOffset> penaltyOffsets;
+  std::vector<double> penalty; ///< [offset][node]: the coupling of the node to the node at the offset
+  std::vector<NodeOffset> dataOffsets;
+  std::vector<Matrix3> data;         ///< [offset][node]
+  std::vector<Matrix3> pivotInverse; ///< per node: D^-1 of the column's L D L^T
+  std::vector<Matrix3> lower1;       ///< per node: L(node, node 1 row before)
+  int twoRowsBeforeSlot = -1;        ///< the penalty offset to the node 2 rows before
+  int bandWidth = 0;                 ///< coarsest level: the band of the Cholesky factor (unknowns ordered by row, column, component)
+  std::vector<double> band;          ///< [unknown][k]: L(unknown, unknown - k)
+  std::vector<double> rhs;           ///< the right-hand side of the coarse correction (levels > 0)
+  std::vector<double> solution;      ///< the coarse correction (levels > 0)
+  std::vector<double> work;          ///< the residual (V-cycle) or the unknowns in the order of the band (coarsest)
+  std::vector<double> columnRhs;     ///< the right-hand side of a column (Gauss-Seidel)
+
+  int nNodes() const { return nRows * nY2X * nZ2X; }
+  int nColumns() const { return nY2X * nZ2X; }
+  int shift(const NodeOffset& offset) const { return offset.row + nRows * (offset.y2x + nY2X * offset.z2x); }
+};
+
+/// calls function(node, neighbour) for the nodes of the level whose neighbour at the offset is on the grid, along the rows
+template <typename Function>
+void forEachCoupling(const MultigridLevel& level, const NodeOffset& offset, Function function)
+{
+  const int shift = level.shift(offset);
+  const int firstRow = std::max(0, -offset.row);
+  const int endRow = std::min(level.nRows, level.nRows - offset.row);
+  for (int z2x = std::max(0, -offset.z2x); z2x < std::min(level.nZ2X, level.nZ2X - offset.z2x); ++z2x) {
+    for (int y2x = std::max(0, -offset.y2x); y2x < std::min(level.nY2X, level.nY2X - offset.y2x); ++y2x) {
+      const int column = level.nRows * (y2x + level.nY2X * z2x);
+      for (int node = column + firstRow; node < column + endRow; ++node) {
+        function(node, node + shift);
+      }
+    }
+  }
+}
+
+/// fills the level's offsets and couplings from addCouplings(addPenalty, addData), which calls addPenalty(node, offset, value) and
+/// addData(node, offset, weight, matrix) for the terms of the matrix (value x 1, weight x matrix between the node and the node at the
+/// offset); offsets beyond +-MaxNodeOffset are not represented
+template <typename AddCouplings>
+void assembleLevel(MultigridLevel& level, AddCouplings addCouplings)
+{
+  constexpr int Width = 2 * MaxNodeOffset + 1;
+  auto key = [](const NodeOffset& offset) {
+    if (std::abs(offset.row) > MaxNodeOffset || std::abs(offset.y2x) > MaxNodeOffset || std::abs(offset.z2x) > MaxNodeOffset) {
+      return -1;
+    }
+    return offset.row + MaxNodeOffset + Width * (offset.y2x + MaxNodeOffset + Width * (offset.z2x + MaxNodeOffset));
+  };
+  std::array<int, Width * Width * Width> penaltySlot;
+  std::array<int, Width * Width * Width> dataSlot;
+  penaltySlot.fill(-1);
+  dataSlot.fill(-1);
+  auto addSlot = [&](const NodeOffset& offset, std::array<int, Width * Width * Width>& slots, std::vector<NodeOffset>& offsets) {
+    const int index = key(offset);
+    if (index >= 0 && slots[index] < 0) {
+      slots[index] = int(offsets.size());
+      offsets.push_back(offset);
+    }
+  };
+  addCouplings([&](int, const NodeOffset& offset, double) { addSlot(offset, penaltySlot, level.penaltyOffsets); },
+               [&](int, const NodeOffset& offset, double, const Matrix3&) { addSlot(offset, dataSlot, level.dataOffsets); });
+  const size_t nNodes = level.nNodes();
+  level.penalty.assign(level.penaltyOffsets.size() * nNodes, 0.);
+  level.data.assign(level.dataOffsets.size() * nNodes, Matrix3{});
+  addCouplings(
+    [&](int node, const NodeOffset& offset, double value) {
+      const int index = key(offset);
+      if (index >= 0) {
+        level.penalty[penaltySlot[index] * nNodes + node] += value;
+      }
+    },
+    [&](int node, const NodeOffset& offset, double weight, const Matrix3& matrix) {
+      const int index = key(offset);
+      if (index >= 0) {
+        Matrix3& coupling = level.data[dataSlot[index] * nNodes + node];
+        for (int row = 0; row < 3; ++row) {
+          for (int column = 0; column < 3; ++column) {
+            coupling[row][column] += weight * matrix[row][column];
+          }
+        }
+      }
+    });
+}
+
+/// the coarse bins of a bin (1 or 2) and their weights in the linear interpolation: the fine bin 2 k is the coarse bin k, 2 k + 1 the mean
+/// of k and k + 1; the same bin if not coarsened
+int coarseBins(int bin, bool coarsened, std::array<int, 2>& coarse, std::array<double, 2>& weight)
+{
+  if (!coarsened) {
+    coarse[0] = bin;
+    weight[0] = 1.;
+    return 1;
+  }
+  coarse = {bin / 2, bin / 2 + 1};
+  weight = {bin % 2 ? 0.5 : 1., 0.5};
+  return bin % 2 ? 2 : 1;
+}
+
+/// calls function(fine column, coarse column, weight) for the interpolation P of the coarse level's columns to the fine level's
+template <typename Function>
+void forEachInterpolation(const MultigridLevel& fine, const MultigridLevel& coarse, Function function)
+{
+  std::array<int, 2> binY2X;
+  std::array<int, 2> binZ2X;
+  std::array<double, 2> weightY2X;
+  std::array<double, 2> weightZ2X;
+  for (int z2x = 0; z2x < fine.nZ2X; ++z2x) {
+    const int nZ2X = coarseBins(z2x, coarse.nZ2X != fine.nZ2X, binZ2X, weightZ2X);
+    for (int y2x = 0; y2x < fine.nY2X; ++y2x) {
+      const int nY2X = coarseBins(y2x, coarse.nY2X != fine.nY2X, binY2X, weightY2X);
+      for (int j = 0; j < nY2X; ++j) {
+        for (int k = 0; k < nZ2X; ++k) {
+          function(y2x + fine.nY2X * z2x, binY2X[j] + coarse.nY2X * binZ2X[k], weightY2X[j] * weightZ2X[k]);
+        }
+      }
+    }
+  }
+}
+
+/// the coarse level: the rows kept, y/x and / or z/x halved; the matrix P^T A P. Semi-coarsening: only the direction(s) whose penalty is
+/// >= MultigridStiffness x the stiffer one's (the penalty energy of the vector alternating along it and constant along the others, = -2 x
+/// the sum of the penalty couplings at odd offsets along it): the error after the sweeps is smooth only along the stiff direction(s), e.g.
+/// y/x alone first at the default binning (~20 x stiffer than z/x), whose stiffness relative to z/x drops by ~16 per halving
+MultigridLevel coarseLevel(const MultigridLevel& fine)
+{
+  const size_t nNodes = fine.nNodes();
+  double stiffnessY2X = 0.;
+  double stiffnessZ2X = 0.;
+  for (size_t slot = 0; slot < fine.penaltyOffsets.size(); ++slot) {
+    const NodeOffset& offset = fine.penaltyOffsets[slot];
+    double sum = 0.;
+    forEachCoupling(fine, offset, [&](int node, int) { sum += fine.penalty[slot * nNodes + node]; });
+    stiffnessY2X -= offset.y2x % 2 ? 2. * sum : 0.;
+    stiffnessZ2X -= offset.z2x % 2 ? 2. * sum : 0.;
+  }
+  const double stiffest = std::max(stiffnessY2X, stiffnessZ2X);
+  bool coarsenY2X = fine.nY2X > 2 && stiffnessY2X >= MultigridStiffness * stiffest;
+  bool coarsenZ2X = fine.nZ2X > 2 && stiffnessZ2X >= MultigridStiffness * stiffest;
+  if (!coarsenY2X && !coarsenZ2X) {
+    coarsenY2X = fine.nY2X > 2;
+    coarsenZ2X = fine.nZ2X > 2;
+  }
+  MultigridLevel coarse;
+  coarse.nRows = fine.nRows;
+  coarse.nY2X = coarsenY2X ? fine.nY2X / 2 + 1 : fine.nY2X;
+  coarse.nZ2X = coarsenZ2X ? fine.nZ2X / 2 + 1 : fine.nZ2X;
+  // a coupling of the fine nodes (row, column a) and (row + d, column b) adds w_a(A) w_b(B) x it to the coarse nodes (row, A) and (row + d,
+  // B), for the coarse columns A, B of a, b and their interpolation weights: function(fine column, coarse column, coarse offset, weight)
+  auto forEachCoarseCoupling = [&](const NodeOffset& offset, auto function) {
+    std::array<int, 2> binY2X;
+    std::array<int, 2> binZ2X;
+    std::array<int, 2> neighbourY2X;
+    std::array<int, 2> neighbourZ2X;
+    std::array<double, 2> weightY2X;
+    std::array<double, 2> weightZ2X;
+    std::array<double, 2> neighbourWeightY2X;
+    std::array<double, 2> neighbourWeightZ2X;
+    for (int z2x = std::max(0, -offset.z2x); z2x < std::min(fine.nZ2X, fine.nZ2X - offset.z2x); ++z2x) {
+      const int nZ2X = coarseBins(z2x, coarsenZ2X, binZ2X, weightZ2X);
+      const int nNeighbourZ2X = coarseBins(z2x + offset.z2x, coarsenZ2X, neighbourZ2X, neighbourWeightZ2X);
+      for (int y2x = std::max(0, -offset.y2x); y2x < std::min(fine.nY2X, fine.nY2X - offset.y2x); ++y2x) {
+        const int nY2X = coarseBins(y2x, coarsenY2X, binY2X, weightY2X);
+        const int nNeighbourY2X = coarseBins(y2x + offset.y2x, coarsenY2X, neighbourY2X, neighbourWeightY2X);
+        for (int j = 0; j < nY2X; ++j) {
+          for (int k = 0; k < nZ2X; ++k) {
+            for (int l = 0; l < nNeighbourY2X; ++l) {
+              for (int m = 0; m < nNeighbourZ2X; ++m) {
+                const NodeOffset coarseOffset{offset.row, neighbourY2X[l] - binY2X[j], neighbourZ2X[m] - binZ2X[k]};
+                const double weight = weightY2X[j] * weightZ2X[k] * neighbourWeightY2X[l] * neighbourWeightZ2X[m];
+                function(y2x + fine.nY2X * z2x, binY2X[j] + coarse.nY2X * binZ2X[k], coarseOffset, weight);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  const int nRows = fine.nRows;
+  assembleLevel(coarse, [&](auto addPenalty, auto addData) {
+    for (size_t slot = 0; slot < fine.penaltyOffsets.size(); ++slot) {
+      const NodeOffset& offset = fine.penaltyOffsets[slot];
+      forEachCoarseCoupling(offset, [&](int fineColumn, int coarseColumn, const NodeOffset& coarseOffset, double weight) {
+        const double* coupling = fine.penalty.data() + slot * nNodes + nRows * fineColumn;
+        for (int row = std::max(0, -offset.row); row < std::min(nRows, nRows - offset.row); ++row) {
+          addPenalty(row + nRows * coarseColumn, coarseOffset, weight * coupling[row]);
+        }
+      });
+    }
+    for (size_t slot = 0; slot < fine.dataOffsets.size(); ++slot) {
+      const NodeOffset& offset = fine.dataOffsets[slot];
+      forEachCoarseCoupling(offset, [&](int fineColumn, int coarseColumn, const NodeOffset& coarseOffset, double weight) {
+        const Matrix3* coupling = fine.data.data() + slot * nNodes + nRows * fineColumn;
+        for (int row = std::max(0, -offset.row); row < std::min(nRows, nRows - offset.row); ++row) {
+          addData(row + nRows * coarseColumn, coarseOffset, weight, coupling[row]);
+        }
+      });
+    }
+  });
+  return coarse;
+}
+
+/// a b (3 x 3)
+Matrix3 matrixProduct(const Matrix3& a, const Matrix3& b)
+{
+  Matrix3 product{};
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      product[row][column] = a[row][0] * b[0][column] + a[row][1] * b[1][column] + a[row][2] * b[2][column];
+    }
+  }
+  return product;
+}
+
+/// the block L D L^T of each column's block of the level's matrix: the diagonal blocks (penalty x 1 + data) and the couplings to the
+/// nodes 1 and 2 rows before and after (penalty x 1; L(node, node - 2) = A(node, node - 2) D^-1(node - 2), not stored). A pivot whose
+/// eigenvalues' geometric mean is below 1e-12 x the mean diagonal element of its block is left out: D^-1 = 0 (a node without data and
+/// penalty, no stencil and no ridge, stays 0)
+void factorColumns(MultigridLevel& level)
+{
+  const size_t nNodes = level.nNodes();
+  int diagonalSlot = -1;
+  int oneRowBeforeSlot = -1;
+  for (size_t slot = 0; slot < level.penaltyOffsets.size(); ++slot) {
+    const NodeOffset& offset = level.penaltyOffsets[slot];
+    if (offset.y2x == 0 && offset.z2x == 0 && offset.row == 0) {
+      diagonalSlot = int(slot);
+    } else if (offset.y2x == 0 && offset.z2x == 0 && offset.row == -1) {
+      oneRowBeforeSlot = int(slot);
+    } else if (offset.y2x == 0 && offset.z2x == 0 && offset.row == -2) {
+      level.twoRowsBeforeSlot = int(slot);
+    }
+  }
+  int dataDiagonalSlot = -1;
+  for (size_t slot = 0; slot < level.dataOffsets.size(); ++slot) {
+    const NodeOffset& offset = level.dataOffsets[slot];
+    if (offset.row == 0 && offset.y2x == 0 && offset.z2x == 0) {
+      dataDiagonalSlot = int(slot);
+    }
+  }
+  auto penalty = [&](int slot, int node) { return slot >= 0 ? level.penalty[slot * nNodes + node] : 0.; };
+  level.pivotInverse.assign(nNodes, Matrix3{});
+  level.lower1.assign(nNodes, Matrix3{});
+  for (int column = 0; column < level.nColumns(); ++column) {
+    for (int row = 0; row < level.nRows; ++row) {
+      const int node = row + level.nRows * column;
+      // D(node) = A(node, node) - sum over k = node - 2, node - 1 of L(node, k) D(k) L(node, k)^T, where L(node, node - 2) D(node - 2) =
+      // A(node, node - 2) = coupling2 x 1 and L(node, node - 1) D(node - 1) = A(node, node - 1) - coupling2 L(node - 1, node - 2)^T =: reduced
+      Matrix3 pivot = dataDiagonalSlot >= 0 ? level.data[dataDiagonalSlot * nNodes + node] : Matrix3{};
+      for (int c = 0; c < 3; ++c) {
+        pivot[c][c] += penalty(diagonalSlot, node);
+      }
+      const double scale = 1e-12 * (pivot[0][0] + pivot[1][1] + pivot[2][2]) / 3.;
+      const double coupling2 = row >= 2 ? penalty(level.twoRowsBeforeSlot, node) : 0.;
+      if (row >= 2) {
+        for (int i = 0; i < 3; ++i) {
+          for (int j = 0; j < 3; ++j) {
+            pivot[i][j] -= coupling2 * coupling2 * level.pivotInverse[node - 2][i][j];
+          }
+        }
+      }
+      if (row >= 1) {
+        Matrix3 reduced{};
+        for (int i = 0; i < 3; ++i) {
+          reduced[i][i] = penalty(oneRowBeforeSlot, node);
+          for (int j = 0; j < 3; ++j) {
+            reduced[i][j] -= coupling2 * level.lower1[node - 1][j][i];
+          }
+        }
+        level.lower1[node] = matrixProduct(reduced, level.pivotInverse[node - 1]);
+        for (int i = 0; i < 3; ++i) {
+          for (int j = 0; j < 3; ++j) {
+            pivot[i][j] -= level.lower1[node][i][0] * reduced[j][0] + level.lower1[node][i][1] * reduced[j][1] + level.lower1[node][i][2] * reduced[j][2];
+          }
+        }
+      }
+      level.pivotInverse[node] = determinant(pivot) > scale * scale * scale ? inverseSymmetric(pivot) : Matrix3{};
+    }
+  }
+}
+
+/// solution = the column's block of the matrix ^-1 rhs (the column's 3 nRows values)
+void solveColumn(const MultigridLevel& level, int column, const double* rhs, double* solution)
+{
+  const int first = level.nRows * column;
+  const double* coupling2 = level.twoRowsBeforeSlot >= 0 ? level.penalty.data() + level.twoRowsBeforeSlot * size_t(level.nNodes()) + first : nullptr;
+  // L y = rhs, solution = D^-1 y; L(row, row - 2) y(row - 2) = A(row, row - 2) solution(row - 2)
+  Vector3 previous{}; // y of the row before
+  for (int row = 0; row < level.nRows; ++row) {
+    const Vector3 term1 = multiply(level.lower1[first + row], previous);
+    Vector3 y;
+    for (int c = 0; c < 3; ++c) {
+      y[c] = rhs[3 * row + c] - term1[c] - (row >= 2 && coupling2 ? coupling2[row] * solution[3 * (row - 2) + c] : 0.);
+    }
+    const Vector3 scaled = multiply(level.pivotInverse[first + row], y);
+    std::copy(scaled.begin(), scaled.end(), solution + 3 * row);
+    previous = y;
+  }
+  // L^T solution = D^-1 y; L(row + 2, row)^T = A(row + 2, row) D^-1(row)
+  for (int row = level.nRows - 2; row >= 0; --row) {
+    const Matrix3& lower = level.lower1[first + row + 1];
+    Vector3 term2{};
+    if (row + 2 < level.nRows && coupling2) {
+      term2 = multiply(level.pivotInverse[first + row], {solution[3 * (row + 2)], solution[3 * (row + 2) + 1], solution[3 * (row + 2) + 2]});
+    }
+    for (int c = 0; c < 3; ++c) {
+      const double term1 = lower[0][c] * solution[3 * (row + 1)] + lower[1][c] * solution[3 * (row + 1) + 1] + lower[2][c] * solution[3 * (row + 1) + 2];
+      solution[3 * row + c] -= term1 + (row + 2 < level.nRows && coupling2 ? coupling2[row + 2] * term2[c] : 0.);
+    }
+  }
+}
+
+/// the couplings of a column's nodes to the other columns (laterOnly: to the columns after it in the order of the nodes) times x: y = the
+/// column's 3 nRows values
+void multiplyColumn(const MultigridLevel& level, int column, bool laterOnly, const double* x, double* y)
+{
+  const size_t nNodes = level.nNodes();
+  const int y2x = column % level.nY2X;
+  const int z2x = column / level.nY2X;
+  const int first = level.nRows * column;
+  std::fill(y, y + 3 * level.nRows, 0.);
+  // the rows of the column whose neighbour at the offset is on the grid; false if none or not to be included
+  auto rowRange = [&](const NodeOffset& offset, int& firstRow, int& endRow) {
+    const int columnShift = offset.y2x + level.nY2X * offset.z2x;
+    const bool included = laterOnly ? columnShift > 0 : columnShift != 0;
+    const bool onGrid = y2x + offset.y2x >= 0 && y2x + offset.y2x < level.nY2X && z2x + offset.z2x >= 0 && z2x + offset.z2x < level.nZ2X;
+    firstRow = std::max(0, -offset.row);
+    endRow = std::min(level.nRows, level.nRows - offset.row);
+    return included && onGrid && firstRow < endRow;
+  };
+  int firstRow = 0;
+  int endRow = 0;
+  for (size_t slot = 0; slot < level.penaltyOffsets.size(); ++slot) {
+    if (!rowRange(level.penaltyOffsets[slot], firstRow, endRow)) {
+      continue;
+    }
+    const double* coupling = level.penalty.data() + slot * nNodes + first;
+    const double* neighbour = x + 3 * (first + level.shift(level.penaltyOffsets[slot]));
+    for (int row = firstRow; row < endRow; ++row) {
+      for (int c = 0; c < 3; ++c) {
+        y[3 * row + c] += coupling[row] * neighbour[3 * row + c];
+      }
+    }
+  }
+  for (size_t slot = 0; slot < level.dataOffsets.size(); ++slot) {
+    if (!rowRange(level.dataOffsets[slot], firstRow, endRow)) {
+      continue;
+    }
+    const Matrix3* coupling = level.data.data() + slot * nNodes + first;
+    const double* neighbour = x + 3 * (first + level.shift(level.dataOffsets[slot]));
+    for (int row = firstRow; row < endRow; ++row) {
+      const Vector3 product = multiply(coupling[row], {neighbour[3 * row], neighbour[3 * row + 1], neighbour[3 * row + 2]});
+      for (int c = 0; c < 3; ++c) {
+        y[3 * row + c] += product[c];
+      }
+    }
+  }
+}
+
+/// a block Gauss-Seidel sweep over the level's columns, forward (in the order of the nodes) or backward: per column solution = its block
+/// ^-1 (rhs - the couplings to the other columns at their current solution)
+void gaussSeidelSweep(MultigridLevel& level, const double* rhs, double* solution, bool forward)
+{
+  const int nColumnValues = 3 * level.nRows;
+  double* columnRhs = level.columnRhs.data();
+  for (int step = 0; step < level.nColumns(); ++step) {
+    const int column = forward ? step : level.nColumns() - 1 - step;
+    multiplyColumn(level, column, false, solution, columnRhs);
+    for (int k = 0; k < nColumnValues; ++k) {
+      columnRhs[k] = rhs[nColumnValues * column + k] - columnRhs[k];
+    }
+    solveColumn(level, column, columnRhs, solution + nColumnValues * column);
+  }
+}
+
+/// the coarsest level: the banded Cholesky factor of its matrix (unknowns ordered by row, column, component: the couplings within +-2
+/// rows); a pivot below 1e-12 x its diagonal element is left out
+void factorCoarsest(MultigridLevel& level)
+{
+  const int nColumns = level.nColumns();
+  const int nUnknowns = 3 * level.nNodes();
+  level.bandWidth = 3 * (MaxNodeOffset * nColumns + nColumns) - 1;
+  const int width = level.bandWidth + 1;
+  level.band.assign(size_t(nUnknowns) * width, 0.);
+  level.work.assign(nUnknowns, 0.);
+  auto unknown = [&](int node, int component) { return 3 * (node / level.nRows + nColumns * (node % level.nRows)) + component; };
+  auto addLower = [&](int i, int j, double value) {
+    if (j <= i) {
+      level.band[size_t(i) * width + (i - j)] += value;
+    }
+  };
+  const size_t nNodes = level.nNodes();
+  for (size_t slot = 0; slot < level.penaltyOffsets.size(); ++slot) {
+    const double* coupling = level.penalty.data() + slot * nNodes;
+    forEachCoupling(level, level.penaltyOffsets[slot], [&](int node, int neighbour) {
+      for (int c = 0; c < 3; ++c) {
+        addLower(unknown(node, c), unknown(neighbour, c), coupling[node]);
+      }
+    });
+  }
+  for (size_t slot = 0; slot < level.dataOffsets.size(); ++slot) {
+    const Matrix3* coupling = level.data.data() + slot * nNodes;
+    forEachCoupling(level, level.dataOffsets[slot], [&](int node, int neighbour) {
+      for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+          addLower(unknown(node, row), unknown(neighbour, column), coupling[node][row][column]);
+        }
+      }
+    });
+  }
+  double* factor = level.band.data();
+  for (int i = 0; i < nUnknowns; ++i) {
+    const int first = std::max(0, i - level.bandWidth);
+    for (int j = first; j <= i; ++j) {
+      double sum = factor[size_t(i) * width + (i - j)];
+      for (int k = std::max(first, j - level.bandWidth); k < j; ++k) {
+        sum -= factor[size_t(i) * width + (i - k)] * factor[size_t(j) * width + (j - k)];
+      }
+      if (j < i) {
+        const double pivot = factor[size_t(j) * width];
+        factor[size_t(i) * width + (i - j)] = pivot > 0. ? sum / pivot : 0.;
+      } else {
+        const double diagonal = factor[size_t(i) * width];
+        factor[size_t(i) * width] = sum > 1e-12 * diagonal ? std::sqrt(sum) : 0.;
+      }
+    }
+  }
+}
+
+/// solution = the coarsest level's matrix ^-1 rhs
+void solveCoarsest(MultigridLevel& level, const double* rhs, double* solution)
+{
+  const int nColumns = level.nColumns();
+  const int nUnknowns = 3 * level.nNodes();
+  const int width = level.bandWidth + 1;
+  const double* factor = level.band.data();
+  double* permuted = level.work.data();
+  auto unknown = [&](int node) { return 3 * (node / level.nRows + nColumns * (node % level.nRows)); };
+  for (int node = 0; node < level.nNodes(); ++node) {
+    std::copy(rhs + 3 * node, rhs + 3 * node + 3, permuted + unknown(node));
+  }
+  for (int i = 0; i < nUnknowns; ++i) {
+    double sum = permuted[i];
+    for (int k = std::max(0, i - level.bandWidth); k < i; ++k) {
+      sum -= factor[size_t(i) * width + (i - k)] * permuted[k];
+    }
+    permuted[i] = factor[size_t(i) * width] > 0. ? sum / factor[size_t(i) * width] : 0.;
+  }
+  for (int i = nUnknowns - 1; i >= 0; --i) {
+    double sum = permuted[i];
+    for (int k = i + 1; k <= std::min(nUnknowns - 1, i + level.bandWidth); ++k) {
+      sum -= factor[size_t(k) * width + (k - i)] * permuted[k];
+    }
+    permuted[i] = factor[size_t(i) * width] > 0. ? sum / factor[size_t(i) * width] : 0.;
+  }
+  for (int node = 0; node < level.nNodes(); ++node) {
+    std::copy(permuted + unknown(node), permuted + unknown(node) + 3, solution + 3 * node);
+  }
+}
+
+/// the V-cycle from the level index on: solution = M^-1 rhs (M symmetric positive definite)
+void vCycle(std::vector<MultigridLevel>& levels, size_t index, const double* rhs, double* solution)
+{
+  MultigridLevel& level = levels[index];
+  if (index + 1 == levels.size()) {
+    solveCoarsest(level, rhs, solution);
+    return;
+  }
+  MultigridLevel& coarse = levels[index + 1];
+  const int nValues = 3 * level.nNodes();
+  const int nColumnValues = 3 * level.nRows;
+  std::fill(solution, solution + nValues, 0.);
+  gaussSeidelSweep(level, rhs, solution, true);
+  // the coarse correction of the residual (P^T, solve, P): the forward sweep from 0 solved each column with the later columns at 0, its
+  // residual rhs - A solution = -(the couplings to the later columns) x solution
+  double* residual = level.work.data();
+  for (int column = 0; column < level.nColumns(); ++column) {
+    multiplyColumn(level, column, true, solution, residual + nColumnValues * column);
+  }
+  std::fill(coarse.rhs.begin(), coarse.rhs.end(), 0.);
+  forEachInterpolation(level, coarse, [&](int fineColumn, int coarseColumn, double weight) {
+    for (int k = 0; k < nColumnValues; ++k) {
+      coarse.rhs[nColumnValues * coarseColumn + k] -= weight * residual[nColumnValues * fineColumn + k];
+    }
+  });
+  vCycle(levels, index + 1, coarse.rhs.data(), coarse.solution.data());
+  forEachInterpolation(level, coarse, [&](int fineColumn, int coarseColumn, double weight) {
+    for (int k = 0; k < nColumnValues; ++k) {
+      solution[nColumnValues * fineColumn + k] += weight * coarse.solution[nColumnValues * coarseColumn + k];
+    }
+  });
+  gaussSeidelSweep(level, rhs, solution, false);
+}
+
+/// the multigrid hierarchy of a sector's normal matrix (see solveSector), down to <= MultigridCoarsestColumns columns (or 2 x 2 bins)
+std::vector<MultigridLevel> makeMultigrid(const std::vector<Stencil>& stencils, const std::array<int, 3>& strides,
+                                          const std::vector<double>& penaltyDiagonal, double ridge, const std::vector<DataVoxel>& voxels)
+{
+  MultigridLevel fine;
+  fine.nRows = strides[1];
+  fine.nY2X = strides[2] / strides[1];
+  fine.nZ2X = int(penaltyDiagonal.size()) / strides[2];
+  auto offsetBetween = [&](int node, int other) {
+    NodeOffset offset;
+    offset.row = other % fine.nRows - node % fine.nRows;
+    offset.y2x = other / fine.nRows % fine.nY2X - node / fine.nRows % fine.nY2X;
+    offset.z2x = other / strides[2] - node / strides[2];
+    return offset;
+  };
+  assembleLevel(fine, [&](auto addPenalty, auto addData) {
+    for (int node = 0; node < fine.nNodes(); ++node) {
+      addPenalty(node, NodeOffset{}, penaltyDiagonal[node] + ridge);
+    }
+    for (const auto& stencil : stencils) {
+      const int step = strides[stencil.axis];
+      for (int k = 0; k < 3; ++k) {
+        for (int l = 0; l < 3; ++l) {
+          if (l != k) {
+            NodeOffset offset;
+            (stencil.axis == 0 ? offset.row : (stencil.axis == 1 ? offset.y2x : offset.z2x)) = l - k;
+            addPenalty(stencil.first + k * step, offset, stencil.lambda * stencil.coefficient[k] * stencil.coefficient[l]);
+          }
+        }
+      }
+    }
+    for (const auto& voxel : voxels) {
+      for (int j = 0; j < voxel.nNodes; ++j) {
+        for (int k = 0; k < voxel.nNodes; ++k) {
+          addData(voxel.node[j], offsetBetween(voxel.node[j], voxel.node[k]), voxel.weight * voxel.nodeWeight[j] * voxel.nodeWeight[k], voxel.a);
+        }
+      }
+    }
+  });
+  std::vector<MultigridLevel> levels;
+  levels.push_back(std::move(fine));
+  while (levels.back().nColumns() > MultigridCoarsestColumns && (levels.back().nY2X > 2 || levels.back().nZ2X > 2)) {
+    factorColumns(levels.back());
+    levels.back().work.assign(3 * size_t(levels.back().nNodes()), 0.);
+    levels.back().columnRhs.assign(3 * size_t(levels.back().nRows), 0.);
+    MultigridLevel coarse = coarseLevel(levels.back());
+    coarse.rhs.assign(3 * size_t(coarse.nNodes()), 0.);
+    coarse.solution.assign(3 * size_t(coarse.nNodes()), 0.);
+    levels.push_back(std::move(coarse));
+  }
+  factorCoarsest(levels.back());
+  return levels;
+}
+
 /// the penalised fit of one sector: minimises the voxels' chi2 (at their nodes, robust weights) + the penalty (stencils, strides of the
-/// sector-local node index along rows / y/x / z/x, penaltyDiagonal = its diagonal per node) + ridge |x|^2 by preconditioned conjugate
-/// gradients from the given nodes (3 per node: dX, dY, dZ; the solution on return); robust > 0: Tukey reweighting cycles
+/// sector-local node index along rows / y/x / z/x, penaltyDiagonal = its diagonal per node) + ridge |x|^2 by conjugate gradients
+/// preconditioned by a multigrid V-cycle (see above) from the given nodes (3 per node: dX, dY, dZ; the solution on return); robust > 0:
+/// Tukey reweighting cycles
 void solveSector(const std::vector<Stencil>& stencils, const std::array<int, 3>& strides, const std::vector<double>& penaltyDiagonal,
                  double ridge, int robust, std::vector<DataVoxel>& voxels, double* sectorNodes, SectorStatistics& statistics)
 {
@@ -312,14 +888,8 @@ void solveSector(const std::vector<Stencil>& stencils, const std::array<int, 3>&
         statistics.nZeroWeight += voxel.weight == 0.;
       }
     }
-    // the normal equations: ridge + penalty + sum over the voxels of w_j w_k a at their nodes; preconditioner = the inverse 3 x 3 diagonal blocks
+    // the normal equations: ridge + penalty + sum over the voxels of w_j w_k a at their nodes; preconditioner = a multigrid V-cycle
     std::vector<double> rhs(n, 0.);
-    std::vector<Matrix3> block(voxelsPerSector, Matrix3{});
-    for (int l = 0; l < voxelsPerSector; ++l) {
-      for (int c = 0; c < 3; ++c) {
-        block[l][c][c] = penaltyDiagonal[l] + ridge;
-      }
-    }
     std::vector<Matrix3> weighted(voxels.size());
     for (size_t i = 0; i < voxels.size(); ++i) {
       const auto& voxel = voxels[i];
@@ -331,19 +901,12 @@ void solveSector(const std::vector<Stencil>& stencils, const std::array<int, 3>&
         weightedB[row] = voxel.weight * voxel.b[row];
       }
       for (int j = 0; j < voxel.nNodes; ++j) {
-        const double squaredNodeWeight = voxel.nodeWeight[j] * voxel.nodeWeight[j];
         for (int row = 0; row < 3; ++row) {
           rhs[3 * voxel.node[j] + row] += voxel.nodeWeight[j] * weightedB[row];
-          for (int column = 0; column < 3; ++column) {
-            block[voxel.node[j]][row][column] += squaredNodeWeight * weighted[i][row][column];
-          }
         }
       }
     }
-    for (auto& matrix : block) {
-      // a node without data and penalty (no stencil, no ridge) stays 0
-      matrix = determinant(matrix) != 0. ? inverseSymmetric(matrix) : Matrix3{};
-    }
+    std::vector<MultigridLevel> levels = makeMultigrid(stencils, strides, penaltyDiagonal, ridge, voxels);
     auto apply = [&](const std::vector<double>& x, std::vector<double>& y) {
       for (int i = 0; i < n; ++i) {
         y[i] = ridge * x[i];
@@ -370,12 +933,7 @@ void solveSector(const std::vector<Stencil>& stencils, const std::array<int, 3>&
         }
       }
     };
-    auto precondition = [&](const std::vector<double>& r, std::vector<double>& z) {
-      for (int l = 0; l < voxelsPerSector; ++l) {
-        const Vector3 product = multiply(block[l], {r[3 * l], r[3 * l + 1], r[3 * l + 2]});
-        std::copy(product.begin(), product.end(), z.begin() + 3 * l);
-      }
-    };
+    auto precondition = [&](const std::vector<double>& r, std::vector<double>& z) { vCycle(levels, 0, r.data(), z.data()); };
     // preconditioned conjugate gradients from the previous cycle's solution
     std::vector<double> x(sectorNodes, sectorNodes + n);
     std::vector<double> r(n);
