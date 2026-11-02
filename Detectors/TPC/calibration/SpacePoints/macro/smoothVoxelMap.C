@@ -25,7 +25,8 @@
 /// - "voxResTree": D with the errors E (dX, dY correlated by EXYCorr) at the voxel's mean position (stat), for the fitted, unmasked voxels
 ///   with >= minEntries entries (staticMapCreator.C, staticMapCreatorCPM.C, fineMapCreatorGBL.C). errorMode 0: the input's E, EXYCorr;
 ///   1: E = s / sqrt(entries), EXYCorr = 0, with s per coordinate from the scatter of the rows' second differences in the IROC bulk (an
-///   upper bound: it includes the curvature differences between columns); 2: E, EXYCorr from the residual slope method's voxel solve of
+///   upper bound: it includes the curvature differences between columns); 2: E, EXYCorr and the dZ correlations (dZ = <r_z> + <s_z> dX:
+///   correlated with dX, dY through dX; the voxResTree has no field for them) from the residual slope method's voxel solve of
 ///   the same file's fineSums (staticMapCreatorCPM.C voxelMethod 0 + writeSlopeSums: the CPM values weighted with the slope method's
 ///   errors; voxels it does not solve are no data); -1: 1 if the input has the placeholders of staticMapCreatorCPM.C's CPM maps (E = 0.1,
 ///   EXYCorr = 1), else 0;
@@ -1123,6 +1124,8 @@ struct VoxelSolution {
   std::array<double, 3> value{}; ///< dX, dY, dZ
   std::array<double, 3> error{}; ///< scaled by sqrt(chi2Scale)
   double correlationXY = 0.;
+  double correlationXZ = 0.; ///< dZ = <r_z> + <s_z> dX: through dX
+  double correlationYZ = 0.;
   double rmsY = 0.;
   double rmsZ = 0.;
   double chi2Scale = 1.; ///< max(1, chi2 / ndf)
@@ -1157,6 +1160,9 @@ bool solveVoxel(const ChargeSums& sums, double minEntries, VoxelSolution& soluti
   solution.error[1] = std::sqrt(std::max(0., covarianceYY) * scale);
   solution.error[2] = std::sqrt(std::max(0., 1. / sums.z[S::W] + meanSlopeZ * meanSlopeZ * covarianceXX) * scale);
   solution.correlationXY = covarianceXX * covarianceYY > 0. ? covarianceXY / std::sqrt(covarianceXX * covarianceYY) : 0.;
+  const double varianceZ = 1. / sums.z[S::W] + meanSlopeZ * meanSlopeZ * covarianceXX;
+  solution.correlationXZ = covarianceXX * varianceZ > 0. ? meanSlopeZ * covarianceXX / std::sqrt(covarianceXX * varianceZ) : 0.;
+  solution.correlationYZ = covarianceYY * varianceZ > 0. ? meanSlopeZ * covarianceXY / std::sqrt(covarianceYY * varianceZ) : 0.;
   solution.rmsY = std::sqrt(std::max(0., chi2Y) / sums.y[S::W]);
   solution.rmsZ = std::sqrt(std::max(0., chi2Z) / sums.z[S::W]);
   solution.chi2Scale = scale;
@@ -1514,6 +1520,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   }
 
   // the errors of a voxResTree: the input's, or s / sqrt(entries) (CPM placeholders)
+  std::vector<std::array<float, 2>> correlationsZ(nVoxels, {0.f, 0.f}); // errorMode 2: dX-dZ, dY-dZ
   if (!useSums) {
     if (errorMode < 0) {
       bool placeholders = true;
@@ -1539,6 +1546,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
           result.E[coordinate] = solved ? solution.error[coordinate] : 0.;
         }
         result.EXYCorr = solved ? solution.correlationXY : 0.;
+        correlationsZ[voxel] = {float(solved ? solution.correlationXZ : 0.), float(solved ? solution.correlationYZ : 0.)};
       }
       LOGP(info, "Errors: the residual slope method's voxel solve of the fineSums ({} voxels solved, the others no data)", nSolved);
     } else if (errorMode == 1) {
@@ -1621,6 +1629,10 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       covariance[0][1] = std::clamp(double(result.EXYCorr), -0.99, 0.99) * result.E[0] * result.E[1];
       covariance[1][0] = covariance[0][1];
       covariance[2][2] = result.E[2] * result.E[2];
+      covariance[0][2] = correlationsZ[voxel][0] * result.E[0] * result.E[2];
+      covariance[2][0] = covariance[0][2];
+      covariance[1][2] = correlationsZ[voxel][1] * result.E[1] * result.E[2];
+      covariance[2][1] = covariance[1][2];
       dataVoxel.a = inverseSymmetric(covariance);
       dataVoxel.b = multiply(dataVoxel.a, {result.D[0], result.D[1], result.D[2]});
       z2xSide = (sector < NSectors / 2 ? 1. : -1.) * result.stat[TrackResiduals::VoxZ];
