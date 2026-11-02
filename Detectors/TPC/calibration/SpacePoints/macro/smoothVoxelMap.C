@@ -66,6 +66,7 @@
 #include <thread>
 #include <vector>
 
+#ifndef SMOOTHVOXELMAP_SOLVER_ONLY // the solver alone (solveSector and its algebra) compiles without ROOT and O2
 #include <fmt/format.h>
 
 #include "TFile.h"
@@ -84,14 +85,13 @@
 #else
 #include "TPCBase/CDBTypes.h"
 #endif
+#endif
 #else
 #error This macro must run in compiled mode
 #endif
 
 namespace voxel_smoother
 {
-using TrackResiduals = o2::tpc::TrackResiduals;
-
 constexpr int NSectors = 36;
 constexpr int NRows = 152;
 constexpr int NIrocRows = 63;
@@ -103,6 +103,324 @@ constexpr double CGTolerance = 1e-8;     ///< relative residual norm of the conj
 constexpr int CGMaxIterations = 20000;   ///< per sector and cycle
 constexpr int JacobiMaxSweeps = 50;      ///< of the 3 x 3 eigen-decomposition (robust reweighting of a voxel with a near-singular chi2)
 constexpr float PlaceholderError = 0.1f; ///< staticMapCreatorCPM.C's E of every voxel
+
+// the algebra of the fit with std::array / std::vector (no Eigen: it is not on the ROOT_INCLUDE_PATH of ACLiC on the GRID), in the operation
+// order of Eigen 3.4 with SSE2 / NEON (packets of two doubles) where it is cheap
+using Vector3 = std::array<double, 3>;
+using Matrix3 = std::array<Vector3, 3>; ///< [row][column]
+
+/// a^T b (from left to right as Eigen's Vector3d::dot)
+double dot(const Vector3& a, const Vector3& b)
+{
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/// matrix x vector: rows 0 and 1 from left to right, row 2 as m20 v0 + (m21 v1 + m22 v2) (Eigen's Matrix3d * Vector3d: a packet of rows 0
+/// and 1, row 2 by its coefficient)
+Vector3 multiply(const Matrix3& matrix, const Vector3& vector)
+{
+  Vector3 product;
+  product[0] = matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2];
+  product[1] = matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2];
+  product[2] = matrix[2][0] * vector[0] + (matrix[2][1] * vector[1] + matrix[2][2] * vector[2]);
+  return product;
+}
+
+/// the determinant (as Eigen's Matrix3d::determinant)
+double determinant(const Matrix3& m)
+{
+  return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+}
+
+/// the inverse of a symmetric matrix via the adjugate (as Eigen's Matrix3d::inverse: the cofactors of the first column give the
+/// determinant; for a symmetric matrix Eigen's cofactors (i, j) and (j, i) are the same products)
+Matrix3 inverseSymmetric(const Matrix3& m)
+{
+  const double cofactor00 = m[1][1] * m[2][2] - m[1][2] * m[2][1];
+  const double cofactor01 = m[2][1] * m[0][2] - m[2][2] * m[0][1];
+  const double cofactor02 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
+  const double cofactor11 = m[2][2] * m[0][0] - m[2][0] * m[0][2];
+  const double cofactor12 = m[0][2] * m[1][0] - m[0][0] * m[1][2];
+  const double cofactor22 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+  const double inverseDeterminant = 1. / (cofactor00 * m[0][0] + cofactor01 * m[1][0] + cofactor02 * m[2][0]);
+  Matrix3 inverse;
+  inverse[0] = {cofactor00 * inverseDeterminant, cofactor01 * inverseDeterminant, cofactor02 * inverseDeterminant};
+  inverse[1] = {inverse[0][1], cofactor11 * inverseDeterminant, cofactor12 * inverseDeterminant};
+  inverse[2] = {inverse[0][2], inverse[1][2], cofactor22 * inverseDeterminant};
+  return inverse;
+}
+
+/// a^T b of two CG vectors in four interleaved partial sums (as Eigen's VectorXd::dot with two packets of two doubles)
+double dot(const std::vector<double>& a, const std::vector<double>& b)
+{
+  const size_t size = a.size();
+  const size_t end = size / 4 * 4;
+  std::array<double, 4> partial{};
+  for (size_t i = 0; i < end; i += 4) {
+    for (size_t k = 0; k < 4; ++k) {
+      partial[k] += a[i + k] * b[i + k];
+    }
+  }
+  partial[0] += partial[2];
+  partial[1] += partial[3];
+  size_t i = end;
+  if (size - end >= 2) {
+    partial[0] += a[i] * b[i];
+    partial[1] += a[i + 1] * b[i + 1];
+    i += 2;
+  }
+  double sum = partial[0] + partial[1];
+  for (; i < size; ++i) {
+    sum += a[i] * b[i];
+  }
+  return sum;
+}
+
+/// the minimum -b^T a^+ b of theta^T a theta - 2 b^T theta for a symmetric positive semi-definite a, and the rank of a (its eigenvalues
+/// above 1e-12 x the largest): with a^-1 if det(a) > 1e-12 trace(a)^3 (then all eigenvalues are above), else from the eigen-decomposition
+/// by cyclic Jacobi rotations
+double quadraticMinimum(const Matrix3& a, const Vector3& b, int& rank)
+{
+  const double trace = a[0][0] + a[1][1] + a[2][2];
+  if (determinant(a) > 1e-12 * trace * trace * trace) {
+    rank = 3;
+    return -dot(b, multiply(inverseSymmetric(a), b));
+  }
+  Matrix3 rotated = a;    // V^T a V, diagonal at the end
+  Matrix3 eigenvectors{}; // V: in its columns
+  double squaredNorm = 0.;
+  for (int row = 0; row < 3; ++row) {
+    eigenvectors[row][row] = 1.;
+    for (int column = 0; column < 3; ++column) {
+      squaredNorm += a[row][column] * a[row][column];
+    }
+  }
+  const double epsilon = std::numeric_limits<double>::epsilon();
+  for (int sweep = 0; sweep < JacobiMaxSweeps; ++sweep) {
+    const double offDiagonal = rotated[0][1] * rotated[0][1] + rotated[0][2] * rotated[0][2] + rotated[1][2] * rotated[1][2];
+    if (!(offDiagonal > epsilon * epsilon * squaredNorm)) {
+      break;
+    }
+    for (int first = 0; first < 2; ++first) {
+      for (int second = first + 1; second < 3; ++second) {
+        const double element = rotated[first][second];
+        if (element == 0.) {
+          continue;
+        }
+        // the rotation by atan(tangent) in the plane (first, second) that zeroes the element
+        const int third = 3 - first - second;
+        const double cotangentTwoAngle = (rotated[second][second] - rotated[first][first]) / (2. * element);
+        const double tangent = (cotangentTwoAngle < 0. ? -1. : 1.) / (std::abs(cotangentTwoAngle) + std::hypot(cotangentTwoAngle, 1.));
+        const double cosine = 1. / std::sqrt(tangent * tangent + 1.);
+        const double sine = tangent * cosine;
+        rotated[first][first] -= tangent * element;
+        rotated[second][second] += tangent * element;
+        rotated[first][second] = 0.;
+        rotated[second][first] = 0.;
+        const double thirdFirst = rotated[third][first];
+        const double thirdSecond = rotated[third][second];
+        rotated[third][first] = cosine * thirdFirst - sine * thirdSecond;
+        rotated[first][third] = rotated[third][first];
+        rotated[third][second] = sine * thirdFirst + cosine * thirdSecond;
+        rotated[second][third] = rotated[third][second];
+        for (int row = 0; row < 3; ++row) {
+          const double vectorFirst = eigenvectors[row][first];
+          const double vectorSecond = eigenvectors[row][second];
+          eigenvectors[row][first] = cosine * vectorFirst - sine * vectorSecond;
+          eigenvectors[row][second] = sine * vectorFirst + cosine * vectorSecond;
+        }
+      }
+    }
+  }
+  const double largest = std::max({rotated[0][0], rotated[1][1], rotated[2][2]});
+  double minimum = 0.;
+  rank = 0;
+  for (int k = 0; k < 3; ++k) {
+    const double eigenvalue = rotated[k][k];
+    if (eigenvalue > 1e-12 * largest) {
+      const double projection = eigenvectors[0][k] * b[0] + eigenvectors[1][k] * b[1] + eigenvectors[2][k] * b[2];
+      minimum -= projection * projection / eigenvalue;
+      ++rank;
+    }
+  }
+  return minimum;
+}
+
+/// one voxel with data: its chi2 theta^T a theta - 2 b^T theta + const (theta = (dX, dY, dZ)) at its position, and the nodes there
+struct DataVoxel {
+  Matrix3 a{};
+  Vector3 b{};
+  double weight = 1.; ///< robust weight
+  int nNodes = 0;
+  std::array<int, 4> node{}; ///< sector-local
+  std::array<double, 4> nodeWeight{};
+};
+
+/// one term of the penalty: lambda (sum_k coefficient_k node(first + k step))^2 along an axis
+struct Stencil {
+  int axis = 0;
+  int first = 0;
+  std::array<double, 3> coefficient{};
+  double lambda = 0.;
+};
+
+/// per sector: the solver statistics
+struct SectorStatistics {
+  int iterations = 0;
+  double residual = 0.; ///< relative residual norm of the last CG
+  bool finite = true;
+  long nLowWeight = 0;  ///< robust: voxels below weight 0.5 at the last reweighting
+  long nZeroWeight = 0; ///< ... at 0
+};
+
+/// the penalised fit of one sector: minimises the voxels' chi2 (at their nodes, robust weights) + the penalty (stencils, strides of the
+/// sector-local node index along rows / y/x / z/x, penaltyDiagonal = its diagonal per node) + ridge |x|^2 by preconditioned conjugate
+/// gradients from the given nodes (3 per node: dX, dY, dZ; the solution on return); robust > 0: Tukey reweighting cycles
+void solveSector(const std::vector<Stencil>& stencils, const std::array<int, 3>& strides, const std::vector<double>& penaltyDiagonal,
+                 double ridge, int robust, std::vector<DataVoxel>& voxels, double* sectorNodes, SectorStatistics& statistics)
+{
+  const int voxelsPerSector = int(penaltyDiagonal.size());
+  statistics = SectorStatistics{};
+  if (voxels.empty()) {
+    return;
+  }
+  const int n = 3 * voxelsPerSector;
+  auto nodeValue = [&](const DataVoxel& voxel, const double* x) {
+    Vector3 theta{};
+    for (int j = 0; j < voxel.nNodes; ++j) {
+      for (int c = 0; c < 3; ++c) {
+        theta[c] += voxel.nodeWeight[j] * x[3 * voxel.node[j] + c];
+      }
+    }
+    return theta;
+  };
+  for (int cycle = 0; cycle <= robust; ++cycle) {
+    if (cycle > 0) {
+      // Tukey's bisquare of sqrt(excess chi2 / rank): the voxel's chi2 at the solution minus its minimum -b^T a^+ b
+      statistics.nLowWeight = 0;
+      statistics.nZeroWeight = 0;
+      for (auto& voxel : voxels) {
+        const Vector3 theta = nodeValue(voxel, sectorNodes);
+        int rank = 0;
+        const double minimum = quadraticMinimum(voxel.a, voxel.b, rank);
+        const double excess = dot(theta, multiply(voxel.a, theta)) - 2. * dot(voxel.b, theta) - minimum;
+        const double normalised = rank > 0 ? std::sqrt(std::max(0., excess) / rank) / Tukey : 0.;
+        voxel.weight = normalised < 1. ? (1. - normalised * normalised) * (1. - normalised * normalised) : 0.;
+        statistics.nLowWeight += voxel.weight < 0.5;
+        statistics.nZeroWeight += voxel.weight == 0.;
+      }
+    }
+    // the normal equations: ridge + penalty + sum over the voxels of w_j w_k a at their nodes; preconditioner = the inverse 3 x 3 diagonal blocks
+    std::vector<double> rhs(n, 0.);
+    std::vector<Matrix3> block(voxelsPerSector, Matrix3{});
+    for (int l = 0; l < voxelsPerSector; ++l) {
+      for (int c = 0; c < 3; ++c) {
+        block[l][c][c] = penaltyDiagonal[l] + ridge;
+      }
+    }
+    std::vector<Matrix3> weighted(voxels.size());
+    for (size_t i = 0; i < voxels.size(); ++i) {
+      const auto& voxel = voxels[i];
+      Vector3 weightedB;
+      for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+          weighted[i][row][column] = voxel.weight * voxel.a[row][column];
+        }
+        weightedB[row] = voxel.weight * voxel.b[row];
+      }
+      for (int j = 0; j < voxel.nNodes; ++j) {
+        const double squaredNodeWeight = voxel.nodeWeight[j] * voxel.nodeWeight[j];
+        for (int row = 0; row < 3; ++row) {
+          rhs[3 * voxel.node[j] + row] += voxel.nodeWeight[j] * weightedB[row];
+          for (int column = 0; column < 3; ++column) {
+            block[voxel.node[j]][row][column] += squaredNodeWeight * weighted[i][row][column];
+          }
+        }
+      }
+    }
+    for (auto& matrix : block) {
+      // a node without data and penalty (no stencil, no ridge) stays 0
+      matrix = determinant(matrix) != 0. ? inverseSymmetric(matrix) : Matrix3{};
+    }
+    auto apply = [&](const std::vector<double>& x, std::vector<double>& y) {
+      for (int i = 0; i < n; ++i) {
+        y[i] = ridge * x[i];
+      }
+      for (const auto& stencil : stencils) {
+        const int step = strides[stencil.axis];
+        for (int c = 0; c < 3; ++c) {
+          double difference = 0.;
+          for (int k = 0; k < 3; ++k) {
+            difference += stencil.coefficient[k] * x[3 * (stencil.first + k * step) + c];
+          }
+          for (int k = 0; k < 3; ++k) {
+            y[3 * (stencil.first + k * step) + c] += stencil.lambda * stencil.coefficient[k] * difference;
+          }
+        }
+      }
+      for (size_t i = 0; i < voxels.size(); ++i) {
+        const auto& voxel = voxels[i];
+        const Vector3 u = multiply(weighted[i], nodeValue(voxel, x.data()));
+        for (int j = 0; j < voxel.nNodes; ++j) {
+          for (int c = 0; c < 3; ++c) {
+            y[3 * voxel.node[j] + c] += voxel.nodeWeight[j] * u[c];
+          }
+        }
+      }
+    };
+    auto precondition = [&](const std::vector<double>& r, std::vector<double>& z) {
+      for (int l = 0; l < voxelsPerSector; ++l) {
+        const Vector3 product = multiply(block[l], {r[3 * l], r[3 * l + 1], r[3 * l + 2]});
+        std::copy(product.begin(), product.end(), z.begin() + 3 * l);
+      }
+    };
+    // preconditioned conjugate gradients from the previous cycle's solution
+    std::vector<double> x(sectorNodes, sectorNodes + n);
+    std::vector<double> r(n);
+    std::vector<double> z(n);
+    std::vector<double> q(n);
+    const double rhsNorm = std::sqrt(dot(rhs, rhs));
+    statistics.iterations = 0;
+    statistics.residual = 0.;
+    if (rhsNorm == 0.) {
+      std::fill(sectorNodes, sectorNodes + n, 0.);
+      continue;
+    }
+    apply(x, q);
+    for (int i = 0; i < n; ++i) {
+      r[i] = rhs[i] - q[i];
+    }
+    precondition(r, z);
+    std::vector<double> p = z;
+    double rz = dot(r, z);
+    statistics.residual = std::sqrt(dot(r, r)) / rhsNorm;
+    while (statistics.residual > CGTolerance && statistics.iterations < CGMaxIterations) {
+      apply(p, q);
+      const double alpha = rz / dot(p, q);
+      for (int i = 0; i < n; ++i) {
+        x[i] += alpha * p[i];
+        r[i] -= alpha * q[i];
+      }
+      statistics.residual = std::sqrt(dot(r, r)) / rhsNorm;
+      ++statistics.iterations;
+      precondition(r, z);
+      const double rzNew = dot(r, z);
+      const double beta = rzNew / rz;
+      for (int i = 0; i < n; ++i) {
+        p[i] = z[i] + beta * p[i];
+      }
+      rz = rzNew;
+    }
+    statistics.finite = statistics.finite && std::all_of(x.begin(), x.end(), [](double value) { return std::isfinite(value); });
+    std::copy(x.begin(), x.end(), sectorNodes);
+  }
+}
+} // namespace voxel_smoother
+
+#ifndef SMOOTHVOXELMAP_SOLVER_ONLY
+namespace voxel_smoother
+{
+using TrackResiduals = o2::tpc::TrackResiduals;
 
 std::unique_ptr<TrackResiduals> makeBinning(const std::string& y2xBinning, const std::string& z2xBinning, float maxZ2X)
 {
@@ -287,158 +605,6 @@ bool solveVoxel(const ChargeSums& sums, double minEntries, VoxelSolution& soluti
   return std::isfinite(dX) && std::isfinite(dY) && std::isfinite(dZ);
 }
 
-// the algebra of the fit with std::array / std::vector (no Eigen: it is not on the ROOT_INCLUDE_PATH of ACLiC on the GRID), in the operation
-// order of Eigen 3.4 with SSE2 / NEON (packets of two doubles) where it is cheap
-using Vector3 = std::array<double, 3>;
-using Matrix3 = std::array<Vector3, 3>; ///< [row][column]
-
-/// a^T b (from left to right as Eigen's Vector3d::dot)
-double dot(const Vector3& a, const Vector3& b)
-{
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-/// matrix x vector: rows 0 and 1 from left to right, row 2 as m20 v0 + (m21 v1 + m22 v2) (Eigen's Matrix3d * Vector3d: a packet of rows 0
-/// and 1, row 2 by its coefficient)
-Vector3 multiply(const Matrix3& matrix, const Vector3& vector)
-{
-  Vector3 product;
-  product[0] = matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2];
-  product[1] = matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2];
-  product[2] = matrix[2][0] * vector[0] + (matrix[2][1] * vector[1] + matrix[2][2] * vector[2]);
-  return product;
-}
-
-/// the determinant (as Eigen's Matrix3d::determinant)
-double determinant(const Matrix3& m)
-{
-  return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-}
-
-/// the inverse of a symmetric matrix via the adjugate (as Eigen's Matrix3d::inverse: the cofactors of the first column give the
-/// determinant; for a symmetric matrix Eigen's cofactors (i, j) and (j, i) are the same products)
-Matrix3 inverseSymmetric(const Matrix3& m)
-{
-  const double cofactor00 = m[1][1] * m[2][2] - m[1][2] * m[2][1];
-  const double cofactor01 = m[2][1] * m[0][2] - m[2][2] * m[0][1];
-  const double cofactor02 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
-  const double cofactor11 = m[2][2] * m[0][0] - m[2][0] * m[0][2];
-  const double cofactor12 = m[0][2] * m[1][0] - m[0][0] * m[1][2];
-  const double cofactor22 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
-  const double inverseDeterminant = 1. / (cofactor00 * m[0][0] + cofactor01 * m[1][0] + cofactor02 * m[2][0]);
-  Matrix3 inverse;
-  inverse[0] = {cofactor00 * inverseDeterminant, cofactor01 * inverseDeterminant, cofactor02 * inverseDeterminant};
-  inverse[1] = {inverse[0][1], cofactor11 * inverseDeterminant, cofactor12 * inverseDeterminant};
-  inverse[2] = {inverse[0][2], inverse[1][2], cofactor22 * inverseDeterminant};
-  return inverse;
-}
-
-/// a^T b of two CG vectors in four interleaved partial sums (as Eigen's VectorXd::dot with two packets of two doubles)
-double dot(const std::vector<double>& a, const std::vector<double>& b)
-{
-  const size_t size = a.size();
-  const size_t end = size / 4 * 4;
-  std::array<double, 4> partial{};
-  for (size_t i = 0; i < end; i += 4) {
-    for (size_t k = 0; k < 4; ++k) {
-      partial[k] += a[i + k] * b[i + k];
-    }
-  }
-  partial[0] += partial[2];
-  partial[1] += partial[3];
-  size_t i = end;
-  if (size - end >= 2) {
-    partial[0] += a[i] * b[i];
-    partial[1] += a[i + 1] * b[i + 1];
-    i += 2;
-  }
-  double sum = partial[0] + partial[1];
-  for (; i < size; ++i) {
-    sum += a[i] * b[i];
-  }
-  return sum;
-}
-
-/// the minimum -b^T a^+ b of theta^T a theta - 2 b^T theta for a symmetric positive semi-definite a, and the rank of a (its eigenvalues
-/// above 1e-12 x the largest): with a^-1 if det(a) > 1e-12 trace(a)^3 (then all eigenvalues are above), else from the eigen-decomposition
-/// by cyclic Jacobi rotations
-double quadraticMinimum(const Matrix3& a, const Vector3& b, int& rank)
-{
-  const double trace = a[0][0] + a[1][1] + a[2][2];
-  if (determinant(a) > 1e-12 * trace * trace * trace) {
-    rank = 3;
-    return -dot(b, multiply(inverseSymmetric(a), b));
-  }
-  Matrix3 rotated = a;    // V^T a V, diagonal at the end
-  Matrix3 eigenvectors{}; // V: in its columns
-  double squaredNorm = 0.;
-  for (int row = 0; row < 3; ++row) {
-    eigenvectors[row][row] = 1.;
-    for (int column = 0; column < 3; ++column) {
-      squaredNorm += a[row][column] * a[row][column];
-    }
-  }
-  const double epsilon = std::numeric_limits<double>::epsilon();
-  for (int sweep = 0; sweep < JacobiMaxSweeps; ++sweep) {
-    const double offDiagonal = rotated[0][1] * rotated[0][1] + rotated[0][2] * rotated[0][2] + rotated[1][2] * rotated[1][2];
-    if (!(offDiagonal > epsilon * epsilon * squaredNorm)) {
-      break;
-    }
-    for (int first = 0; first < 2; ++first) {
-      for (int second = first + 1; second < 3; ++second) {
-        const double element = rotated[first][second];
-        if (element == 0.) {
-          continue;
-        }
-        // the rotation by atan(tangent) in the plane (first, second) that zeroes the element
-        const int third = 3 - first - second;
-        const double cotangentTwoAngle = (rotated[second][second] - rotated[first][first]) / (2. * element);
-        const double tangent = (cotangentTwoAngle < 0. ? -1. : 1.) / (std::abs(cotangentTwoAngle) + std::hypot(cotangentTwoAngle, 1.));
-        const double cosine = 1. / std::sqrt(tangent * tangent + 1.);
-        const double sine = tangent * cosine;
-        rotated[first][first] -= tangent * element;
-        rotated[second][second] += tangent * element;
-        rotated[first][second] = 0.;
-        rotated[second][first] = 0.;
-        const double thirdFirst = rotated[third][first];
-        const double thirdSecond = rotated[third][second];
-        rotated[third][first] = cosine * thirdFirst - sine * thirdSecond;
-        rotated[first][third] = rotated[third][first];
-        rotated[third][second] = sine * thirdFirst + cosine * thirdSecond;
-        rotated[second][third] = rotated[third][second];
-        for (int row = 0; row < 3; ++row) {
-          const double vectorFirst = eigenvectors[row][first];
-          const double vectorSecond = eigenvectors[row][second];
-          eigenvectors[row][first] = cosine * vectorFirst - sine * vectorSecond;
-          eigenvectors[row][second] = sine * vectorFirst + cosine * vectorSecond;
-        }
-      }
-    }
-  }
-  const double largest = std::max({rotated[0][0], rotated[1][1], rotated[2][2]});
-  double minimum = 0.;
-  rank = 0;
-  for (int k = 0; k < 3; ++k) {
-    const double eigenvalue = rotated[k][k];
-    if (eigenvalue > 1e-12 * largest) {
-      const double projection = eigenvectors[0][k] * b[0] + eigenvectors[1][k] * b[1] + eigenvectors[2][k] * b[2];
-      minimum -= projection * projection / eigenvalue;
-      ++rank;
-    }
-  }
-  return minimum;
-}
-
-/// one voxel with data: its chi2 theta^T a theta - 2 b^T theta + const (theta = (dX, dY, dZ)) at its position, and the nodes there
-struct DataVoxel {
-  Matrix3 a{};
-  Vector3 b{};
-  double weight = 1.; ///< robust weight
-  int nNodes = 0;
-  std::array<int, 4> node{}; ///< sector-local
-  std::array<double, 4> nodeWeight{};
-};
-
 /// the per-coordinate noise s of a voxel with N entries, s / sqrt(N): the rows' second difference d_r - (d_{r-1} + d_{r+1}) / 2 over its
 /// expected spread sqrt(1/N_r + (1/N_{r-1} + 1/N_{r+1}) / 4), its MAD in the IROC bulk (rows 10-55)
 std::array<double, 3> estimateNoise(const TrackResiduals& binning, const std::vector<TrackResiduals::VoxRes>& results, double minEntries)
@@ -515,14 +681,6 @@ std::vector<char> untrustedRows(const TrackResiduals& binning, const std::vector
   return untrusted;
 }
 
-/// one term of the penalty: lambda (sum_k coefficient_k node(first + k step))^2 along an axis
-struct Stencil {
-  int axis = 0;
-  int first = 0;
-  std::array<double, 3> coefficient{};
-  double lambda = 0.;
-};
-
 /// the penalty's terms, the same in every sector (none across the stack boundaries). Per bin (curvature = false): the second difference
 /// with the prior rms tau[axis] (cm) per term. Curvature: the second derivative from the bin centres' positions in cm (x of the pad rows,
 /// y = y/x x, z = z/x x; unequal spacing allowed) weighted with the centre voxel's volume in cm^3, tau[axis] = the prior rms (cm / cm^2)
@@ -585,7 +743,7 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
   const int nBinsX = binning.getNXBins();
   const int nBinsY2X = binning.getNY2XBins();
   const int voxelsPerSector = binning.getNVoxelsPerSector();
-  const int strides[3] = {1, nBinsX, nBinsX * nBinsY2X}; // getGlbVoxBin = row + nX * (y/x bin + nY2X * z/x bin)
+  const std::array<int, 3> strides = {1, nBinsX, nBinsX * nBinsY2X}; // getGlbVoxBin = row + nX * (y/x bin + nY2X * z/x bin)
   const double ridge = tau0 > 0. ? 1. / (tau0 * tau0) : 0.;
 
   // the penalty's terms and their diagonal per node
@@ -598,148 +756,9 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
   }
 
   nodes.assign(size_t(NSectors) * voxelsPerSector * 3, 0.);
-  std::array<int, NSectors> iterations{};
-  std::array<double, NSectors> residuals{};
-  std::array<bool, NSectors> finite{};
-  std::array<long, NSectors> nLowWeight{};
-  std::array<long, NSectors> nZeroWeight{};
+  std::array<SectorStatistics, NSectors> statistics{};
   auto smoothSector = [&](int sector) {
-    finite[sector] = true;
-    auto& voxels = data[sector];
-    if (voxels.empty()) {
-      return;
-    }
-    const int n = 3 * voxelsPerSector;
-    double* sectorNodes = nodes.data() + 3 * size_t(sector) * voxelsPerSector;
-    auto nodeValue = [&](const DataVoxel& voxel, const double* x) {
-      Vector3 theta{};
-      for (int j = 0; j < voxel.nNodes; ++j) {
-        for (int c = 0; c < 3; ++c) {
-          theta[c] += voxel.nodeWeight[j] * x[3 * voxel.node[j] + c];
-        }
-      }
-      return theta;
-    };
-    for (int cycle = 0; cycle <= robust; ++cycle) {
-      if (cycle > 0) {
-        // Tukey's bisquare of sqrt(excess chi2 / rank): the voxel's chi2 at the solution minus its minimum -b^T a^+ b
-        nLowWeight[sector] = 0;
-        nZeroWeight[sector] = 0;
-        for (auto& voxel : voxels) {
-          const Vector3 theta = nodeValue(voxel, sectorNodes);
-          int rank = 0;
-          const double minimum = quadraticMinimum(voxel.a, voxel.b, rank);
-          const double excess = dot(theta, multiply(voxel.a, theta)) - 2. * dot(voxel.b, theta) - minimum;
-          const double normalised = rank > 0 ? std::sqrt(std::max(0., excess) / rank) / Tukey : 0.;
-          voxel.weight = normalised < 1. ? (1. - normalised * normalised) * (1. - normalised * normalised) : 0.;
-          nLowWeight[sector] += voxel.weight < 0.5;
-          nZeroWeight[sector] += voxel.weight == 0.;
-        }
-      }
-      // the normal equations: ridge + penalty + sum over the voxels of w_j w_k a at their nodes; preconditioner = the inverse 3 x 3 diagonal blocks
-      std::vector<double> rhs(n, 0.);
-      std::vector<Matrix3> block(voxelsPerSector, Matrix3{});
-      for (int l = 0; l < voxelsPerSector; ++l) {
-        for (int c = 0; c < 3; ++c) {
-          block[l][c][c] = penaltyDiagonal[l] + ridge;
-        }
-      }
-      std::vector<Matrix3> weighted(voxels.size());
-      for (size_t i = 0; i < voxels.size(); ++i) {
-        const auto& voxel = voxels[i];
-        Vector3 weightedB;
-        for (int row = 0; row < 3; ++row) {
-          for (int column = 0; column < 3; ++column) {
-            weighted[i][row][column] = voxel.weight * voxel.a[row][column];
-          }
-          weightedB[row] = voxel.weight * voxel.b[row];
-        }
-        for (int j = 0; j < voxel.nNodes; ++j) {
-          const double squaredNodeWeight = voxel.nodeWeight[j] * voxel.nodeWeight[j];
-          for (int row = 0; row < 3; ++row) {
-            rhs[3 * voxel.node[j] + row] += voxel.nodeWeight[j] * weightedB[row];
-            for (int column = 0; column < 3; ++column) {
-              block[voxel.node[j]][row][column] += squaredNodeWeight * weighted[i][row][column];
-            }
-          }
-        }
-      }
-      for (auto& matrix : block) {
-        // a node without data and penalty (no stencil, no ridge) stays 0
-        matrix = determinant(matrix) != 0. ? inverseSymmetric(matrix) : Matrix3{};
-      }
-      auto apply = [&](const std::vector<double>& x, std::vector<double>& y) {
-        for (int i = 0; i < n; ++i) {
-          y[i] = ridge * x[i];
-        }
-        for (const auto& stencil : stencils) {
-          const int step = strides[stencil.axis];
-          for (int c = 0; c < 3; ++c) {
-            double difference = 0.;
-            for (int k = 0; k < 3; ++k) {
-              difference += stencil.coefficient[k] * x[3 * (stencil.first + k * step) + c];
-            }
-            for (int k = 0; k < 3; ++k) {
-              y[3 * (stencil.first + k * step) + c] += stencil.lambda * stencil.coefficient[k] * difference;
-            }
-          }
-        }
-        for (size_t i = 0; i < voxels.size(); ++i) {
-          const auto& voxel = voxels[i];
-          const Vector3 u = multiply(weighted[i], nodeValue(voxel, x.data()));
-          for (int j = 0; j < voxel.nNodes; ++j) {
-            for (int c = 0; c < 3; ++c) {
-              y[3 * voxel.node[j] + c] += voxel.nodeWeight[j] * u[c];
-            }
-          }
-        }
-      };
-      auto precondition = [&](const std::vector<double>& r, std::vector<double>& z) {
-        for (int l = 0; l < voxelsPerSector; ++l) {
-          const Vector3 product = multiply(block[l], {r[3 * l], r[3 * l + 1], r[3 * l + 2]});
-          std::copy(product.begin(), product.end(), z.begin() + 3 * l);
-        }
-      };
-      // preconditioned conjugate gradients from the previous cycle's solution
-      std::vector<double> x(sectorNodes, sectorNodes + n);
-      std::vector<double> r(n);
-      std::vector<double> z(n);
-      std::vector<double> q(n);
-      const double rhsNorm = std::sqrt(dot(rhs, rhs));
-      iterations[sector] = 0;
-      residuals[sector] = 0.;
-      if (rhsNorm == 0.) {
-        std::fill(sectorNodes, sectorNodes + n, 0.);
-        continue;
-      }
-      apply(x, q);
-      for (int i = 0; i < n; ++i) {
-        r[i] = rhs[i] - q[i];
-      }
-      precondition(r, z);
-      std::vector<double> p = z;
-      double rz = dot(r, z);
-      residuals[sector] = std::sqrt(dot(r, r)) / rhsNorm;
-      while (residuals[sector] > CGTolerance && iterations[sector] < CGMaxIterations) {
-        apply(p, q);
-        const double alpha = rz / dot(p, q);
-        for (int i = 0; i < n; ++i) {
-          x[i] += alpha * p[i];
-          r[i] -= alpha * q[i];
-        }
-        residuals[sector] = std::sqrt(dot(r, r)) / rhsNorm;
-        ++iterations[sector];
-        precondition(r, z);
-        const double rzNew = dot(r, z);
-        const double beta = rzNew / rz;
-        for (int i = 0; i < n; ++i) {
-          p[i] = z[i] + beta * p[i];
-        }
-        rz = rzNew;
-      }
-      finite[sector] = finite[sector] && std::all_of(x.begin(), x.end(), [](double value) { return std::isfinite(value); });
-      std::copy(x.begin(), x.end(), sectorNodes);
-    }
+    solveSector(stencils, strides, penaltyDiagonal, ridge, robust, data[sector], nodes.data() + 3 * size_t(sector) * voxelsPerSector, statistics[sector]);
   };
   std::atomic<int> nextSector{0};
   std::vector<std::thread> threads;
@@ -754,14 +773,16 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
     thread.join();
   }
 
-  const int nNotConverged = std::count_if(residuals.begin(), residuals.end(), [](double residual) { return residual > CGTolerance; });
-  const int nNotFinite = std::count(finite.begin(), finite.end(), false);
+  const int nNotConverged = std::count_if(statistics.begin(), statistics.end(), [](const auto& s) { return s.residual > CGTolerance; });
+  const int nNotFinite = std::count_if(statistics.begin(), statistics.end(), [](const auto& s) { return !s.finite; });
+  const auto [fewest, most] = std::minmax_element(statistics.begin(), statistics.end(), [](const auto& a, const auto& b) { return a.iterations < b.iterations; });
+  const auto worst = std::max_element(statistics.begin(), statistics.end(), [](const auto& a, const auto& b) { return a.residual < b.residual; });
   LOGP(info, "Smoothing: {} stencils per sector; CG iterations per sector {} - {}, worst relative residual {:.2e}", stencils.size(),
-       *std::min_element(iterations.begin(), iterations.end()), *std::max_element(iterations.begin(), iterations.end()),
-       *std::max_element(residuals.begin(), residuals.end()));
+       fewest->iterations, most->iterations, worst->residual);
   if (robust > 0) {
     LOGP(info, "Smoothing: {} Tukey reweightings (c = {}), at the last {} voxels below weight 0.5, {} at 0", robust, Tukey,
-         std::accumulate(nLowWeight.begin(), nLowWeight.end(), 0L), std::accumulate(nZeroWeight.begin(), nZeroWeight.end(), 0L));
+         std::accumulate(statistics.begin(), statistics.end(), 0L, [](long sum, const auto& s) { return sum + s.nLowWeight; }),
+         std::accumulate(statistics.begin(), statistics.end(), 0L, [](long sum, const auto& s) { return sum + s.nZeroWeight; }));
   }
   if (nNotConverged) {
     LOGP(warning, "Smoothing: the conjugate gradients did not reach the tolerance {} in {} sectors", CGTolerance, nNotConverged);
@@ -1146,3 +1167,4 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   }
   LOGP(info, "{} written: {} voxels, DS = the smoothed map at the voxels' positions", outputFile, nVoxels);
 }
+#endif // SMOOTHVOXELMAP_SOLVER_ONLY
