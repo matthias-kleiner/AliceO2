@@ -58,7 +58,9 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -415,6 +417,122 @@ void solveSector(const std::vector<Stencil>& stencils, const std::array<int, 3>&
     std::copy(x.begin(), x.end(), sectorNodes);
   }
 }
+
+// TEST ONLY (branch tpc-fine-map-gbl-solver, not for upstream): one sector's system and solution as a binary file, for the stand-alone
+// solver test (smoothVoxelMapSolverTest/). Little endian: "SVMSYS01", int32 voxelsPerSector, strides[3], robust, nStencils, double ridge;
+// per stencil int32 axis, first, double coefficient[3], lambda; int64 nVoxels; per voxel double a[9], b[3], weight, int32 nNodes, node[4],
+// double nodeWeight[4]; int32 iterations, double residual; double nodes[3 voxelsPerSector] (the solution)
+struct SectorSystem {
+  int voxelsPerSector = 0;
+  std::array<int, 3> strides{};
+  int robust = 0;
+  double ridge = 0.;
+  std::vector<Stencil> stencils;
+  std::vector<DataVoxel> voxels;
+  int iterations = 0;
+  double residual = 0.;
+  std::vector<double> nodes;
+};
+
+bool writeSectorSystem(const std::string& fileName, const SectorSystem& system)
+{
+  std::ofstream out(fileName, std::ios::binary);
+  auto put = [&](const auto& value) { out.write(reinterpret_cast<const char*>(&value), sizeof(value)); };
+  out.write("SVMSYS01", 8);
+  put(int32_t(system.voxelsPerSector));
+  for (const int stride : system.strides) {
+    put(int32_t(stride));
+  }
+  put(int32_t(system.robust));
+  put(int32_t(system.stencils.size()));
+  put(system.ridge);
+  for (const auto& stencil : system.stencils) {
+    put(int32_t(stencil.axis));
+    put(int32_t(stencil.first));
+    put(stencil.coefficient);
+    put(stencil.lambda);
+  }
+  put(int64_t(system.voxels.size()));
+  for (const auto& voxel : system.voxels) {
+    put(voxel.a);
+    put(voxel.b);
+    put(voxel.weight);
+    put(int32_t(voxel.nNodes));
+    for (const int node : voxel.node) {
+      put(int32_t(node));
+    }
+    put(voxel.nodeWeight);
+  }
+  put(int32_t(system.iterations));
+  put(system.residual);
+  out.write(reinterpret_cast<const char*>(system.nodes.data()), system.nodes.size() * sizeof(double));
+  return bool(out);
+}
+
+bool readSectorSystem(const std::string& fileName, SectorSystem& system)
+{
+  std::ifstream in(fileName, std::ios::binary);
+  auto get = [&](auto& value) { in.read(reinterpret_cast<char*>(&value), sizeof(value)); };
+  char magic[8] = {};
+  in.read(magic, 8);
+  if (!in || std::string(magic, 8) != "SVMSYS01") {
+    return false;
+  }
+  int32_t value32 = 0;
+  get(value32);
+  system.voxelsPerSector = value32;
+  for (auto& stride : system.strides) {
+    get(value32);
+    stride = value32;
+  }
+  get(value32);
+  system.robust = value32;
+  int32_t nStencils = 0;
+  get(nStencils);
+  get(system.ridge);
+  system.stencils.resize(nStencils);
+  for (auto& stencil : system.stencils) {
+    get(value32);
+    stencil.axis = value32;
+    get(value32);
+    stencil.first = value32;
+    get(stencil.coefficient);
+    get(stencil.lambda);
+  }
+  int64_t nVoxels = 0;
+  get(nVoxels);
+  system.voxels.resize(nVoxels);
+  for (auto& voxel : system.voxels) {
+    get(voxel.a);
+    get(voxel.b);
+    get(voxel.weight);
+    get(value32);
+    voxel.nNodes = value32;
+    for (auto& node : voxel.node) {
+      get(value32);
+      node = value32;
+    }
+    get(voxel.nodeWeight);
+  }
+  get(value32);
+  system.iterations = value32;
+  get(system.residual);
+  system.nodes.resize(3 * size_t(system.voxelsPerSector));
+  in.read(reinterpret_cast<char*>(system.nodes.data()), system.nodes.size() * sizeof(double));
+  return bool(in);
+}
+
+/// the diagonal of the penalty per node, as smoothNodes computes it
+std::vector<double> penaltyDiagonalOf(const std::vector<Stencil>& stencils, const std::array<int, 3>& strides, int voxelsPerSector)
+{
+  std::vector<double> penaltyDiagonal(voxelsPerSector, 0.);
+  for (const auto& stencil : stencils) {
+    for (int k = 0; k < 3; ++k) {
+      penaltyDiagonal[stencil.first + k * strides[stencil.axis]] += stencil.lambda * stencil.coefficient[k] * stencil.coefficient[k];
+    }
+  }
+  return penaltyDiagonal;
+}
 } // namespace voxel_smoother
 
 #ifndef SMOOTHVOXELMAP_SOLVER_ONLY
@@ -756,6 +874,12 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
   }
 
   nodes.assign(size_t(NSectors) * voxelsPerSector * 3, 0.);
+  // TEST ONLY: SMOOTHVOXELMAP_DUMP=<prefix> writes every sector's system (the voxels before the solve) and solution to <prefix>_sectorNN.bin
+  const char* dumpPrefix = std::getenv("SMOOTHVOXELMAP_DUMP");
+  std::vector<std::vector<DataVoxel>> dumpVoxels;
+  if (dumpPrefix) {
+    dumpVoxels = data;
+  }
   std::array<SectorStatistics, NSectors> statistics{};
   auto smoothSector = [&](int sector) {
     solveSector(stencils, strides, penaltyDiagonal, ridge, robust, data[sector], nodes.data() + 3 * size_t(sector) * voxelsPerSector, statistics[sector]);
@@ -771,6 +895,24 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
   }
   for (auto& thread : threads) {
     thread.join();
+  }
+  if (dumpPrefix) {
+    for (int sector = 0; sector < NSectors; ++sector) {
+      SectorSystem system;
+      system.voxelsPerSector = voxelsPerSector;
+      system.strides = strides;
+      system.robust = robust;
+      system.ridge = ridge;
+      system.stencils = stencils;
+      system.voxels = dumpVoxels[sector];
+      system.iterations = statistics[sector].iterations;
+      system.residual = statistics[sector].residual;
+      system.nodes.assign(nodes.begin() + 3 * size_t(sector) * voxelsPerSector, nodes.begin() + 3 * size_t(sector + 1) * voxelsPerSector);
+      const std::string fileName = fmt::format("{}_sector{:02d}.bin", dumpPrefix, sector);
+      const bool written = writeSectorSystem(fileName, system);
+      LOGP(info, "Dump: sector {}: {} data voxels, CG iterations {}, residual {:.2e} -> {}{}", sector, system.voxels.size(), system.iterations,
+           system.residual, fileName, written ? "" : " FAILED");
+    }
   }
 
   const int nNotConverged = std::count_if(statistics.begin(), statistics.end(), [](const auto& s) { return s.residual > CGTolerance; });
