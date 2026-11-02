@@ -31,8 +31,9 @@
 ///   errors; voxels it does not solve are no data); -1: 1 if the input has the placeholders of staticMapCreatorCPM.C's CPM maps (E = 0.1,
 ///   EXYCorr = 1), else 0;
 /// - "fineSums": per voxel and charge the sums of the residual slope method (staticMapCreatorCPM.C writeSlopeSums, fineMapCreatorGBL.C
-///   writeSums), solved here: D, E from the voxel solve; every voxel with entries enters with its chi2 scaled by max(1, chi2 / ndf) of its
-///   solve (the median of the solved voxels below minEntries);
+///   writeSums), solved here: D, E from the voxel solve; every voxel with entries enters with its chi2, per channel (y, z) scaled by
+///   max(1, chi2 / ndf) of that channel in its solve (the median of the solved voxels below minEntries); the errors of the voxel solve
+///   (also errorMode 2) are scaled the same way per channel;
 /// - "auto": voxResTree if the file has one, else fineSums (a file with both is the voxResTree's map: a CPM map with the slope sums,
 ///   or a two-pass fineMapCreatorGBL.C map, whose fineSums hold pass 1 only).
 /// trustFraction > 0: per column the innermost IROC rows with fewer entries than trustFraction x the column's median entries in rows
@@ -1122,13 +1123,14 @@ struct ChargeSums {
 
 struct VoxelSolution {
   std::array<double, 3> value{}; ///< dX, dY, dZ
-  std::array<double, 3> error{}; ///< scaled by sqrt(chi2Scale)
+  std::array<double, 3> error{}; ///< dX, dY scaled by sqrt(chi2ScaleY); dZ: its z channel part by sqrt(chi2ScaleZ), its dX part by sqrt(chi2ScaleY)
   double correlationXY = 0.;
   double correlationXZ = 0.; ///< dZ = <r_z> + <s_z> dX: through dX
   double correlationYZ = 0.;
   double rmsY = 0.;
   double rmsZ = 0.;
-  double chi2Scale = 1.; ///< max(1, chi2 / ndf)
+  double chi2ScaleY = 1.; ///< max(1, chi2 / ndf) of the y channel (ndf N - 2)
+  double chi2ScaleZ = 1.; ///< ... and of the z channel (ndf N - 1): the channels' chi2 / ndf differ by 2-4 (more in y, growing with z/x)
 };
 
 /// the voxel solve of the residual slope method: dX, dY from the y channel (2 x 2), then dZ = <r_z> + <s_z> dX; false below minEntries
@@ -1152,20 +1154,22 @@ bool solveVoxel(const ChargeSums& sums, double minEntries, VoxelSolution& soluti
   const double dZ = sums.z[S::WR] / sums.z[S::W] + meanSlopeZ * dX;
   const double chi2Y = sums.y[S::WRR] + dY * dY * sums.y[S::W] + dX * dX * sums.y[S::WSS] - 2. * dY * sums.y[S::WR] + 2. * dX * sums.y[S::WSR] - 2. * dX * dY * sums.y[S::WS];
   const double chi2Z = sums.z[S::WRR] + dZ * dZ * sums.z[S::W] + dX * dX * sums.z[S::WSS] - 2. * dZ * sums.z[S::WR] + 2. * dX * sums.z[S::WSR] - 2. * dX * dZ * sums.z[S::WS];
-  const int ndf = int(2. * sums.entries + 0.5) - 3;
-  const double chi2 = std::max(0., chi2Y) + std::max(0., chi2Z);
-  const double scale = ndf > 0 ? std::max(1., chi2 / ndf) : 1.;
+  const int entries = int(sums.entries + 0.5);
+  const double scaleY = entries > 2 ? std::max(1., chi2Y / (entries - 2)) : 1.;
+  const double scaleZ = entries > 1 ? std::max(1., chi2Z / (entries - 1)) : 1.;
   solution.value = {dX, dY, dZ};
-  solution.error[0] = std::sqrt(std::max(0., covarianceXX) * scale);
-  solution.error[1] = std::sqrt(std::max(0., covarianceYY) * scale);
-  solution.error[2] = std::sqrt(std::max(0., 1. / sums.z[S::W] + meanSlopeZ * meanSlopeZ * covarianceXX) * scale);
+  solution.error[0] = std::sqrt(std::max(0., covarianceXX) * scaleY);
+  solution.error[1] = std::sqrt(std::max(0., covarianceYY) * scaleY);
+  solution.error[2] = std::sqrt(std::max(0., scaleZ / sums.z[S::W] + meanSlopeZ * meanSlopeZ * covarianceXX * scaleY));
   solution.correlationXY = covarianceXX * covarianceYY > 0. ? covarianceXY / std::sqrt(covarianceXX * covarianceYY) : 0.;
-  const double varianceZ = 1. / sums.z[S::W] + meanSlopeZ * meanSlopeZ * covarianceXX;
-  solution.correlationXZ = covarianceXX * varianceZ > 0. ? meanSlopeZ * covarianceXX / std::sqrt(covarianceXX * varianceZ) : 0.;
-  solution.correlationYZ = covarianceYY * varianceZ > 0. ? meanSlopeZ * covarianceXY / std::sqrt(covarianceYY * varianceZ) : 0.;
+  const double errorProductXZ = solution.error[0] * solution.error[2];
+  const double errorProductYZ = solution.error[1] * solution.error[2];
+  solution.correlationXZ = errorProductXZ > 0. ? meanSlopeZ * covarianceXX * scaleY / errorProductXZ : 0.;
+  solution.correlationYZ = errorProductYZ > 0. ? meanSlopeZ * covarianceXY * scaleY / errorProductYZ : 0.;
   solution.rmsY = std::sqrt(std::max(0., chi2Y) / sums.y[S::W]);
   solution.rmsZ = std::sqrt(std::max(0., chi2Z) / sums.z[S::W]);
-  solution.chi2Scale = scale;
+  solution.chi2ScaleY = scaleY;
+  solution.chi2ScaleZ = scaleZ;
   return std::isfinite(dX) && std::isfinite(dY) && std::isfinite(dZ);
 }
 
@@ -1570,18 +1574,21 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   }
   long nUntrusted = 0;
   const auto untrusted = untrustedRows(*binning, results, trustFraction, nUntrusted);
-  double medianScale = 1.;
+  std::array<double, 2> medianScale{1., 1.}; // y, z channel
   if (useSums) {
-    std::vector<double> scales;
+    std::array<std::vector<double>, 2> scales;
     for (size_t voxel = 0; voxel < nVoxels; ++voxel) {
       VoxelSolution solution;
       if (solveVoxel(sums[voxel], minEntries, solution)) {
-        scales.push_back(solution.chi2Scale);
+        scales[0].push_back(solution.chi2ScaleY);
+        scales[1].push_back(solution.chi2ScaleZ);
       }
     }
-    if (!scales.empty()) {
-      std::nth_element(scales.begin(), scales.begin() + scales.size() / 2, scales.end());
-      medianScale = scales[scales.size() / 2];
+    for (int channel = 0; channel < 2; ++channel) {
+      if (!scales[channel].empty()) {
+        std::nth_element(scales[channel].begin(), scales[channel].begin() + scales[channel].size() / 2, scales[channel].end());
+        medianScale[channel] = scales[channel][scales[channel].size() / 2];
+      }
     }
   }
   std::vector<std::vector<DataVoxel>> data(NSectors);
@@ -1603,19 +1610,15 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
         continue;
       }
       VoxelSolution solution;
-      const double scale = solveVoxel(total, minEntries, solution) ? solution.chi2Scale : medianScale;
-      // the y channel (J = (-s_y, 1, 0)) and the z channel's mean W_z (<r_z> - dZ + <s_z> dX)^2
+      const bool solved = solveVoxel(total, minEntries, solution);
+      const double scaleY = solved ? solution.chi2ScaleY : medianScale[0];
+      const double scaleZ = solved ? solution.chi2ScaleZ : medianScale[1];
+      // the y channel (J = (-s_y, 1, 0)) and the z channel's mean W_z (<r_z> - dZ + <s_z> dX)^2, each with its chi2 scale
       const double meanSlopeZ = total.z[S::WS] / total.z[S::W];
-      dataVoxel.a[0] = {total.y[S::WSS] + total.z[S::WS] * meanSlopeZ, -total.y[S::WS], -total.z[S::WS]};
-      dataVoxel.a[1] = {-total.y[S::WS], total.y[S::W], 0.};
-      dataVoxel.a[2] = {-total.z[S::WS], 0., total.z[S::W]};
-      dataVoxel.b = {-total.y[S::WSR] - meanSlopeZ * total.z[S::WR], total.y[S::WR], total.z[S::WR]};
-      for (int row = 0; row < 3; ++row) {
-        for (int column = 0; column < 3; ++column) {
-          dataVoxel.a[row][column] /= scale;
-        }
-        dataVoxel.b[row] /= scale;
-      }
+      dataVoxel.a[0] = {total.y[S::WSS] / scaleY + total.z[S::WS] * meanSlopeZ / scaleZ, -total.y[S::WS] / scaleY, -total.z[S::WS] / scaleZ};
+      dataVoxel.a[1] = {-total.y[S::WS] / scaleY, total.y[S::W] / scaleY, 0.};
+      dataVoxel.a[2] = {-total.z[S::WS] / scaleZ, 0., total.z[S::W] / scaleZ};
+      dataVoxel.b = {-total.y[S::WSR] / scaleY - meanSlopeZ * total.z[S::WR] / scaleZ, total.y[S::WR] / scaleY, total.z[S::WR] / scaleZ};
       z2xSide = (sector < NSectors / 2 ? 1. : -1.) * result.stat[TrackResiduals::VoxZ];
     } else {
       const bool fitted = (result.flags & TrackResiduals::DistDone) && !(result.flags & TrackResiduals::Masked) && result.stat[TrackResiduals::VoxV] >= std::max(1.f, minEntries);
