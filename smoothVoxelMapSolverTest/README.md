@@ -17,13 +17,29 @@ cap at a residual of 2.7e-8). The block-Jacobi preconditioner ignores the coupli
   sector systems, solves each from zero with the macro's `solveSector` and compares with the macro's solution stored in the file:
   iterations, residual, wall time, rms / max |x − x_ref| per component in µm, and the objective F(x) at both solutions
   (F(new) − F(ref) ≤ ~0: at least as converged).
-- `data/<tag>_sectorNN.bin`: sector systems + solutions dumped by the macro (`SMOOTHVOXELMAP_DUMP=<prefix>`; format in the macro,
-  `writeSectorSystem`) from a real PbPb 2025 map (run 568041, one 5-min window), for t1 and t30, in the sectors with the most iterations.
+- `data/<tag>_sectorNN.bin.gz`: sector systems + solutions dumped by the macro (`SMOOTHVOXELMAP_DUMP=<prefix>`; format in the macro,
+  `writeSectorSystem`) from a real PbPb 2025 map (run 568041, window 3 of 44; input = its smoothed map re-fitted with errorMode 1,
+  trustFraction 0.7: the same data voxels and errors as the production's stage 1 up to 0.3 %), for t1 (1000 / 2000 / 1000) and t30
+  (33 / 67 / 33): sector 11 (the most iterations at t1) and sector 34 (the worst residual at t30, stopped at the iteration cap).
+  ~80k data voxels, 236288 stencils, 3 × 82080 unknowns per sector.
 
 ```
+gunzip -k data/*.gz
 c++ -std=c++20 -O2 -o solverTest solverTest.cxx
 ./solverTest data/*.bin
 ```
+
+Before (the macro's block-Jacobi CG; Apple M-series laptop, one thread; the macro runs 36 sectors on 8 threads): the test reproduces the
+macro's solution exactly (0 µm, same iterations).
+
+| file | iterations | residual | time |
+|---|---|---|---|
+| t1_sector11 | 6483 | 9.99e-09 | 9.3 s |
+| t1_sector34 | 5773 | 9.96e-09 | 8.3 s |
+| t30_sector11 | 19856 | 9.99e-09 | 28.3 s |
+| t30_sector34 | 20000 (cap) | 2.44e-08 | 28.6 s |
+
+Whole map (36 sectors, 16 threads, laptop): t1 1.4 min, t30 4.3 min (7 sectors at the cap).
 
 ## Task: a better preconditioner (or solver) in `solveSector`
 
@@ -46,7 +62,7 @@ preconditioner — per (y/x, z/x) column the exact block-banded (3 × 3 blocks, 
 row penalty; symmetric line Gauss–Seidel / ADI over the three directions; a geometric multigrid V-cycle as preconditioner. Measure,
 don't guess: report iterations and time per sector for t1 and t30 before / after in the test.
 
-Acceptance (in `solverTest`, all files): finite; final residual ≤ 1e-8 where the reference converged; rms |x − x_ref| ≤ 5 µm per
+Acceptance (in `solverTest`, all files): finite; final residual ≤ 1e-8 (also in t30_sector34, where the reference stopped at 2.4e-8); rms |x − x_ref| ≤ 5 µm per
 component (the reference itself is converged to 1e-8; 1e-8 vs 1e-12 changed the map by 1–4 µm rms); F(new) − F(ref) ≤ 1e-9 · |F(ref)|.
 
 Deliverable: commit on a new branch `tpc-fine-map-gbl-solver-precond` from `tpc-fine-map-gbl-solver`, the solver change in its own
