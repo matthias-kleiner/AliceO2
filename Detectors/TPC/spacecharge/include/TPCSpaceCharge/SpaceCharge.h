@@ -865,7 +865,7 @@ class SpaceCharge
   DataT getPotential(const size_t iz, const size_t ir, const size_t iphi, const Side side) const { return mPotential[side](iz, ir, iphi); }
 
   /// Get the step width which is used for the calculation of the correction/distortions in units of the z-bin
-  static int getStepWidth() { return 1 / sSteps; }
+  static DataT getStepWidth() { return DataT(1) / sSteps; }
 
   /// Get phi vertex position for index in phi direction
   /// \param indexPhi index in phi direction

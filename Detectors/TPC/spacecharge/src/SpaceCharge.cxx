@@ -781,7 +781,9 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterative(const DistCorrInterpolator<
     initContainer(mGlobalCorrdRPhi[side], true);
   }
 
-  const auto& scSCaleInterpolator = (type == Type::Distortions) ? scSCale->mInterpolatorGlobalCorr[side] : scSCale->mInterpolatorGlobalDist[side];
+  // interpolator of the object used for scaling (only used if scSCale is set and scale != 0)
+  const bool useScaling = scSCale && (scale != 0);
+  const DistCorrInterpolator<DataT>* scSCaleInterpolator = useScaling ? ((type == Type::Distortions) ? &scSCale->mInterpolatorGlobalCorr[side] : &scSCale->mInterpolatorGlobalDist[side]) : nullptr;
 
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int iPhi = 0; iPhi < mParamGrid.NPhiVertices; ++iPhi) {
@@ -825,14 +827,14 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterative(const DistCorrInterpolator<
 
           // interpolate global correction at new point and calculate position of global correction
           corrdR = globCorr.evaldR(zCurrPos, rCurrPos, phiCurrPos);
-          if (scSCale && scale != 0) {
-            corrdR += scale * scSCaleInterpolator.evaldR(zCurrPos, rCurrPos, phiCurrPos);
+          if (useScaling) {
+            corrdR += scale * scSCaleInterpolator->evaldR(zCurrPos, rCurrPos, phiCurrPos);
           }
           const DataT rNewPos = rCurrPos + corrdR;
 
           DataT corrPhi = 0;
-          if (scSCale && scale != 0) {
-            corrPhi = scale * scSCaleInterpolator.evaldRPhi(zCurrPos, rCurrPos, phiCurrPos);
+          if (useScaling) {
+            corrPhi = scale * scSCaleInterpolator->evaldRPhi(zCurrPos, rCurrPos, phiCurrPos);
           }
           corrPhi += globCorr.evaldRPhi(zCurrPos, rCurrPos, phiCurrPos);
           corrPhi /= rCurrPos;
@@ -841,8 +843,8 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterative(const DistCorrInterpolator<
           const DataT phiNewPos = phiCurrPos + corrPhi;
 
           corrdZ = globCorr.evaldZ(zCurrPos, rCurrPos, phiCurrPos);
-          if (scSCale && scale != 0) {
-            corrdZ += scale * scSCaleInterpolator.evaldZ(zCurrPos, rCurrPos, phiCurrPos);
+          if (useScaling) {
+            corrdZ += scale * scSCaleInterpolator->evaldZ(zCurrPos, rCurrPos, phiCurrPos);
           }
           const DataT zNewPos = zCurrPos + corrdZ;
 
@@ -937,8 +939,6 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterativeLinearCartesian(const DistCo
     initContainer(mGlobalCorrdRPhi[side], true);
   }
 
-  const auto& scSCaleInterpolator = (type == Type::Distortions) ? scSCale->mInterpolatorGlobalCorr[side] : scSCale->mInterpolatorGlobalDist[side];
-
 #pragma omp parallel for num_threads(sNThreads)
   for (unsigned int iPhi = 0; iPhi < mParamGrid.NPhiVertices; ++iPhi) {
     const DataT phi = getPhiVertex(iPhi, side);
@@ -983,7 +983,7 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterativeLinearCartesian(const DistCo
             DataT corrXScale = 0;
             DataT corrYScale = 0;
             DataT corrZScale = 0;
-            (type == Type::Distortions) ? scSCale->getCorrections(xCurrPos, yCurrPos, zCurrPos, side, corrXScale, corrYScale, corrZScale) : getDistortions(xCurrPos, yCurrPos, zCurrPos, side, corrX, corrY, corrZ);
+            (type == Type::Distortions) ? scSCale->getCorrections(xCurrPos, yCurrPos, zCurrPos, side, corrXScale, corrYScale, corrZScale) : scSCale->getDistortions(xCurrPos, yCurrPos, zCurrPos, side, corrXScale, corrYScale, corrZScale);
             corrX += scale * corrXScale;
             corrY += scale * corrYScale;
             corrZ += scale * corrZScale;
@@ -1021,11 +1021,11 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterativeLinearCartesian(const DistCo
         const DataT radiusNew = getRadiusFromCartesian(xNew, yNew);
         const DataT corrdR = -(radiusNew - getRadiusFromCartesian(lastX, lastY));
 
-        float phiNew = getPhiFromCartesian(xNew, yNew);
-        o2::math_utils::bringTo02PiGen(phiNew);
+        DataT phiNew = getPhiFromCartesian(xNew, yNew);
+        o2::math_utils::detail::bringTo02PiGen(phiNew);
 
-        float phiLast = getPhiFromCartesian(lastX, lastY);
-        o2::math_utils::bringTo02PiGen(phiLast);
+        DataT phiLast = getPhiFromCartesian(lastX, lastY);
+        o2::math_utils::detail::bringTo02PiGen(phiLast);
 
         DataT deltaPhi = (phiNew - phiLast);
         // handle edge cases
@@ -1729,8 +1729,8 @@ void SpaceCharge<DataT>::calcGlobalCorrections(const Formulas& formulaStruct, co
             if (type == 1) {
               // just replace with last valid number (assumption: values at iR==mParamGrid.NRVertices / 2 are valid)
               mGlobalCorrdR[side](iZ, iR, iPhi) = mGlobalCorrdR[side](iZ, iRUp, iPhi);
-              mGlobalCorrdRPhi[side](iZ, iR, iPhi) = mGlobalCorrdR[side](iZ, iRUp, iPhi);
-              mGlobalCorrdZ[side](iZ, iR, iPhi) = mGlobalCorrdR[side](iZ, iRUp, iPhi);
+              mGlobalCorrdRPhi[side](iZ, iR, iPhi) = mGlobalCorrdRPhi[side](iZ, iRUp, iPhi);
+              mGlobalCorrdZ[side](iZ, iR, iPhi) = mGlobalCorrdZ[side](iZ, iRUp, iPhi);
             } else if (type == 2) {
               // extrapolate values
               const size_t iRUpTwo = iR + 2;
@@ -1748,8 +1748,8 @@ void SpaceCharge<DataT>::calcGlobalCorrections(const Formulas& formulaStruct, co
             if (type == 1) {
               // just replace with last valid number (assumption: values at iR==mParamGrid.NRVertices / 2 are valid)
               mGlobalCorrdR[side](iZ, iR, iPhi) = mGlobalCorrdR[side](iZ, iRUp, iPhi);
-              mGlobalCorrdRPhi[side](iZ, iR, iPhi) = mGlobalCorrdR[side](iZ, iRUp, iPhi);
-              mGlobalCorrdZ[side](iZ, iR, iPhi) = mGlobalCorrdR[side](iZ, iRUp, iPhi);
+              mGlobalCorrdRPhi[side](iZ, iR, iPhi) = mGlobalCorrdRPhi[side](iZ, iRUp, iPhi);
+              mGlobalCorrdZ[side](iZ, iR, iPhi) = mGlobalCorrdZ[side](iZ, iRUp, iPhi);
             } else if (type == 2) {
               // extrapolate values
               const size_t iRUpTwo = iR - 2;
@@ -1781,8 +1781,8 @@ void SpaceCharge<DataT>::correctElectron(GlobalPosition3D& point)
   // get the distortions for input coordinate
   getCorrections(point.X(), point.Y(), point.Z(), side, corrX, corrY, corrZ);
 
-  // set distorted coordinates
-  point.SetXYZ(point.X() + corrX, point.Y() + corrY, point.Y() + corrY);
+  // set corrected coordinates
+  point.SetXYZ(point.X() + corrX, point.Y() + corrY, point.Z() + corrZ);
 }
 
 template <typename DataT>
@@ -2815,6 +2815,9 @@ void SpaceCharge<DataT>::fillChargeDensityFromHisto(const char* file, const char
   if (!hSCC) {
     LOGP(error, "Histogram {} not found", nameC);
   }
+  if (!hSCA || !hSCC) {
+    return;
+  }
   fillChargeDensityFromHisto(*hSCA, *hSCC);
 }
 
@@ -3366,7 +3369,7 @@ void SpaceCharge<DataT>::scaleChargeDensityStack(const float scalingFactor, cons
   for (unsigned int iR = 0; iR < mParamGrid.NRVertices; ++iR) {
     const DataT radius = getRVertex(iR, side);
     for (unsigned int iPhi = iPhiFirst; iPhi < iPhiLast; ++iPhi) {
-      const DataT phi = getPhiVertex(iR, side);
+      const DataT phi = getPhiVertex(iPhi, side);
       const GlobalPosition3D pos(getXFromPolar(radius, phi), getYFromPolar(radius, phi), ((side == Side::A) ? 10 : -10));
       const auto& mapper = o2::tpc::Mapper::instance();
       const o2::tpc::DigitPos digiPadPos = mapper.findDigitPosFromGlobalPosition(pos);
