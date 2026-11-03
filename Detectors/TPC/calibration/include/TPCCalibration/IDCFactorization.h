@@ -106,6 +106,14 @@ class IDCFactorization : public IDCGroupHelperSector
   /// calculate \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) )
   void calcIDCDelta();
 
+  /// calculate \Delta I(r,\phi,t) = I(r,\phi,t) / ( I_0(r,\phi) * I_1(t) ) for one side and one chunk.
+  /// IDC0 and IDC1 have to be calculated before (see factorizeIDCs()).
+  /// All values of the output are overwritten: the output can be reused for all chunks to avoid allocating and initializing the memory for each chunk
+  /// \param side TPC side
+  /// \param chunk chunk of Delta IDC
+  /// \param idcDelta output Delta IDCs
+  void calcIDCDelta(const Side side, const unsigned int chunk, IDCDelta<float>& idcDelta) const;
+
   /// calculate I_1(t) = <I(r,\phi,t) / I_0(r,\phi)>_{r,\phi}
   template <typename DataVec>
   static void calcIDCOne(const DataVec& idcsData, const int idcsPerCRU, const int integrationIntervalOffset, const unsigned int indexOffset, const CRU cru, std::vector<std::vector<float>>& idcOneTmp, const IDCZero* idcZero, const CalDet<PadFlags>* flagMap = nullptr, const bool usePadStatusMap = false);

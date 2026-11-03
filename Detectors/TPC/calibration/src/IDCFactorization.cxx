@@ -251,17 +251,24 @@ void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
     const o2::tpc::CRU cruTmp(cru);
     const auto side = cruTmp.side();
     const unsigned int region = cruTmp.region();
+    const unsigned int nIDCsPerCRU = mNIDCsPerCRU[region];
     const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
+    float* idcZero = mIDCZero[mSideIndex[side]].mIDCZero.data() + factorIndexGlob;
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
-      for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
-        if ((mIDCs[cru][timeframe][idcs] == -1) || (mIDCs[cru][timeframe][idcs] == 0)) {
-          continue;
+      auto& idcs = mIDCs[cru][timeframe];
+      // loop over the integration intervals and the pads separately to avoid the integer division for each IDC
+      for (std::size_t offs = 0; offs < idcs.size(); offs += nIDCsPerCRU) {
+        const unsigned int nPads = std::min<std::size_t>(nIDCsPerCRU, idcs.size() - offs);
+        float* idcsInterval = idcs.data() + offs;
+        for (unsigned int pad = 0; pad < nPads; ++pad) {
+          if ((idcsInterval[pad] == -1) || (idcsInterval[pad] == 0)) {
+            continue;
+          }
+          if (norm) {
+            idcsInterval[pad] *= Mapper::INVPADAREA[region];
+          }
+          idcZero[pad] += idcsInterval[pad];
         }
-        if (norm) {
-          mIDCs[cru][timeframe][idcs] *= Mapper::INVPADAREA[region];
-        }
-        const unsigned int indexGlob = (idcs % mNIDCsPerCRU[region]) + factorIndexGlob;
-        mIDCZero[mSideIndex[side]].fillValueIDCZero(mIDCs[cru][timeframe][idcs], indexGlob);
       }
     }
   }
@@ -428,58 +435,71 @@ void o2::tpc::IDCFactorization::calcIDCOne(const DataVec& idcsData, const int id
 
 void o2::tpc::IDCFactorization::calcIDCDelta()
 {
-  const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
   for (auto side : mSides) {
-    for (unsigned int i = 0; i < getNChunks(side); ++i) {
-      const auto idcsSide = nIDCsSide * getNIntegrationIntervalsInChunk(i);
-      mIDCDelta[mSideIndex[side]][i].getIDCDelta().clear();
-      mIDCDelta[mSideIndex[side]][i].getIDCDelta().resize(idcsSide);
+    for (unsigned int chunk = 0; chunk < getNChunks(side); ++chunk) {
+      calcIDCDelta(side, chunk, mIDCDelta[mSideIndex[side]][chunk]);
     }
   }
+}
+
+void o2::tpc::IDCFactorization::calcIDCDelta(const Side side, const unsigned int chunk, IDCDelta<float>& idcDelta) const
+{
+  const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
+  const unsigned int firstTF = chunk * mTimeFramesDeltaIDC;
+  const unsigned int lastTF = firstTF + getNTFsPerChunk(chunk);
+  const unsigned long firstIntervalChunk = getNIntegrationIntervalsToChunk(chunk);
+  const std::size_t nIDCsChunk = static_cast<std::size_t>(nIDCsSide) * getNIntegrationIntervalsInChunk(chunk);
+  const auto& intervalsPerTF = mIntegrationIntervalsPerTF.empty() ? getAllIntegrationIntervalsPerTF() : mIntegrationIntervalsPerTF;
+
+  // all values are set below: in case the output is reused no reallocation and initialization of the memory is needed
+  auto& idcDeltaVec = idcDelta.getIDCDelta();
+  if (idcDeltaVec.capacity() < nIDCsChunk) {
+    idcDeltaVec.clear(); // avoid copying the old values during the reallocation
+  }
+  idcDeltaVec.resize(nIDCsChunk);
+
+  std::array<bool, CRU::MaxCRU> processCRU{};
+  for (const auto cru : mCRUs) {
+    processCRU[cru] = true;
+  }
+
+  const unsigned int indexSide = mSideIndex[side];
+  const bool usePadStatusMap = mUsePadStatusMap && !mInputGrouped && mPadFlagsMap;
+  const unsigned int cruStart = (side == Side::A) ? 0 : CRU::MaxCRU / 2;
+  const unsigned int cruEnd = cruStart + CRU::MaxCRU / 2;
 
 #pragma omp parallel for num_threads(sNThreads)
-  for (unsigned int cruInd = 0; cruInd < mCRUs.size(); ++cruInd) {
-    const unsigned int cru = mCRUs[cruInd];
+  for (unsigned int cru = cruStart; cru < cruEnd; ++cru) {
     const o2::tpc::CRU cruTmp(cru);
     const unsigned int region = cruTmp.region();
-    const auto side = cruTmp.side();
+    const unsigned int nIDCsPerCRU = mNIDCsPerCRU[region];
     const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
-    unsigned int integrationIntervallast = 0;
-    unsigned int integrationIntervallastLocal = 0;
-    unsigned int lastChunk = 0;
+    const float* idcZero = mIDCZero[indexSide].mIDCZero.data() + factorIndexGlob;
+    const PadFlags* padFlags = usePadStatusMap ? mPadFlagsMap->getCalArray(cru).getData().data() : nullptr;
 
-    for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
-      const unsigned int chunk = getChunk(timeframe);
-      if (lastChunk != chunk) {
-        integrationIntervallastLocal = 0;
-      }
-
-      for (unsigned int idcs = 0; idcs < mIDCs[cru][timeframe].size(); ++idcs) {
-        if ((mIDCs[cru][timeframe][idcs] == -1) || (mIDCs[cru][timeframe][idcs] == 0)) {
-          continue;
-        }
-        const unsigned int intervallocal = idcs / mNIDCsPerCRU[region];
-        const unsigned int integrationIntervalGlobal = intervallocal + integrationIntervallast;
-        const unsigned int integrationIntervalLocal = intervallocal + integrationIntervallastLocal;
-        const unsigned int localPad = idcs % mNIDCsPerCRU[region];
-        const unsigned int indexGlob = localPad + factorIndexGlob;
-        const auto idcZero = mIDCZero[mSideIndex[side]].mIDCZero[indexGlob];
-        const auto idcOne = mIDCOne[mSideIndex[side]].mIDCOne[integrationIntervalGlobal];
-        const auto mult = idcZero * idcOne;
-        auto val = (mult != 0) ? mIDCs[cru][timeframe][idcs] / mult - 1 : 0;
-        if (mUsePadStatusMap && !mInputGrouped && mPadFlagsMap) {
-          const o2::tpc::PadFlags flag = mPadFlagsMap->getCalArray(cru).getValue(localPad);
-          if ((flag & PadFlags::flagSkip) == PadFlags::flagSkip) {
-            val = 0;
+    std::size_t intervalLocal = 0; // integration interval in the chunk
+    for (unsigned int timeframe = firstTF; timeframe < lastTF; ++timeframe) {
+      const auto& idcs = mIDCs[cru][timeframe];
+      for (unsigned int interval = 0; interval < intervalsPerTF[timeframe]; ++interval, ++intervalLocal) {
+        float* idcDeltaInterval = idcDeltaVec.data() + intervalLocal * nIDCsSide + factorIndexGlob;
+        const std::size_t offs = static_cast<std::size_t>(interval) * nIDCsPerCRU;
+        // number of pads with data: in case of missing data the Delta IDCs are set to 0
+        const unsigned int nPads = (processCRU[cru] && (offs < idcs.size())) ? std::min<std::size_t>(nIDCsPerCRU, idcs.size() - offs) : 0;
+        const float idcOne = mIDCOne[indexSide].mIDCOne[firstIntervalChunk + intervalLocal];
+        for (unsigned int pad = 0; pad < nPads; ++pad) {
+          const float idc = idcs[offs + pad];
+          float val = 0;
+          if ((idc != -1) && (idc != 0)) {
+            const float mult = idcZero[pad] * idcOne;
+            val = (mult != 0) ? idc / mult - 1 : 0;
+            if (padFlags && ((padFlags[pad] & PadFlags::flagSkip) == PadFlags::flagSkip)) {
+              val = 0;
+            }
           }
+          idcDeltaInterval[pad] = val;
         }
-        mIDCDelta[mSideIndex[side]][chunk].setIDCDelta(indexGlob + integrationIntervalLocal * nIDCsSide, val);
+        std::fill(idcDeltaInterval + nPads, idcDeltaInterval + nIDCsPerCRU, 0.f);
       }
-
-      const unsigned int intervals = mIntegrationIntervalsPerTF[timeframe];
-      integrationIntervallast += intervals;
-      integrationIntervallastLocal += intervals;
-      lastChunk = chunk;
     }
   }
 }
