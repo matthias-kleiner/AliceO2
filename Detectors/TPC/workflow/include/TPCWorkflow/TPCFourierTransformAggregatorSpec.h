@@ -303,12 +303,12 @@ class TPCFourierTransformAggregatorSpec : public o2::framework::Task
       }
     }
 
-    LOGP(info, "Creating IDC scalers with {} IDC objects", lastValidIdx);
+    LOGP(info, "Creating IDC scalers with {} IDC objects", lastValidIdx + 1);
 
     if (eos) {
       // in case of eos write out everything
       lastValidIdx = times.empty() ? -1 : times.size() - 1;
-      LOGP(info, "End of stream detected: Creating IDC scalers with {} IDC objects", lastValidIdx);
+      LOGP(info, "End of stream detected: Creating IDC scalers with {} IDC objects", lastValidIdx + 1);
     }
 
     // create IDC scaler in case index is valid
