@@ -153,7 +153,10 @@ class TriCubicInterpolator
     SideZLeft = 25
   };
 
-  void setValues(const int iz, const int ir, const int iphi, std::array<Vector<DataT, 4>, 16>& cVals) const;
+  /// set the 64 values (4 x 4 x 4) used for the interpolation in the cell with given indices. Missing values outside of the grid are extrapolated
+  /// \param location position of the cell in the grid (see findPos())
+  /// \param cVals values of the points: cVals[4 * iphi + ir][iz] with iphi, ir, iz the relative index (-1, 0, 1, 2) + 1 to the cell
+  void setValues(const int iz, const int ir, const int iphi, const GridPos location, DataT (&cVals)[16][4]) const;
 
   // interpolate value at given coordinate - this method doesnt compute and stores the coefficients and is faster when quering only a few values per cube
   /// \param z z coordinate

@@ -17,6 +17,7 @@
 #include "TPCSpaceCharge/TriCubic.h"
 #include "TPCSpaceCharge/DataContainer3D.h"
 #include "TPCSpaceCharge/Vector.h"
+#include <type_traits>
 
 using namespace o2::tpc;
 
@@ -72,6 +73,86 @@ DataT TriCubicInterpolator<DataT>::parabolExtrapolation(const DataT valk, const 
   return val;
 }
 
+namespace
+{
+/// sum of four values with the same association of the terms as the horizontal sum of a Vc::Memory<Vc::Vector<DataT>, 4> (Vector<DataT, 4>),
+/// which was used in the previous implementation (to get bit-identical results):
+/// Vc scalar: ((x0 + x1) + x2) + x3, SSE float (4 lanes): (x0 + x3) + (x1 + x2), SSE double (2 x 2 lanes), AVX double (4 lanes), AVX float (8 lanes with zero padding): (x0 + x2) + (x1 + x3)
+template <typename DataT>
+inline DataT sum4(const DataT x0, const DataT x1, const DataT x2, const DataT x3)
+{
+  if constexpr (Vc::Vector<DataT>::Size == 1) {
+    return ((x0 + x1) + x2) + x3;
+  } else if constexpr (std::is_same_v<DataT, float> && (Vc::Vector<DataT>::Size == 4)) {
+    return (x0 + x3) + (x1 + x2);
+  } else {
+    return (x0 + x2) + (x1 + x3);
+  }
+}
+
+/// calculate the 4 weights of the 1D cubic (Catmull-Rom) interpolation for the relative positions t in the cell for all dimensions (the last one is not used)
+/// \param t relative position in the cell for each dimension
+/// \param weights weights[i][dim]
+template <typename DataT>
+inline void getWeights(const DataT (&t)[4], DataT (&weights)[4][4])
+{
+  static constexpr DataT matrixA[4][4]{{0, -0.5, 1, -0.5},
+                                       {1, 0, -2.5, 1.5},
+                                       {0, 0.5, 2., -1.5},
+                                       {0, 0, -0.5, 0.5}};
+  DataT t2[4];
+  DataT t3[4];
+  for (int dim = 0; dim < 4; ++dim) {
+    t2[dim] = t[dim] * t[dim];
+    t3[dim] = t[dim] * t2[dim];
+  }
+  for (int i = 0; i < 4; ++i) {
+    for (int dim = 0; dim < 4; ++dim) {
+      weights[i][dim] = sum4<DataT>(DataT(0) + matrixA[i][0] * DataT(1), DataT(0) + matrixA[i][1] * t[dim], DataT(0) + matrixA[i][2] * t2[dim], DataT(0) + matrixA[i][3] * t3[dim]);
+    }
+  }
+}
+
+/// sum_{slice, row, iz} weightsPhi[slice] * weightsR[row] * weightsZ[iz] * vals[sliceOffset[slice] + row * rowStride + iz]
+/// \param vals values of the grid
+/// \param sliceOffset offset of the 4 phi slices
+/// \param rowStride offset between the rows in r direction (the 4 values in z direction are consecutive)
+template <typename DataT>
+inline DataT interpolateCell(const DataT* vals, const int (&sliceOffset)[4], const int rowStride, const DataT (&weightsZ)[4], const DataT (&weightsR)[4], const DataT (&weightsPhi)[4])
+{
+  using VDataT = Vc::Vector<DataT>;
+  DataT result{};
+  if constexpr (VDataT::Size <= 4) {
+    // same operations as in the previous Vc implementation
+    constexpr size_t NVec = 4 / VDataT::Size;
+    VDataT vecWeightsZ[NVec];
+    for (size_t j = 0; j < NVec; ++j) {
+      vecWeightsZ[j] = VDataT(weightsZ + j * VDataT::Size, Vc::Unaligned);
+    }
+    for (int slice = 0; slice < 4; ++slice) {
+      for (int row = 0; row < 4; ++row) {
+        const DataT weightPhiR = weightsPhi[slice] * weightsR[row];
+        const DataT* val = vals + sliceOffset[slice] + row * rowStride;
+        VDataT sum = (weightPhiR * vecWeightsZ[0]) * VDataT(val, Vc::Unaligned);
+        for (size_t j = 1; j < NVec; ++j) {
+          sum += (weightPhiR * vecWeightsZ[j]) * VDataT(val + j * VDataT::Size, Vc::Unaligned);
+        }
+        result += sum.sum();
+      }
+    }
+  } else {
+    for (int slice = 0; slice < 4; ++slice) {
+      for (int row = 0; row < 4; ++row) {
+        const DataT weightPhiR = weightsPhi[slice] * weightsR[row];
+        const DataT* val = vals + sliceOffset[slice] + row * rowStride;
+        result += sum4<DataT>((weightPhiR * weightsZ[0]) * val[0], (weightPhiR * weightsZ[1]) * val[1], (weightPhiR * weightsZ[2]) * val[2], (weightPhiR * weightsZ[3]) * val[3]);
+      }
+    }
+  }
+  return result;
+}
+} // namespace
+
 template <typename DataT>
 DataT TriCubicInterpolator<DataT>::interpolateSparse(const DataT z, const DataT r, const DataT phi) const
 {
@@ -79,10 +160,11 @@ DataT TriCubicInterpolator<DataT>::interpolateSparse(const DataT z, const DataT 
   if (!mGridData->getNDataPoints()) {
     return 0;
   }
-  const Vector<DataT, FDim> coordinates{{z, r, phi}};                                                           // vector holding the coordinates
-  Vector<DataT, FDim> posRel{(coordinates - mGridProperties->getGridMin()) * mGridProperties->getInvSpacing()}; // needed for the grid index
+
+  // relative position in the grid (in units of the grid spacing)
+  DataT posRel[FDim]{(z - mGridProperties->getGridMinZ()) * mGridProperties->getInvSpacingZ(), (r - mGridProperties->getGridMinR()) * mGridProperties->getInvSpacingR(), (phi - mGridProperties->getGridMinPhi()) * mGridProperties->getInvSpacingPhi()};
   posRel[FPHI] = mGridProperties->clampToGridCircularRel(posRel[FPHI], FPHI);
-  Vector<DataT, FDim> posRelN{posRel};
+  DataT posRelN[FDim]{posRel[FZ], posRel[FR], posRel[FPHI]};
   posRel[FZ] = mGridProperties->clampToGridRel(posRel[FZ], FZ);
   posRel[FR] = mGridProperties->clampToGridRel(posRel[FR], FR);
   if (!mExtraPolateValues) {
@@ -90,37 +172,36 @@ DataT TriCubicInterpolator<DataT>::interpolateSparse(const DataT z, const DataT 
     posRelN[FR] = posRel[FR];
   }
 
-  const int nPoints = 4;
-  std::array<Vector<DataT, nPoints>, 16> cVals;
-  const Vector<DataT, FDim> index{floor_vec(posRel)};
-  setValues(index[FZ], index[FR], index[FPHI], cVals);
+  // index of the cell: the relative positions are >= 0 after the clamping, so the conversion to int is equal to floor()
+  const int indexZ = static_cast<int>(posRel[FZ]);
+  const int indexR = static_cast<int>(posRel[FR]);
+  const int indexPhi = static_cast<int>(posRel[FPHI]);
 
-  const Vector<DataT, FDim> vals0{posRelN - index};
-  const Vector<DataT, FDim> vals1{vals0 * vals0};
-  const Vector<DataT, FDim> vals2{vals0 * vals1};
+  // weights of the interpolation in each dimension
+  const DataT t[4]{posRelN[FZ] - indexZ, posRelN[FR] - indexR, posRelN[FPHI] - indexPhi, 0};
+  DataT weights[4][4];
+  getWeights<DataT>(t, weights);
+  const DataT weightsZ[4]{weights[0][FZ], weights[1][FZ], weights[2][FZ], weights[3][FZ]};
+  const DataT weightsR[4]{weights[0][FR], weights[1][FR], weights[2][FR], weights[3][FR]};
+  const DataT weightsPhi[4]{weights[0][FPHI], weights[1][FPHI], weights[2][FPHI], weights[3][FPHI]};
 
-  const Vector<DataT, nPoints> vecValX{{1, vals0[FZ], vals1[FZ], vals2[FZ]}};
-  const Vector<DataT, nPoints> vecValY{{1, vals0[FR], vals1[FR], vals2[FR]}};
-  const Vector<DataT, nPoints> vecValZ{{1, vals0[FPHI], vals1[FPHI], vals2[FPHI]}};
-
-  const static std::array<Vc::Memory<Vc::Vector<DataT>, nPoints>, nPoints> matrixA{{{0, -0.5, 1, -0.5},
-                                                                                    {1, 0, -2.5, 1.5},
-                                                                                    {0, 0.5, 2., -1.5},
-                                                                                    {0, 0, -0.5, 0.5}}};
-
-  const Vector<DataT, nPoints> vecValXMult{matrixA * vecValX};
-  const Vector<DataT, nPoints> vecValYMult{matrixA * vecValY};
-  const Vector<DataT, nPoints> vecValZMult{matrixA * vecValZ};
-
-  DataT result{};
-  int ind = 0;
-  for (int slice = 0; slice < nPoints; ++slice) {
-    const Vector<DataT, nPoints> vecA{vecValZMult[slice] * vecValYMult};
-    for (int row = 0; row < nPoints; ++row) {
-      result += sum(vecA[row] * vecValXMult * cVals[ind++]);
-    }
+  const GridPos location = findPos(indexZ, indexR, indexPhi);
+  if ((location == GridPos::InnerVolume) || (location == GridPos::SideZRight) || (location == GridPos::SideZLeft)) {
+    // all 64 values are inside the grid (the phi direction is periodic): directly use the values from the grid.
+    // The values in z direction are consecutive in memory (DataContainer3D::getDataIndex()): start at (iz - 1, ir - 1, iphi)
+    int deltaPhi[3]{};
+    getDataIndexCircularArray(indexPhi, FPHI, deltaPhi);
+    const int deltaPhiSlice[4]{deltaPhi[0], 0, deltaPhi[1], deltaPhi[2]};
+    const int deltaR = mGridProperties->getDeltaDataIndex(1, FR);
+    const DataT* data = mGridData->getData().data() + mGridData->getDataIndex(indexZ, indexR, indexPhi) - deltaR - 1;
+    return interpolateCell<DataT>(data, deltaPhiSlice, deltaR, weightsZ, weightsR, weightsPhi);
   }
-  return result;
+
+  // missing values outside of the grid are extrapolated
+  DataT cVals[16][4];
+  setValues(indexZ, indexR, indexPhi, location, cVals);
+  static constexpr int sliceOffset[4]{0, 16, 32, 48};
+  return interpolateCell<DataT>(&cVals[0][0], sliceOffset, 4, weightsZ, weightsR, weightsPhi);
 }
 
 // for perdiodic boundary condition
@@ -309,11 +390,9 @@ bool TriCubicInterpolator<DataT>::isSideLeft(const int ind) const
 }
 
 template <typename DataT>
-void TriCubicInterpolator<DataT>::setValues(const int iz, const int ir, const int iphi, std::array<Vector<DataT, 4>, 16>& cVals) const
+void TriCubicInterpolator<DataT>::setValues(const int iz, const int ir, const int iphi, const GridPos location, DataT (&cVals)[16][4]) const
 {
-  const GridPos location = findPos(iz, ir, iphi);
   const int ii_x_y_z = mGridData->getDataIndex(iz, ir, iphi);
-  cVals[5][1] = (*mGridData)[ii_x_y_z];
 
   int deltaZ[3]{mGridProperties->getDeltaDataIndex(-1, 0), mGridProperties->getDeltaDataIndex(1, 0), mGridProperties->getDeltaDataIndex(2, 0)};
   int deltaR[3]{mGridProperties->getDeltaDataIndex(-1, 1), mGridProperties->getDeltaDataIndex(1, 1), mGridProperties->getDeltaDataIndex(2, 1)};
@@ -323,6 +402,8 @@ void TriCubicInterpolator<DataT>::setValues(const int iz, const int ir, const in
   const int i0 = 0;
   const int i1 = 1;
   const int i2 = 2;
+
+  cVals[5][1] = (*mGridData)[ii_x_y_z];
 
   switch (location) {
     case GridPos::InnerVolume:
