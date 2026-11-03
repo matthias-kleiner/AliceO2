@@ -343,6 +343,8 @@ class IDCToVectorDevice : public o2::framework::Task
       tree.SetAlias("sector", "int(cru/10)");
       mDebugStream->Close();
       mDebugStream.reset(nullptr);
+    }
+    if (mRawOutputFile.is_open()) {
       mRawOutputFile.close();
     }
   }
@@ -427,7 +429,7 @@ class IDCToVectorDevice : public o2::framework::Task
       }
 
       if (packetsInTF != infVec.size()) {
-        LOGP(error, "IDC CRU {:3}: number of IDC packets {} does not match max over all CRUs {} in TF {}", cru, packetsInTF, infVec.size(), tfCounter);
+        LOGP(error, "IDC CRU {:3}: number of IDC packets {} does not match max over all CRUs {} in TF {}", cru, infVec.size(), packetsInTF, tfCounter);
         hasErrors = true;
       }
 
