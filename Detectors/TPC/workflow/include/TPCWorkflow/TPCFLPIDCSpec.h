@@ -193,7 +193,7 @@ class TPCFLPIDCDevice : public o2::framework::Task
     idcOne.first.resize(integrationIntervals);
     idcOne.second.resize(integrationIntervals);
     for (int i = 0; i < integrationIntervals; ++i) {
-      idcOne.first[i] = std::accumulate(idcOneTmp[i].begin(), idcOneTmp[i].end(), 0);
+      idcOne.first[i] = std::accumulate(idcOneTmp[i].begin(), idcOneTmp[i].end(), 0.f);
       idcOne.second[i] = idcOneTmp[i].size();
     }
 
