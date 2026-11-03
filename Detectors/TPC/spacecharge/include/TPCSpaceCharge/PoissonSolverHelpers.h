@@ -57,6 +57,7 @@ struct MGParameters {                                             ///< Parameter
   inline static int maxLoop = 7;                                  ///< the number of tree-deep of multi grid
   inline static int gamma = 1;                                    ///< number of iteration at coarsest level !TODO SET TO REASONABLE VALUE!
   inline static int normalizeGridToNSector = SECTORSPERSIDE;      ///< the grid in phi direction is squashed from 2 Pi to (2 Pi / SECTORSPERSIDE). This can used to get the potential for phi symmetric sc density or boundary potentials
+  inline static float phiCoarseningThreshold = 0.5;               ///< full 3D: the phi direction is only coarsened if the relative coupling in phi (h_{r,z} / (r_{min} * h_{phi}))^2 is larger than this value (weakly coupled directions should not be coarsened). 0: always coarsen phi if possible
 };
 
 template <typename DataT = double>

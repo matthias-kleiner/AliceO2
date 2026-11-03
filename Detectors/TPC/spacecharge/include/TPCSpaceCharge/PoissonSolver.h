@@ -101,6 +101,7 @@ class PoissonSolver
   inline static DataT sConvergenceError{1e-6};                       ///< Error tolerated
   static constexpr DataT INVTWOPI = 1. / o2::constants::math::TwoPI; ///< inverse of 2*pi
   inline static int sNThreads{4};                                    ///< number of threads which are used during some of the calculations (increasing this number has no big impact)
+  static constexpr long MINPOINTSPARALLEL{20000};                    ///< minimum number of grid points of a multi grid level for which the calculations are performed in parallel
 
   /// \returns inverse grid size in phi (either 1/2Pi or NSECTORSPERSIDE/2Pi)
   static DataT getGridSizePhiInv();
@@ -109,7 +110,22 @@ class PoissonSolver
   ///
   /// \param matricesCurrentV current potential (numerical solution)
   /// \param prevArrayV content from matricesCurrentV from previous iteration
-  DataT getConvergenceError(const Vector& matricesCurrentV, Vector& prevArrayV) const;
+  DataT getConvergenceError(const Vector& matricesCurrentV, const Vector& prevArrayV) const;
+
+  /// \returns the number of phi slices for each level of the multi grid (full 3D). The phi direction is coarsened (if the number of slices is even)
+  /// only if the coupling in phi direction is not weak compared to the coupling in r and z direction (see MGParameters::phiCoarseningThreshold)
+  /// \param nLevels number of multi grid levels
+  std::vector<int> getPhiSlicesPerLevel(const int nLevels) const;
+
+  /// get the indices of the neighbouring phi slices for given phi slice taking into account the boundary condition in phi
+  /// \param m phi slice
+  /// \param nPhi number of phi slices
+  /// \param symmetry 0: periodic, 1: reflection symmetry, -1: anti-symmetry
+  /// \param mp1 index of the slice m + 1 (output)
+  /// \param mm1 index of the slice m - 1 (output)
+  /// \param signPlus sign of the potential for the slice m + 1 (output)
+  /// \param signMinus sign of the potential for the slice m - 1 (output)
+  static void getPhiNeighbours(const int m, const int nPhi, const int symmetry, int& mp1, int& mm1, int& signPlus, int& signMinus);
 
   /// 3D - Solve Poisson's Equation in 3D by MultiGrid with constant phi slices
   ///
@@ -371,6 +387,7 @@ class PoissonSolver
   /// \param nPre number of smoothing before coarsening
   /// \param nPost number of smoothing after coarsening
   /// \param ratioZ ratio between square of grid r and grid z (OPTION,  recalculate)
+  /// \param nPhiLevels number of phi slices for each multi grid level
   /// \param tvArrayV vector of V potential in different grids
   /// \param tvCharge vector of charge distribution in different grids
   /// \param tvResidue vector of residue calculation in different grids
@@ -379,7 +396,7 @@ class PoissonSolver
   /// \param coefficient3 coefficient for relaxation (ratio r/z)
   /// \param coefficient4 coefficient for relaxation (ratio for grid_r)
   /// \param inverseCoefficient4 coefficient for relaxation (inverse coefficient4)
-  void vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, std::vector<Vector>& tvArrayV, std::vector<Vector>& tvCharge,
+  void vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, const std::vector<int>& nPhiLevels, std::vector<Vector>& tvArrayV, std::vector<Vector>& tvCharge,
                 std::vector<Vector>& tvResidue, std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2, std::vector<DataT>& coefficient3,
                 std::vector<DataT>& coefficient4, std::vector<DataT>& inverseCoefficient4) const;
 

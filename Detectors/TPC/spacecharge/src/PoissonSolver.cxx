@@ -22,7 +22,10 @@
 #include "TPCSpaceCharge/PoissonSolverHelpers.h"
 #include "Framework/Logger.h"
 #include <numeric>
+#include <algorithm>
 #include <fmt/core.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include "TPCSpaceCharge/Vector3D.h"
 #include "TPCSpaceCharge/DataContainer3D.h"
 #include "DataFormatsTPC/Defs.h"
@@ -393,10 +396,12 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
   LOGP(detail, "{}", fmt::format("PoissonMultiGrid3D: nGridRow={}, nGridCol={}, nGridPhi={}", nGridRow, nGridCol, nGridPhi));
   const int nLoop = std::max({nGridRow, nGridCol, nGridPhi}); // Calculate the number of nLoop for the binary expansion
 
+  // number of phi slices for each level of the multi grid
+  const std::vector<int> nPhiLevels = getPhiSlicesPerLevel(nLoop);
+
   // Vector for storing multi grid array
   unsigned int iOne = 1; // index i in gridSize r (original)
   unsigned int jOne = 1; // index j in gridSize z (original)
-  unsigned int kOne = 1; // index k in gridSize phi
   int tnRRow = mParamGrid.NRVertices;
   int tnZColumn = mParamGrid.NZVertices;
   int tPhiSlice = mParamGrid.NPhiVertices;
@@ -418,11 +423,10 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
     // tnRRow,tnZColumn in new grid
     tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
     tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-    tPhiSlice = kOne == 1 ? mParamGrid.NPhiVertices : mParamGrid.NPhiVertices / kOne;
-    tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
 
     // allocate memory for residue
     const int index = count - 1;
+    tPhiSlice = nPhiLevels[index];
     tvResidue[index].resize(tnRRow, tnZColumn, tPhiSlice);
     tvPrevArrayV[index].resize(tnRRow, tnZColumn, tPhiSlice);
     tvChargeFMG[index].resize(tnRRow, tnZColumn, tPhiSlice);
@@ -443,7 +447,6 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
     }
     iOne *= 2; // doubling
     jOne *= 2; // doubling
-    kOne *= 2;
   }
 
   // Case full multi grid (FMG)
@@ -451,7 +454,6 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
     // Restrict the charge to coarser grid
     iOne = 2;
     jOne = 2;
-    kOne = 2;
     int otPhiSlice = mParamGrid.NPhiVertices;
 
     // 1) Restrict Charge and Boundary to coarser grid
@@ -459,8 +461,7 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
       // tnRRow,tnZColumn in new grid
       tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
       tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-      tPhiSlice = kOne == 1 ? mParamGrid.NPhiVertices : mParamGrid.NPhiVertices / kOne;
-      tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
+      tPhiSlice = nPhiLevels[count - 1];
 
       LOGP(detail, "{}", fmt::format("PoissonMultiGrid3D: Restrict3D, tnRRow={}, tnZColumn={}, newPhiSlice={}, oldPhiSlice={}", tnRRow, tnZColumn, tPhiSlice, otPhiSlice));
       restrict3D(tvChargeFMG[count - 1], tvChargeFMG[count - 2], tnRRow, tnZColumn, tPhiSlice, otPhiSlice);
@@ -470,7 +471,6 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
 
       iOne *= 2; // doubling
       jOne *= 2; // doubling
-      kOne *= 2;
     }
 
     // Relax on the coarsest grid
@@ -479,11 +479,9 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
     // move to the coarsest + 1
     iOne /= 2;
     jOne /= 2;
-    kOne /= 2;
     tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
     tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-    tPhiSlice = kOne == 1 ? mParamGrid.NPhiVertices : mParamGrid.NPhiVertices / kOne;
-    tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
+    tPhiSlice = nPhiLevels[nLoop - 1];
     otPhiSlice = tPhiSlice;
 
     const DataT h = gridSpacingR * iOne;
@@ -508,12 +506,10 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
 
       iOne /= 2;
       jOne /= 2;
-      kOne /= 2;
 
       tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
       tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-      tPhiSlice = kOne == 1 ? mParamGrid.NPhiVertices : mParamGrid.NPhiVertices / kOne;
-      tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
+      tPhiSlice = nPhiLevels[count];
 
       // 4) a) interpolate from 2h --> h grid
       interp3D(tvArrayV[count], tvArrayV[count + 1], tnRRow, tnZColumn, tPhiSlice, otPhiSlice);
@@ -529,7 +525,7 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
         // copy to store previous potential
         tvPrevArrayV[count] = tvArrayV[count];
 
-        vCycle3D(symmetry, count + 1, nLoop, MGParameters::nPre, MGParameters::nPost, ratioZ, tvArrayV, tvCharge, tvResidue, coefficient1, coefficient2, coefficient3, coefficient4, inverseCoefficient4);
+        vCycle3D(symmetry, count + 1, nLoop, MGParameters::nPre, MGParameters::nPost, ratioZ, nPhiLevels, tvArrayV, tvCharge, tvResidue, coefficient1, coefficient2, coefficient3, coefficient4, inverseCoefficient4);
 
         // converge error
         const DataT convergenceError = getConvergenceError(tvArrayV[count], tvPrevArrayV[count]);
@@ -563,7 +559,7 @@ void PoissonSolver<DataT>::poissonMultiGrid3D(DataContainer& matricesV, const Da
       tvPrevArrayV[0] = tvArrayV[0];
 
       // Do V Cycle from the coarsest to finest grid
-      vCycle3D(symmetry, gridFrom, gridTo, MGParameters::nPre, MGParameters::nPost, ratioZ, tvArrayV, tvCharge, tvResidue, coefficient1, coefficient2, coefficient3, coefficient4, inverseCoefficient4);
+      vCycle3D(symmetry, gridFrom, gridTo, MGParameters::nPre, MGParameters::nPost, ratioZ, nPhiLevels, tvArrayV, tvCharge, tvResidue, coefficient1, coefficient2, coefficient3, coefficient4, inverseCoefficient4);
 
       // convergence error
       const DataT convergenceError = getConvergenceError(tvArrayV[0], tvPrevArrayV[0]);
@@ -829,7 +825,7 @@ void PoissonSolver<DataT>::vCycle3D2D(const int symmetry, const int gridFrom, co
 }
 
 template <typename DataT>
-void PoissonSolver<DataT>::vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, std::vector<Vector>& tvArrayV,
+void PoissonSolver<DataT>::vCycle3D(const int symmetry, const int gridFrom, const int gridTo, const int nPre, const int nPost, const DataT ratioZ, const std::vector<int>& nPhiLevels, std::vector<Vector>& tvArrayV,
                                     std::vector<Vector>& tvCharge, std::vector<Vector>& tvResidue, std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2, std::vector<DataT>& coefficient3,
                                     std::vector<DataT>& coefficient4, std::vector<DataT>& inverseCoefficient4) const
 {
@@ -837,17 +833,10 @@ void PoissonSolver<DataT>::vCycle3D(const int symmetry, const int gridFrom, cons
 
   unsigned int iOne = 1 << (gridFrom - 1);
   unsigned int jOne = 1 << (gridFrom - 1);
-  unsigned int kOne = 1 << (gridFrom - 1);
-
-  int nnPhi = mParamGrid.NPhiVertices;
-  while (nnPhi % 2 == 0) {
-    nnPhi /= 2;
-  }
 
   int tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
   int tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-  int tPhiSlice = kOne == 1 ? mParamGrid.NPhiVertices : mParamGrid.NPhiVertices / kOne;
-  tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
+  int tPhiSlice = nPhiLevels[gridFrom - 1];
 
   for (int count = gridFrom; count <= gridTo - 1; ++count) {
     const int index = count - 1;
@@ -875,11 +864,9 @@ void PoissonSolver<DataT>::vCycle3D(const int symmetry, const int gridFrom, cons
 
     iOne *= 2;
     jOne *= 2;
-    kOne *= 2;
     tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
     tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-    tPhiSlice = mParamGrid.NPhiVertices / kOne;
-    tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
+    tPhiSlice = nPhiLevels[count];
 
     // 3) Restriction
     restrict3D(tvCharge[count], tvResidue[index], tnRRow, tnZColumn, tPhiSlice, otPhiSlice);
@@ -905,12 +892,10 @@ void PoissonSolver<DataT>::vCycle3D(const int symmetry, const int gridFrom, cons
     const int otPhiSlice = tPhiSlice;
     iOne /= 2;
     jOne /= 2;
-    kOne /= 2;
 
     tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
     tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-    tPhiSlice = kOne == 1 ? mParamGrid.NPhiVertices : mParamGrid.NPhiVertices / kOne;
-    tPhiSlice = tPhiSlice < nnPhi ? nnPhi : tPhiSlice;
+    tPhiSlice = nPhiLevels[index];
 
     const DataT h = gridSpacingR * iOne;
     const DataT h2 = h * h;
@@ -956,48 +941,72 @@ template <typename DataT>
 void PoissonSolver<DataT>::residue3D(Vector& residue, const Vector& matricesCurrentV, const Vector& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int tnPhi, const int symmetry,
                                      const DataT ih2, const DataT tempRatioZ, const std::vector<DataT>& coefficient1, const std::vector<DataT>& coefficient2, const std::vector<DataT>& coefficient3, const std::vector<DataT>& inverseCoefficient4) const
 {
-#pragma omp parallel for num_threads(sNThreads) // parallising this loop is possible - but using more than 2 cores makes it slower -
-  for (int m = 0; m < tnPhi; ++m) {
-    int mp1 = m + 1;
-    int signPlus = 1;
-    int mm1 = m - 1;
-    int signMinus = 1;
+  // strides of the storage: index = i + nr * (j + nz * m)
+  const int strideZ = matricesCurrentV.getNr();
+  const int stridePhi = strideZ * matricesCurrentV.getNz();
+  const DataT* pot = matricesCurrentV.data().data();
+  const DataT* charge = matricesCurrentCharge.data().data();
+  DataT* res = residue.data().data();
+  const bool runParallel = (sNThreads > 1) && (static_cast<long>(tnRRow) * tnZColumn * tnPhi > MINPOINTSPARALLEL);
 
-    // Reflection symmetry in phi (e.g. symmetry at sector boundaries, or half sectors, etc.)
-    if (symmetry == 1) {
-      if (mp1 > tnPhi - 1) {
-        mp1 = tnPhi - 2;
-      }
-      if (mm1 < 0) {
-        mm1 = 1;
-      }
-    }
-    // Anti-symmetry in phi
-    else if (symmetry == -1) {
-      if (mp1 > tnPhi - 1) {
-        mp1 = tnPhi - 2;
-        signPlus = -1;
-      }
-      if (mm1 < 0) {
-        mm1 = 1;
-        signMinus = -1;
-      }
-    } else { // No Symmetries in phi, no boundaries, the calculation is continuous across all phi
-      if (mp1 > tnPhi - 1) {
-        mp1 = m + 1 - tnPhi;
-      }
-      if (mm1 < 0) {
-        mm1 = m - 1 + tnPhi;
-      }
-    }
+#pragma omp parallel for num_threads(sNThreads) if (runParallel)
+  for (int m = 0; m < tnPhi; ++m) {
+    int mp1, mm1, signPlusI, signMinusI;
+    getPhiNeighbours(m, tnPhi, symmetry, mp1, mm1, signPlusI, signMinusI);
+    const DataT signPlus = signPlusI;
+    const DataT signMinus = signMinusI;
+    const DataT* potM = pot + m * stridePhi;
+    const DataT* potP = pot + mp1 * stridePhi;
+    const DataT* potMm = pot + mm1 * stridePhi;
+    const DataT* chargeM = charge + m * stridePhi;
+    DataT* resM = res + m * stridePhi;
 
     for (int j = 1; j < tnZColumn - 1; ++j) {
+      const int row = j * strideZ;
       for (int i = 1; i < tnRRow - 1; ++i) {
-        residue(i, j, m) = ih2 * (coefficient2[i] * matricesCurrentV(i - 1, j, m) + tempRatioZ * (matricesCurrentV(i, j - 1, m) + matricesCurrentV(i, j + 1, m)) + coefficient1[i] * matricesCurrentV(i + 1, j, m) +
-                                  coefficient3[i] * (signPlus * matricesCurrentV(i, j, mp1) + signMinus * matricesCurrentV(i, j, mm1)) - inverseCoefficient4[i] * matricesCurrentV(i, j, m)) +
-                           matricesCurrentCharge(i, j, m);
+        const int idx = row + i;
+        resM[idx] = ih2 * (coefficient2[i] * potM[idx - 1] + tempRatioZ * (potM[idx - strideZ] + potM[idx + strideZ]) + coefficient1[i] * potM[idx + 1] +
+                           coefficient3[i] * (signPlus * potP[idx] + signMinus * potMm[idx]) - inverseCoefficient4[i] * potM[idx]) +
+                    chargeM[idx];
       } // end cols
     } // end mParamGrid.NRVertices
+  }
+}
+
+template <typename DataT>
+void PoissonSolver<DataT>::getPhiNeighbours(const int m, const int nPhi, const int symmetry, int& mp1, int& mm1, int& signPlus, int& signMinus)
+{
+  mp1 = m + 1;
+  mm1 = m - 1;
+  signPlus = 1;
+  signMinus = 1;
+
+  // Reflection symmetry in phi (e.g. symmetry at sector boundaries, or half sectors, etc.)
+  if (symmetry == 1) {
+    if (mp1 > nPhi - 1) {
+      mp1 = nPhi - 2;
+    }
+    if (mm1 < 0) {
+      mm1 = 1;
+    }
+  }
+  // Anti-symmetry in phi
+  else if (symmetry == -1) {
+    if (mp1 > nPhi - 1) {
+      mp1 = nPhi - 2;
+      signPlus = -1;
+    }
+    if (mm1 < 0) {
+      mm1 = 1;
+      signMinus = -1;
+    }
+  } else { // No Symmetries in phi, no boundaries, the calculation is continuous across all phi
+    if (mp1 > nPhi - 1) {
+      mp1 = m + 1 - nPhi;
+    }
+    if (mm1 < 0) {
+      mm1 = m - 1 + nPhi;
+    }
   }
 }
 
@@ -1006,9 +1015,11 @@ void PoissonSolver<DataT>::interp3D(Vector& matricesCurrentV, const Vector& matr
 {
   // Do restrict 2 D for each slice
   if (newPhiSlice == 2 * oldPhiSlice) {
-    for (int m = 0; m < newPhiSlice; m += 2) {
+    // each iteration writes only to the fine slices m and m + 1
+#pragma omp parallel for num_threads(sNThreads) if ((sNThreads > 1) && (static_cast<long>(tnRRow) * tnZColumn * newPhiSlice > MINPOINTSPARALLEL))
+    for (int mm = 0; mm < oldPhiSlice; ++mm) {
       // assuming no symmetry
-      int mm = m / 2;
+      const int m = 2 * mm;
       int mmPlus = mm + 1;
       int mp1 = m + 1;
 
@@ -1114,9 +1125,11 @@ void PoissonSolver<DataT>::addInterp3D(Vector& matricesCurrentV, const Vector& m
 {
   // Do restrict 2 D for each slice
   if (newPhiSlice == 2 * oldPhiSlice) {
-    for (int m = 0; m < newPhiSlice; m += 2) {
+    // each iteration writes only to the fine slices m and m + 1
+#pragma omp parallel for num_threads(sNThreads) if ((sNThreads > 1) && (static_cast<long>(tnRRow) * tnZColumn * newPhiSlice > MINPOINTSPARALLEL))
+    for (int mm = 0; mm < oldPhiSlice; ++mm) {
       // assuming no symmetry
-      int mm = m / 2;
+      const int m = 2 * mm;
       int mmPlus = mm + 1;
       int mp1 = m + 1;
 
@@ -1220,87 +1233,55 @@ template <typename DataT>
 void PoissonSolver<DataT>::relax3D(Vector& matricesCurrentV, const Vector& matricesCurrentCharge, const int tnRRow, const int tnZColumn, const int iPhi, const int symmetry, const DataT h2,
                                    const DataT tempRatioZ, const std::vector<DataT>& coefficient1, const std::vector<DataT>& coefficient2, const std::vector<DataT>& coefficient3, const std::vector<DataT>& coefficient4) const
 {
-  // Gauss-Seidel (Read Black}
+  // Gauss-Seidel (Red Black)
   if (MGParameters::relaxType == RelaxType::GaussSeidel) {
-    // for each slice
+    // strides of the storage: index = i + nr * (j + nz * m)
+    const int nr = matricesCurrentV.getNr();
+    const int strideZ = nr;
+    const int stridePhi = nr * matricesCurrentV.getNz();
+    const DataT* charge = matricesCurrentCharge.data().data();
+    DataT* pot = matricesCurrentV.data().data();
+
+    // relax all points of one colour in phi slice m
+    auto relaxSlice = [&](const int msw, const int m) {
+      const int jsw = ((msw + m) % 2) ? 1 : 2;
+      int mp1, mm1, signPlusI, signMinusI;
+      getPhiNeighbours(m, iPhi, symmetry, mp1, mm1, signPlusI, signMinusI);
+      const DataT signPlus = signPlusI;
+      const DataT signMinus = signMinusI;
+      DataT* potM = pot + m * stridePhi;
+      const DataT* potP = pot + mp1 * stridePhi;
+      const DataT* potMm = pot + mm1 * stridePhi;
+      const DataT* chargeM = charge + m * stridePhi;
+      int isw = jsw;
+      for (int j = 1; j < tnZColumn - 1; ++j, isw = 3 - isw) {
+        const int row = j * strideZ;
+        for (int i = isw; i < tnRRow - 1; i += 2) {
+          const int idx = row + i;
+          potM[idx] = (coefficient2[i] * potM[idx - 1] + tempRatioZ * (potM[idx - strideZ] + potM[idx + strideZ]) + coefficient1[i] * potM[idx + 1] + coefficient3[i] * (signPlus * potP[idx] + signMinus * potMm[idx]) + (h2 * chargeM[idx])) * coefficient4[i];
+        } // end cols
+      } // end mParamGrid.NRVertices
+    };
+
+    // In one pass only the points with one parity of (i + j + m) are updated. All direct neighbours of these points have the other parity,
+    // which makes the updates within one pass independent of each other and the phi slices can be processed in parallel.
+    // The only exception is the periodic case with an odd number of phi slices: the first and the last slice are neighbours with the same parity.
+    // To get exactly the same result as with the sequential loop (m = 0, 1, ..., iPhi - 1), the last slice is processed after all other slices.
+    const bool runParallel = (sNThreads > 1) && (static_cast<long>(tnRRow) * tnZColumn * iPhi > MINPOINTSPARALLEL);
     for (int iPass = 1; iPass <= 2; ++iPass) {
       const int msw = (iPass % 2) ? 1 : 2;
-      for (int m = 0; m < iPhi; ++m) {
-        const int jsw = ((msw + m) % 2) ? 1 : 2;
-        int mp1 = m + 1;
-        int signPlus = 1;
-        int mm1 = m - 1;
-        int signMinus = 1;
-        // Reflection symmetry in phi (e.g. symmetry at sector boundaries, or half sectors, etc.)
-        if (symmetry == 1) {
-          if (mp1 > iPhi - 1) {
-            mp1 = iPhi - 2;
-          }
-          if (mm1 < 0) {
-            mm1 = 1;
-          }
-        }
-        // Anti-symmetry in phi
-        else if (symmetry == -1) {
-          if (mp1 > iPhi - 1) {
-            mp1 = iPhi - 2;
-            signPlus = -1;
-          }
-          if (mm1 < 0) {
-            mm1 = 1;
-            signMinus = -1;
-          }
-        } else { // No Symmetries in phi, no boundaries, the calculation is continuous across all phi
-          if (mp1 > iPhi - 1) {
-            mp1 = m + 1 - iPhi;
-          }
-          if (mm1 < 0) {
-            mm1 = m - 1 + iPhi;
-          }
-        }
-        int isw = jsw;
-        for (int j = 1; j < tnZColumn - 1; ++j, isw = 3 - isw) {
-          for (int i = isw; i < tnRRow - 1; i += 2) {
-            (matricesCurrentV)(i, j, m) = (coefficient2[i] * (matricesCurrentV)(i - 1, j, m) + tempRatioZ * ((matricesCurrentV)(i, j - 1, m) + (matricesCurrentV)(i, j + 1, m)) + coefficient1[i] * (matricesCurrentV)(i + 1, j, m) + coefficient3[i] * (signPlus * (matricesCurrentV)(i, j, mp1) + signMinus * (matricesCurrentV)(i, j, mm1)) + (h2 * (matricesCurrentCharge)(i, j, m))) * coefficient4[i];
-          } // end cols
-        } // end mParamGrid.NRVertices
-      } // end phi
+#pragma omp parallel for num_threads(sNThreads) if (runParallel)
+      for (int m = 0; m < iPhi - 1; ++m) {
+        relaxSlice(msw, m);
+      }
+      relaxSlice(msw, iPhi - 1);
     } // end sweep
   } else if (MGParameters::relaxType == RelaxType::Jacobi) {
+    // NOTE: the potential is updated in place, i.e. this is a lexicographic Gauss-Seidel and not a Jacobi relaxation
     // for each slice
     for (int m = 0; m < iPhi; ++m) {
-      int mp1 = m + 1;
-      int signPlus = 1;
-      int mm1 = m - 1;
-      int signMinus = 1;
-
-      // Reflection symmetry in phi (e.g. symmetry at sector boundaries, or half sectors, etc.)
-      if (symmetry == 1) {
-        if (mp1 > iPhi - 1) {
-          mp1 = iPhi - 2;
-        }
-        if (mm1 < 0) {
-          mm1 = 1;
-        }
-      }
-      // Anti-symmetry in phi
-      else if (symmetry == -1) {
-        if (mp1 > iPhi - 1) {
-          mp1 = iPhi - 2;
-          signPlus = -1;
-        }
-        if (mm1 < 0) {
-          mm1 = 1;
-          signMinus = -1;
-        }
-      } else { // No Symmetries in phi, no boundaries, the calculation is continuous across all phi
-        if (mp1 > iPhi - 1) {
-          mp1 = m + 1 - iPhi;
-        }
-        if (mm1 < 0) {
-          mm1 = m - 1 + iPhi;
-        }
-      }
+      int mp1, mm1, signPlus, signMinus;
+      getPhiNeighbours(m, iPhi, symmetry, mp1, mm1, signPlus, signMinus);
       // Jacobian
       for (int j = 1; j < tnZColumn - 1; ++j) {
         for (int i = 1; i < tnRRow - 1; ++i) {
@@ -1388,9 +1369,12 @@ void PoissonSolver<DataT>::restrictBoundary2D(Vector& matricesCurrentCharge, con
 template <typename DataT>
 void PoissonSolver<DataT>::restrict3D(Vector& matricesCurrentCharge, const Vector& residue, const int tnRRow, const int tnZColumn, const int newPhiSlice, const int oldPhiSlice) const
 {
+  const bool runParallel = (sNThreads > 1) && (static_cast<long>(tnRRow) * tnZColumn * newPhiSlice > MINPOINTSPARALLEL / 4);
   if (2 * newPhiSlice == oldPhiSlice) {
-    int mm = 0;
-    for (int m = 0; m < newPhiSlice; m++, mm += 2) {
+    // each iteration writes only to the coarse slice m
+#pragma omp parallel for num_threads(sNThreads) if (runParallel)
+    for (int m = 0; m < newPhiSlice; ++m) {
+      const int mm = 2 * m;
       // assuming no symmetry
       int mp1 = mm + 1;
       int mm1 = mm - 1;
@@ -1437,6 +1421,7 @@ void PoissonSolver<DataT>::restrict3D(Vector& matricesCurrentCharge, const Vecto
     } // end phis
 
   } else {
+#pragma omp parallel for num_threads(sNThreads) if (runParallel)
     for (int m = 0; m < newPhiSlice; ++m) {
       restrict2D(matricesCurrentCharge, residue, tnRRow, tnZColumn, m);
     }
@@ -1475,20 +1460,25 @@ void PoissonSolver<DataT>::restrict2D(Vector& matricesCurrentCharge, const Vecto
 }
 
 template <typename DataT>
-DataT PoissonSolver<DataT>::getConvergenceError(const Vector& matricesCurrentV, Vector& prevArrayV) const
+DataT PoissonSolver<DataT>::getConvergenceError(const Vector& matricesCurrentV, const Vector& prevArrayV) const
 {
-  std::vector<DataT> errorArr(prevArrayV.getNphi());
+  const int nPhi = prevArrayV.getNphi();
+  const size_t phiStep = static_cast<size_t>(prevArrayV.getNr()) * prevArrayV.getNz(); // number of points in one phi slice
+  std::vector<DataT> errorArr(nPhi);
+  const DataT* prev = prevArrayV.data().data();
+  const DataT* curr = matricesCurrentV.data().data();
 
-  // subtract the two matrices
-  std::transform(prevArrayV.begin(), prevArrayV.end(), matricesCurrentV.begin(), prevArrayV.begin(), std::minus<DataT>());
-
-#pragma omp parallel for num_threads(sNThreads) // parallising this loop is possible - but using more than 2 cores makes it slower -
-  for (unsigned int m = 0; m < prevArrayV.getNphi(); ++m) {
-    // square each entry in the vector and sum them up
-    const auto phiStep = prevArrayV.getNr() * prevArrayV.getNz(); // number of points in one phi slice
-    const auto start = prevArrayV.begin() + m * phiStep;
-    const auto end = start + phiStep;
-    errorArr[m] = std::inner_product(start, end, start, DataT(0)); // inner product "Sum (matrix[a]*matrix[a])"
+#pragma omp parallel for num_threads(sNThreads) if ((sNThreads > 1) && (phiStep * nPhi > MINPOINTSPARALLEL))
+  for (int m = 0; m < nPhi; ++m) {
+    // sum of the squared differences in the phi slice
+    const DataT* prevM = prev + m * phiStep;
+    const DataT* currM = curr + m * phiStep;
+    DataT sum = 0;
+    for (size_t k = 0; k < phiStep; ++k) {
+      const DataT diff = prevM[k] - currM[k];
+      sum = sum + diff * diff;
+    }
+    errorArr[m] = sum;
   }
   // return largest error
   return *std::max_element(std::begin(errorArr), std::end(errorArr));
@@ -1515,6 +1505,32 @@ void PoissonSolver<DataT>::calcCoefficients2D(unsigned int from, unsigned int to
     coefficient1[i] = 1 + radiusInvHalf;
     coefficient2[i] = 1 - radiusInvHalf;
   }
+}
+
+template <typename DataT>
+std::vector<int> PoissonSolver<DataT>::getPhiSlicesPerLevel(const int nLevels) const
+{
+  std::vector<int> nPhiLevels(nLevels);
+  nPhiLevels[0] = mParamGrid.NPhiVertices;
+  const DataT gridSpacingRZ = std::min(getSpacingR(), getSpacingZ());
+  const DataT radiusMin = mGrid3D.getGridMinR();
+  for (int level = 1; level < nLevels; ++level) {
+    const int nPhiFine = nPhiLevels[level - 1];
+    // phi direction can only be coarsened for an even number of phi slices
+    bool coarsenPhi = (nPhiFine % 2 == 0);
+    if (coarsenPhi && (MGParameters::phiCoarseningThreshold > 0)) {
+      // The point-wise relaxation does not smooth the error well in a direction which is only weakly coupled compared to the other directions
+      // and coarsening in such a direction leads to a slow convergence of the multi grid (number of V cycles increases).
+      // Coarsen phi only if the coupling in phi (largest at the inner radius) is not weak compared to the coupling in r/z: (h_{r,z} / (r_{min} * h_{phi}))^2
+      const DataT spacingRZ = gridSpacingRZ * (1 << (level - 1));
+      const DataT spacingPhiInv = nPhiFine * getGridSizePhiInv();
+      const DataT relCouplingPhi = (spacingRZ * spacingPhiInv / radiusMin) * (spacingRZ * spacingPhiInv / radiusMin);
+      coarsenPhi = relCouplingPhi >= MGParameters::phiCoarseningThreshold;
+    }
+    nPhiLevels[level] = coarsenPhi ? nPhiFine / 2 : nPhiFine;
+  }
+  LOGP(detail, "Number of phi slices per multi grid level: {}", fmt::join(nPhiLevels, ", "));
+  return nPhiLevels;
 }
 
 template <typename DataT>
