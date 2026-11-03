@@ -1036,7 +1036,8 @@ void o2::tpc::IDCFactorization::reset()
 {
   for (auto& tf : mIDCs) {
     for (auto& idcs : tf) {
-      idcs.clear();
+      // release the memory: the IDCs of the next aggregation interval are moved in (see setIDCs())
+      std::vector<float>().swap(idcs);
     }
   }
 }

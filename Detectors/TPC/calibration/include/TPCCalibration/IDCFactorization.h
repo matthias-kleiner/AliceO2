@@ -358,7 +358,7 @@ class IDCFactorization : public IDCGroupHelperSector
   /// \returns vector containing the number of integration intervals for each stored TF (dropped TFs taken into account)
   std::vector<unsigned int> getAllIntegrationIntervalsPerTF() const;
 
-  /// resetting aggregated IDCs
+  /// resetting aggregated IDCs and releasing the memory
   void reset();
 
   /// setting a gain map from a file
