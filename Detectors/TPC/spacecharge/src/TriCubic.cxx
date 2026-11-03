@@ -17,7 +17,6 @@
 #include "TPCSpaceCharge/TriCubic.h"
 #include "TPCSpaceCharge/DataContainer3D.h"
 #include <algorithm>
-#include <type_traits>
 
 using namespace o2::tpc;
 
@@ -77,46 +76,16 @@ DataT TriCubicInterpolator<DataT>::parabolExtrapolation(const DataT valk, const 
 
 namespace
 {
-/// sum of four values. The association of the terms is the same as for the horizontal sum of the Vc vectors (Vc::Memory<Vc::Vector<DataT>, 4>),
-/// which were used in a previous implementation, to get bit-identical results for the SIMD implementation Vc would use for the target:
-/// AVX (double: 4 lanes, float: 8 lanes with zero padding): (x0 + x2) + (x1 + x3), SSE (double: 2 x 2 lanes): (x0 + x2) + (x1 + x3), SSE (float: 4 lanes): (x0 + x3) + (x1 + x2), scalar (e.g. ARM): ((x0 + x1) + x2) + x3
+/// calculate the 4 weights of the 1D cubic (Catmull-Rom) interpolation for the relative position t in the cell
 template <typename DataT>
-inline DataT sum4(const DataT x0, const DataT x1, const DataT x2, const DataT x3)
+inline void getWeights(const DataT t, DataT (&weights)[4])
 {
-#if defined(__AVX__)
-  return (x0 + x2) + (x1 + x3);
-#elif defined(__SSE2__)
-  if constexpr (std::is_same_v<DataT, float>) {
-    return (x0 + x3) + (x1 + x2);
-  } else {
-    return (x0 + x2) + (x1 + x3);
-  }
-#else
-  return ((x0 + x1) + x2) + x3;
-#endif
-}
-
-/// calculate the 4 weights of the 1D cubic (Catmull-Rom) interpolation for the relative positions t in the cell for all dimensions (the last one is not used)
-/// \param t relative position in the cell for each dimension
-/// \param weights weights[i][dim]
-template <typename DataT>
-inline void getWeights(const DataT (&t)[4], DataT (&weights)[4][4])
-{
-  static constexpr DataT matrixA[4][4]{{0, -0.5, 1, -0.5},
-                                       {1, 0, -2.5, 1.5},
-                                       {0, 0.5, 2., -1.5},
-                                       {0, 0, -0.5, 0.5}};
-  DataT t2[4];
-  DataT t3[4];
-  for (int dim = 0; dim < 4; ++dim) {
-    t2[dim] = t[dim] * t[dim];
-    t3[dim] = t[dim] * t2[dim];
-  }
-  for (int i = 0; i < 4; ++i) {
-    for (int dim = 0; dim < 4; ++dim) {
-      weights[i][dim] = sum4<DataT>(DataT(0) + matrixA[i][0] * DataT(1), DataT(0) + matrixA[i][1] * t[dim], DataT(0) + matrixA[i][2] * t2[dim], DataT(0) + matrixA[i][3] * t3[dim]);
-    }
-  }
+  const DataT t2 = t * t;
+  const DataT t3 = t2 * t;
+  weights[0] = DataT(0.5) * (-t + 2 * t2 - t3);
+  weights[1] = DataT(0.5) * (2 - 5 * t2 + 3 * t3);
+  weights[2] = DataT(0.5) * (t + 4 * t2 - 3 * t3);
+  weights[3] = DataT(0.5) * (t3 - t2);
 }
 
 /// sum_{slice, row, iz} weightsPhi[slice] * weightsR[row] * weightsZ[iz] * vals[sliceOffset[slice] + row * rowStride + iz]
@@ -126,13 +95,14 @@ inline void getWeights(const DataT (&t)[4], DataT (&weights)[4][4])
 template <typename DataT>
 inline DataT interpolateCell(const DataT* vals, const int (&sliceOffset)[4], const int rowStride, const DataT (&weightsZ)[4], const DataT (&weightsR)[4], const DataT (&weightsPhi)[4])
 {
-  DataT result{};
+  DataT result = 0;
   for (int slice = 0; slice < 4; ++slice) {
+    DataT sumR = 0;
     for (int row = 0; row < 4; ++row) {
-      const DataT weightPhiR = weightsPhi[slice] * weightsR[row];
       const DataT* val = vals + sliceOffset[slice] + row * rowStride;
-      result += sum4<DataT>((weightPhiR * weightsZ[0]) * val[0], (weightPhiR * weightsZ[1]) * val[1], (weightPhiR * weightsZ[2]) * val[2], (weightPhiR * weightsZ[3]) * val[3]);
+      sumR += weightsR[row] * (weightsZ[0] * val[0] + weightsZ[1] * val[1] + weightsZ[2] * val[2] + weightsZ[3] * val[3]);
     }
+    result += weightsPhi[slice] * sumR;
   }
   return result;
 }
@@ -164,12 +134,12 @@ DataT TriCubicInterpolator<DataT>::interpolateSparse(const DataT z, const DataT 
   const int indexPhi = static_cast<int>(posRel[FPHI]);
 
   // weights of the interpolation in each dimension
-  const DataT t[4]{posRelN[FZ] - indexZ, posRelN[FR] - indexR, posRelN[FPHI] - indexPhi, 0};
-  DataT weights[4][4];
-  getWeights<DataT>(t, weights);
-  const DataT weightsZ[4]{weights[0][FZ], weights[1][FZ], weights[2][FZ], weights[3][FZ]};
-  const DataT weightsR[4]{weights[0][FR], weights[1][FR], weights[2][FR], weights[3][FR]};
-  const DataT weightsPhi[4]{weights[0][FPHI], weights[1][FPHI], weights[2][FPHI], weights[3][FPHI]};
+  DataT weightsZ[4];
+  DataT weightsR[4];
+  DataT weightsPhi[4];
+  getWeights<DataT>(posRelN[FZ] - indexZ, weightsZ);
+  getWeights<DataT>(posRelN[FR] - indexR, weightsR);
+  getWeights<DataT>(posRelN[FPHI] - indexPhi, weightsPhi);
 
   const GridPos location = findPos(indexZ, indexR, indexPhi);
   if ((location == GridPos::InnerVolume) || (location == GridPos::SideZRight) || (location == GridPos::SideZLeft)) {
