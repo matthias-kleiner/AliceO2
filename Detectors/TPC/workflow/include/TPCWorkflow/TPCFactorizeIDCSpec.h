@@ -140,7 +140,8 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
       mIDCFactorization.setIDCs(std::move(data), cru, relTF);
     }
 
-    if (mProcessedCRUs == mCRUs.size() * mIDCFactorization.getNTimeframes()) {
+    // use >= instead of == as several inputs can be processed in one call: in case more inputs than expected were received, the IDCs would never be processed otherwise
+    if (mProcessedCRUs >= mCRUs.size() * mIDCFactorization.getNTimeframes()) {
       LOGP(info, "ProcessedTFs: {}   currTF: {}  relTF: {}  OrbitResetTime: {} orbits per TF: {}", mProcessedCRUs / mCRUs.size(), currTF, relTF, mTFInfo.first, mTFInfo.second);
       factorizeIDCs();
       sendOutput(pc.outputs());
@@ -228,7 +229,9 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
       output.snapshot(Output{gDataOriginTPC, getDataDescriptionLane()}, mLaneId);
     }
 
-    if (mSendOutCCDB && (timeStampEnd > mTimestampStart)) {
+    if (mSendOutCCDB && (mTimestampStart <= 0) && (timeStampEnd > mTimestampStart)) {
+      LOGP(error, "Start time stamp {} is not valid (orbit reset time not received?). Not writing IDCs to CCDB", mTimestampStart);
+    } else if (mSendOutCCDB && (timeStampEnd > mTimestampStart)) {
       for (int iSide = 0; iSide < mSides.size(); ++iSide) {
         const Side side = mSides[iSide];
         LOGP(info, "Writing IDCs to CCDB for Side {}", static_cast<int>(side));
