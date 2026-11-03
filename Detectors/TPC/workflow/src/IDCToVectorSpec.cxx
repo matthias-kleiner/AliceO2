@@ -181,9 +181,12 @@ class IDCToVectorDevice : public o2::framework::Task
           }
 
           auto rdhPtr = reinterpret_cast<const o2::header::RDHAny*>(it.raw());
+          if (!rdhPtr) {
+            throw std::runtime_error("could not get RDH from packet");
+          }
           const auto rdhVersion = RDHUtils::getVersion(rdhPtr);
-          if (!rdhPtr || rdhVersion < 6) {
-            throw std::runtime_error(fmt::format("could not get RDH from packet, or version {} < 6", rdhVersion).data());
+          if (rdhVersion < 6) {
+            throw std::runtime_error(fmt::format("RDH version {} < 6", rdhVersion).data());
           }
 
           // ---| extract hardware information to do the processing |---
@@ -224,6 +227,12 @@ class IDCToVectorDevice : public o2::framework::Task
           // LOGP(info, "IDC Procssing orbit/BC: {:9}/{:4}", orbit, bc);
 
           auto infoIt = std::find(infoVec.begin(), infoVec.end(), orbit);
+          if ((infoIt == infoVec.end()) && (infoVec.size() >= mMaxIDCPerTF)) {
+            // the IDC vector has only space for mMaxIDCPerTF packets
+            LOGP(error, "received more than the maximum number of {} IDC packets with different orbits for CRU {} in TF {} (orbit {}), skipping packet", mMaxIDCPerTF, cruID, tfCounter, orbit);
+            hasErrors = true;
+            continue;
+          }
           if (!infoVec.size()) {
             infoVec.emplace_back(orbit, bc);
             infoIt = infoVec.end() - 1;
@@ -422,7 +431,7 @@ class IDCToVectorDevice : public o2::framework::Task
         hasErrors = true;
       }
 
-      if (!std::equal(infVecComp->begin(), infVecComp->end(), infVec.begin())) {
+      if (!std::equal(infVecComp->begin(), infVecComp->end(), infVec.begin(), infVec.end())) {
         LOGP(warning, "IDC CRU {:3}: mismatch in orbit numbers", cru);
         hasErrors = true;
       }
