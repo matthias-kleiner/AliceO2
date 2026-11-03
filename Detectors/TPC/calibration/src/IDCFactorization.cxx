@@ -348,54 +348,91 @@ void o2::tpc::IDCFactorization::calcIDCOne()
     std::fill(idcOne.mIDCOne.begin(), idcOne.mIDCOne.end(), 1);
   }
 
-#pragma omp parallel for num_threads(sNThreads)
+  // map the global integration interval to the time frame and the integration interval in the time frame
+  std::vector<std::pair<unsigned int, unsigned int>> intervalsTF;
+  intervalsTF.reserve(integrationIntervals);
   for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
-    const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
-    std::vector<std::vector<std::vector<float>>> idcOneSafe(mSides.size()); // side -> intervals -> IDCs
-
-    // reserve memory
-    for (auto& interavalvec : idcOneSafe) {
-      interavalvec.resize(mIntegrationIntervalsPerTF[timeframe]);
-      for (auto& idcsPerInteraval : interavalvec) {
-        idcsPerInteraval.reserve(nIDCsSide);
-      }
+    for (unsigned int interval = 0; interval < mIntegrationIntervalsPerTF[timeframe]; ++interval) {
+      intervalsTF.emplace_back(timeframe, interval);
     }
 
-    // loop over CRUs and fill idcOneSafe vector with IDC/IDC0 values
+    // IDCs exceeding the expected number of integration intervals are not used
     for (unsigned int cruInd = 0; cruInd < mCRUs.size(); ++cruInd) {
       const unsigned int cru = mCRUs[cruInd];
-      const o2::tpc::CRU cruTmp(cru);
-      const unsigned int region = cruTmp.region();
-      const auto side = cruTmp.side();
-      const unsigned int indexSide = mSideIndex[side];
-      const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
-      unsigned int integrationIntervalOffset = 0;
-      calcIDCOne(mIDCs[cru][timeframe], mNIDCsPerCRU[region], integrationIntervalOffset, factorIndexGlob, cru, idcOneSafe[indexSide], &mIDCZero[indexSide], mInputGrouped ? nullptr : mPadFlagsMap.get(), mUsePadStatusMap);
+      const std::size_t nIDCsMax = static_cast<std::size_t>(mIntegrationIntervalsPerTF[timeframe]) * mNIDCsPerCRU[CRU(cru).region()];
+      if (mIDCs[cru][timeframe].size() > nIDCsMax) {
+        LOGP(error, "Received {} IDCs for CRU {} and TF {}, which is larger than the expected maximum of {} IDCs. Skipping the additional IDCs", mIDCs[cru][timeframe].size(), cru, timeframe, nIDCsMax);
+      }
+    }
+  }
+
+  const unsigned int nIDCsSide = mNIDCsPerSector * SECTORSPERSIDE;
+  const CalDet<PadFlags>* padFlagsMap = (mUsePadStatusMap && !mInputGrouped) ? mPadFlagsMap.get() : nullptr;
+
+  // parallelize over the integration intervals: a time frame can contain many integration intervals in case the IDCs are buffered on the FLPs
+#pragma omp parallel num_threads(sNThreads)
+  {
+    // thread local objects for averaging the IDCs of one integration interval, which are reused for all integration intervals
+    std::vector<RobustAverage> averages;
+    averages.reserve(mSides.size());
+    for (unsigned int i = 0; i < mSides.size(); ++i) {
+      averages.emplace_back(nIDCsSide, false);
     }
 
-    // calculate global offset for interval
-    int offsInterval = 0;
-    for (unsigned int tf = 0; tf < timeframe; ++tf) {
-      offsInterval += mIntegrationIntervalsPerTF[tf];
-    }
+#pragma omp for
+    for (unsigned int intervalGlobal = 0; intervalGlobal < intervalsTF.size(); ++intervalGlobal) {
+      const auto [timeframe, interval] = intervalsTF[intervalGlobal];
+      for (auto& average : averages) {
+        average.clear();
+      }
 
-    for (int side = 0; side < mSides.size(); ++side) {
-      const unsigned int indexSide = mSideIndex[side];
-      for (int interval = 0; interval < mIntegrationIntervalsPerTF[timeframe]; ++interval) {
-
-        // calculate robust average for each slice
-        const int intervalGlobal = interval + offsInterval;
-        if (!idcOneSafe[indexSide].empty()) {
-          RobustAverage average(std::move(idcOneSafe[indexSide][interval]));
-          const float mean = average.getTrunctedMean(0.05, 0.95);
-          const float median = average.getMedian();
-          const float rms = average.getStdDev();
-          if (mean != 0) {
-            mIDCOne[indexSide].mIDCOne[intervalGlobal] = mean;
-          }
-          mIDCOne[indexSide].mIDCOneMedian[intervalGlobal] = median;
-          mIDCOne[indexSide].mIDCOneRMS[intervalGlobal] = rms;
+      // loop over CRUs and fill IDC/IDC0 values
+      for (unsigned int cruInd = 0; cruInd < mCRUs.size(); ++cruInd) {
+        const unsigned int cru = mCRUs[cruInd];
+        const o2::tpc::CRU cruTmp(cru);
+        const unsigned int region = cruTmp.region();
+        const unsigned int indexSide = mSideIndex[cruTmp.side()];
+        const unsigned int nIDCsPerCRU = mNIDCsPerCRU[region];
+        const auto& idcs = mIDCs[cru][timeframe];
+        const std::size_t offs = static_cast<std::size_t>(interval) * nIDCsPerCRU;
+        if (offs >= idcs.size()) {
+          continue;
         }
+        const unsigned int nPads = std::min<std::size_t>(nIDCsPerCRU, idcs.size() - offs);
+        const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
+        const float* idcZero = mIDCZero[indexSide].mIDCZero.data() + factorIndexGlob;
+        const PadFlags* padFlags = padFlagsMap ? padFlagsMap->getCalArray(cru).getData().data() : nullptr;
+        auto& average = averages[indexSide];
+        for (unsigned int pad = 0; pad < nPads; ++pad) {
+          const float idc = idcs[offs + pad];
+          if ((idc == -1) || (idc == 0)) {
+            continue;
+          }
+
+          // check pad in case of input is not grouped
+          if (padFlags && ((padFlags[pad] & PadFlags::flagSkip) == PadFlags::flagSkip)) {
+            continue;
+          }
+
+          const float idcZeroVal = idcZero[pad];
+          const double epsilon = 0.001;
+          if (std::abs(idcZeroVal) > epsilon) {
+            average.addValue(idc / idcZeroVal);
+          }
+        }
+      }
+
+      // calculate robust average for each side
+      for (unsigned int indexSide = 0; indexSide < averages.size(); ++indexSide) {
+        auto& average = averages[indexSide];
+        const float mean = average.getTrunctedMean(0.05, 0.95);
+        const float median = average.getMedian();
+        const float rms = average.getStdDev();
+        if (mean != 0) {
+          mIDCOne[indexSide].mIDCOne[intervalGlobal] = mean;
+        }
+        mIDCOne[indexSide].mIDCOneMedian[intervalGlobal] = median;
+        mIDCOne[indexSide].mIDCOneRMS[intervalGlobal] = rms;
       }
     }
   }
