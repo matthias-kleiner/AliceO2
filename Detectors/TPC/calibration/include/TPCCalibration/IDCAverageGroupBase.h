@@ -149,6 +149,9 @@ class IDCAverageGroupBase<IDCAverageGroupTPC>
   /// \return returns ungrouped IDCDelta object
   const auto& getIDCUngroupData() const& { return mIDCsUngrouped; }
 
+  /// \return returns ungrouped IDCDelta object using move semantics (e.g. to reuse the memory for the next IDCDelta which will be grouped)
+  auto getIDCUngroupData() && { return std::move(mIDCsUngrouped); }
+
   /// \return returns helper object containing the grouping parameters and accessing of data indices
   auto& getIDCGroupHelperSector() const { return mIDCGroupHelperSector; }
 

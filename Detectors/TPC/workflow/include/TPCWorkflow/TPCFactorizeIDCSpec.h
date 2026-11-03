@@ -185,7 +185,7 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
   const int mLaneId{0};                             ///< the id of the current process within the parallel pipeline
   std::vector<Side> mSides{};                       ///< processed TPC sides
   const int mNTFsBuffer{1};                         ///< number of TFs for which the IDCs will be buffered
-  std::unique_ptr<CalDet<PadFlags>> mPadFlagsMap;   ///< status flag for each pad (i.e. if the pad is dead). This map is buffered to check if something changed, when a new map is created
+  IDCDelta<float> mIDCDeltaBuffer{};                ///< buffer for the ungrouped IDCDelta of one chunk, which is reused for all chunks to avoid allocating and initializing the memory for each chunk
   int mNOrbitsIDC{12};                              ///< Number of orbits over which the IDCs are integrated.
   bool mDumpIDC0{false};                            ///< Dump IDC0 to file
   bool mDumpIDC1{false};                            ///< Dump IDC1 to file
@@ -267,33 +267,25 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
         LOGP(info, "IDC1 CCDB time: {}", time.count());
         totalTime += time.count();
 
-        auto padStatusMap = mIDCFactorization.getPadStatusMap();
-        if (padStatusMap && iSide == 0) {
+        // the pad status map is kept in mIDCFactorization as it is still needed for the calculation of IDCDelta
+        const CalDet<PadFlags>* padStatusMap = mIDCFactorization.getPadStatusMapPtr();
+        if (padStatusMap && (iSide == 0) && mEnableWritingPadStatusMap) {
           start = timer::now();
-
-          // store map in case it is no nullptr
-          if (mEnableWritingPadStatusMap) {
-            long timeStampEndOffsPad = 0;
-            if (mStatusMapOffsSec > 0) {
-              timeStampEndOffsPad = mStatusMapOffsSec * 1000;
-            } else if (mStatusMapOffsNSlot > 0) {
-              const long length = timeStampEnd - mTimestampStart;
-              timeStampEndOffsPad = mStatusMapOffsNSlot * length;
-            }
-
-            mPadFlagsMap = std::move(padStatusMap);
-            LOGP(info, "Writing pad status map to CCDB with an offset of {}.", timeStampEndOffsPad);
-            o2::ccdb::CcdbObjectInfo ccdbInfoPadFlags(CDBTypeMap.at(sideA ? CDBType::CalIDCPadStatusMapA : CDBType::CalIDCPadStatusMapC), std::string{}, std::string{}, std::map<std::string, std::string>{}, mTimestampStart, timeStampEnd + timeStampEndOffsPad);
-            auto imageFlagMap = o2::ccdb::CcdbApi::createObjectImage(mPadFlagsMap.get(), &ccdbInfoPadFlags);
-            LOGP(info, "Sending object {} / {} of size {} bytes, valid for {} : {} ", ccdbInfoPadFlags.getPath(), ccdbInfoPadFlags.getFileName(), imageFlagMap->size(), ccdbInfoPadFlags.getStartValidityTimestamp(), ccdbInfoPadFlags.getEndValidityTimestamp());
-            output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBPayload, getDataDescriptionCCDBIDCPadFlag(), 0}, *imageFlagMap.get());
-            output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBWrapper, getDataDescriptionCCDBIDCPadFlag(), 0}, ccdbInfoPadFlags);
-            LOGP(info, "Pad status map written to CCDB");
-            stop = timer::now();
-            time = stop - start;
-            LOGP(info, "Pad status map CCDB time: {}", time.count());
-            totalTime += time.count();
+          long timeStampEndOffsPad = 0;
+          if (mStatusMapOffsSec > 0) {
+            timeStampEndOffsPad = mStatusMapOffsSec * 1000;
+          } else if (mStatusMapOffsNSlot > 0) {
+            const long length = timeStampEnd - mTimestampStart;
+            timeStampEndOffsPad = mStatusMapOffsNSlot * length;
           }
+
+          LOGP(info, "Writing pad status map to CCDB with an offset of {}.", timeStampEndOffsPad);
+          o2::ccdb::CcdbObjectInfo ccdbInfoPadFlags(CDBTypeMap.at(sideA ? CDBType::CalIDCPadStatusMapA : CDBType::CalIDCPadStatusMapC), std::string{}, std::string{}, std::map<std::string, std::string>{}, mTimestampStart, timeStampEnd + timeStampEndOffsPad);
+          auto imageFlagMap = o2::ccdb::CcdbApi::createObjectImage(padStatusMap, &ccdbInfoPadFlags);
+          LOGP(info, "Sending object {} / {} of size {} bytes, valid for {} : {} ", ccdbInfoPadFlags.getPath(), ccdbInfoPadFlags.getFileName(), imageFlagMap->size(), ccdbInfoPadFlags.getStartValidityTimestamp(), ccdbInfoPadFlags.getEndValidityTimestamp());
+          output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBPayload, getDataDescriptionCCDBIDCPadFlag(), 0}, *imageFlagMap.get());
+          output.snapshot(Output{o2::calibration::Utils::gDataOriginCDBWrapper, getDataDescriptionCCDBIDCPadFlag(), 0}, ccdbInfoPadFlags);
+          LOGP(info, "Pad status map written to CCDB");
           stop = timer::now();
           time = stop - start;
           LOGP(info, "Pad status map CCDB time: {}", time.count());
@@ -303,9 +295,15 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
         if (!mDisableIDCDelta || mDumpIDCDeltaCalibData) {
           start = timer::now();
           for (unsigned int iChunk = 0; iChunk < mIDCFactorization.getNChunks(side); ++iChunk) {
+            // calculate the IDCDelta only for the current chunk: avoids storing the IDCDelta for all chunks at the same time
+            auto startDelta = timer::now();
+            mIDCFactorization.calcIDCDelta(side, iChunk, mIDCDeltaBuffer);
             auto startGrouping = timer::now();
-            mIDCGrouping.setIDCs(std::move(mIDCFactorization).getIDCDeltaUncompressed(iChunk, side), side);
-            mIDCGrouping.processIDCs(mIDCFactorization.getUsePadStatusMap() ? mPadFlagsMap.get() : nullptr);
+            time = startGrouping - startDelta;
+            LOGP(info, "IDCDelta calculation time: {}", time.count());
+
+            mIDCGrouping.setIDCs(std::move(mIDCDeltaBuffer), side);
+            mIDCGrouping.processIDCs(mIDCFactorization.getUsePadStatusMap() ? padStatusMap : nullptr);
             auto stopGrouping = timer::now();
             time = stopGrouping - startGrouping;
             LOGP(info, "Averaging and grouping time: {}", time.count());
@@ -379,13 +377,16 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
             auto stopCCDBIDCDelta = timer::now();
             time = stopCCDBIDCDelta - startCCDBIDCDelta;
             LOGP(info, "Compression and CCDB object creation time: {}", time.count());
+
+            // get back the memory of the ungrouped IDCDelta to reuse it for the next chunk
+            mIDCDeltaBuffer = std::move(mIDCGrouping).getIDCUngroupData();
           }
 
           stop = timer::now();
           time = stop - start;
           LOGP(info, "IDCDelta CCDB time: {}", time.count());
+          totalTime += time.count();
         }
-        totalTime += time.count();
         LOGP(info, "CCDB object creation done. Total time: {}", totalTime);
       }
     }
@@ -420,8 +421,8 @@ class TPCFactorizeIDCSpec : public o2::framework::Task
       mIDCFactorization.dumpLargeObjectToFile(fmt::format("{}Factorized_TF_{:02}_TS_{}.root", getCurrentType(), mTFFirst, mTimestampStart).data());
     }
 
-    const bool calcDeltas = mDumpIDCDeltaCalibData || !mDisableIDCDelta;
-    mIDCFactorization.factorizeIDCs(true, calcDeltas); // calculate DeltaIDC, 0D-IDC, 1D-IDC
+    // calculate 0D-IDC, 1D-IDC. The DeltaIDC are calculated in sendOutput() for each chunk separately to reduce the memory consumption and to reuse the memory of the previous chunk
+    mIDCFactorization.factorizeIDCs(true, false);
 
     if (mDumpIDC0) {
       LOGP(info, "dumping IDC Zero to file");
