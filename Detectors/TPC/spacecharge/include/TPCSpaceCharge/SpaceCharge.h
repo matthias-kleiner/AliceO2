@@ -282,14 +282,14 @@ class SpaceCharge
 
   /// step 1: use the O2TPCPoissonSolver class to numerically calculate the potential with set space charge density and boundary conditions from potential
   /// \param side side of the TPC
-  /// \param stoppingConvergence stopping criterion used in the poisson solver
+  /// \param stoppingConvergence stopping criterion used in the poisson solver (relative change of the potential between two multi grid V cycles, see MGParameters::relativeConvergence)
   /// \param symmetry use symmetry or not in the poisson solver
-  void poissonSolver(const Side side, const DataT stoppingConvergence = 1e-6, const int symmetry = 0);
+  void poissonSolver(const Side side, const DataT stoppingConvergence = 1e-8, const int symmetry = 0);
 
   /// step 1: use the O2TPCPoissonSolver class to numerically calculate the potential with set space charge density and boundary conditions from potential for A and C side in parallel
-  /// \param stoppingConvergence stopping criterion used in the poisson solver
+  /// \param stoppingConvergence stopping criterion used in the poisson solver (relative change of the potential between two multi grid V cycles, see MGParameters::relativeConvergence)
   /// \param symmetry use symmetry or not in the poisson solver
-  void poissonSolver(const DataT stoppingConvergence = 1e-6, const int symmetry = 0);
+  void poissonSolver(const DataT stoppingConvergence = 1e-8, const int symmetry = 0);
 
   /// step 2: calculate numerically the electric field from the potential
   /// \param side side of the TPC

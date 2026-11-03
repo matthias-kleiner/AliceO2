@@ -58,6 +58,7 @@ struct MGParameters {                                             ///< Parameter
   inline static int gamma = 1;                                    ///< number of iteration at coarsest level !TODO SET TO REASONABLE VALUE!
   inline static int normalizeGridToNSector = SECTORSPERSIDE;      ///< the grid in phi direction is squashed from 2 Pi to (2 Pi / SECTORSPERSIDE). This can used to get the potential for phi symmetric sc density or boundary potentials
   inline static float phiCoarseningThreshold = 0.5;               ///< full 3D: the phi direction is only coarsened if the relative coupling in phi (h_{r,z} / (r_{min} * h_{phi}))^2 is larger than this value (weakly coupled directions should not be coarsened). 0: always coarsen phi if possible
+  inline static bool relativeConvergence = true;                  ///< stopping criterion of the multi grid V cycles: true: relative change of the potential between two V cycles sqrt(sum dV^2 / sum V^2) (independent of the units of the potential and the grid size), false: maximum over the phi slices of the sum of dV^2 (depends on the units and on the grid size)
 };
 
 template <typename DataT = double>

@@ -22,6 +22,7 @@
 #include "TPCSpaceCharge/PoissonSolverHelpers.h"
 #include "Framework/Logger.h"
 #include <numeric>
+#include <cmath>
 #include <algorithm>
 #include <chrono>
 #include <fmt/core.h>
@@ -1467,22 +1468,34 @@ DataT PoissonSolver<DataT>::getConvergenceError(const Vector& matricesCurrentV, 
   const int nPhi = prevArrayV.getNphi();
   const size_t phiStep = static_cast<size_t>(prevArrayV.getNr()) * prevArrayV.getNz(); // number of points in one phi slice
   std::vector<DataT> errorArr(nPhi);
+  std::vector<DataT> normArr(nPhi);
   const DataT* prev = prevArrayV.data().data();
   const DataT* curr = matricesCurrentV.data().data();
 
 #pragma omp parallel for num_threads(sNThreads) if ((sNThreads > 1) && (phiStep * nPhi > MINPOINTSPARALLEL))
   for (int m = 0; m < nPhi; ++m) {
-    // sum of the squared differences in the phi slice
+    // sum of the squared differences and of the squared potential in the phi slice
     const DataT* prevM = prev + m * phiStep;
     const DataT* currM = curr + m * phiStep;
     DataT sum = 0;
+    DataT sumNorm = 0;
     for (size_t k = 0; k < phiStep; ++k) {
       const DataT diff = prevM[k] - currM[k];
       sum = sum + diff * diff;
+      sumNorm = sumNorm + currM[k] * currM[k];
     }
     errorArr[m] = sum;
+    normArr[m] = sumNorm;
   }
-  // return largest error
+
+  if (MGParameters::relativeConvergence) {
+    // relative change of the potential: sqrt(sum dV^2 / sum V^2)
+    const DataT sumDiff = std::accumulate(errorArr.begin(), errorArr.end(), DataT(0));
+    const DataT sumNorm = std::accumulate(normArr.begin(), normArr.end(), DataT(0));
+    return (sumNorm > 0) ? std::sqrt(sumDiff / sumNorm) : std::sqrt(sumDiff);
+  }
+
+  // largest sum of dV^2 of the phi slices
   return *std::max_element(std::begin(errorArr), std::end(errorArr));
 }
 

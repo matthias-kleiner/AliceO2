@@ -85,6 +85,7 @@ class PoissonSolver
   DataT getSpacingR() const { return mGrid3D.getSpacingR(); }
   DataT getSpacingPhi() const { return mGrid3D.getSpacingPhi(); }
 
+  /// set the stopping criterion of the multi grid V cycles. For MGParameters::relativeConvergence (default): maximum relative change sqrt(sum dV^2 / sum V^2) of the potential between two V cycles
   static void setConvergenceError(const DataT error) { sConvergenceError = error; }
 
   static DataT getConvergenceError() { return sConvergenceError; }
@@ -98,7 +99,7 @@ class PoissonSolver
  private:
   const RegularGrid& mGrid3D{};                                      ///< grid properties
   const ParamSpaceCharge mParamGrid{mGrid3D.getParamSC()};           ///< parameters of the grid on which the calculations are performed
-  inline static DataT sConvergenceError{1e-6};                       ///< Error tolerated
+  inline static DataT sConvergenceError{1e-8};                       ///< stopping criterion of the V cycles (see MGParameters::relativeConvergence)
   static constexpr DataT INVTWOPI = 1. / o2::constants::math::TwoPI; ///< inverse of 2*pi
   inline static int sNThreads{4};                                    ///< number of threads which are used during some of the calculations (increasing this number has no big impact)
   static constexpr long MINPOINTSPARALLEL{20000};                    ///< minimum number of grid points of a multi grid level for which the calculations are performed in parallel
