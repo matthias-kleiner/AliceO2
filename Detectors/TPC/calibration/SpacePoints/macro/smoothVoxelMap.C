@@ -13,7 +13,9 @@
 /// \brief Smoothing and extrapolation of a TPC voxel map as a penalised fit: one node (dX, dY, dZ) per voxel of the map-creation grid,
 /// the voxels with data entering with their chi2 as a quadratic form at their position (bilinear between the nodes of their pad row),
 /// and second-difference penalties along the pad rows, y/x and z/x with the prior rms tauRow, tauY2X, tauZ2X (none across the stack
-/// boundaries) and optionally a ridge towards 0 (tau0). Nodes without data follow the penalties: a smooth continuation, linear in the
+/// boundaries; softFactor: tau x softFactor near the GEM frames, where the distortions are steep: the first / last rows of each stack,
+/// the rows below the spacer cross, the sector centre and the pad plane's edges in y/x, see SoftRegions) and optionally a ridge towards
+/// 0 (tau0). Nodes without data follow the penalties: a smooth continuation, linear in the
 /// direction without data and coherent between the neighbouring columns, e.g. through the innermost IROC rows, which the large radial
 /// distortion empties (trustFraction: those rows are no data). Replaces the Gaussian smoothing + per-column pol2 extrapolation of
 /// SmoothingExtrapolate.C. Defaults tuned on a PbPb 2025 map (568210, 22 kHz) by a leave-rows-out test (hide the first measured inner
@@ -81,6 +83,7 @@
 #include "CommonUtils/ConfigurableParam.h"
 #include "Framework/Logger.h"
 #include "SpacePoints/TrackResiduals.h"
+#include "TPCBase/Mapper.h"
 #include "TPCCalibration/TPCScaler.h"
 #if __has_include("TPCBaseRecSim/CDBTypes.h")
 #include "TPCBaseRecSim/CDBTypes.h"
@@ -1255,17 +1258,64 @@ std::vector<char> untrustedRows(const TrackResiduals& binning, const std::vector
   return untrusted;
 }
 
+/// local softening of the prior where the distortions are steep by construction (the GEM frames): every stencil touching a soft pad row
+/// (along the rows) or a soft y/x bin (along y/x) gets tau x factor. Soft rows: the first / last stackRows rows of each stack and the
+/// rows within spacerRows of a row below the spacer cross (Mapper::isBelowSpacerCross); soft y/x bins: those reaching within centrePads
+/// pads of the sector centre (the radial bar of the spacer cross) or within edgePads pads of the pad plane's edge
+struct SoftRegions {
+  double factor = 1.; ///< 1: off
+  int stackRows = 2;
+  int spacerRows = 1;
+  double centrePads = 2.;
+  double edgePads = 2.;
+};
+
+/// per pad row: soft along the rows; per row and y/x bin: soft along y/x (see SoftRegions)
+void softMasks(const TrackResiduals& binning, const SoftRegions& soft, std::vector<char>& softRow, std::vector<std::vector<char>>& softY2X)
+{
+  const int nBinsX = binning.getNXBins();
+  const int nBinsY2X = binning.getNY2XBins();
+  const auto& mapper = o2::tpc::Mapper::instance();
+  softRow.assign(nBinsX, 0);
+  softY2X.assign(nBinsX, std::vector<char>(nBinsY2X, 0));
+  for (int row = 0; row < nBinsX; ++row) {
+    const int stack = stackOfRow(row);
+    const int first = int(o2::tpc::Mapper::ROWOFFSETSTACK[stack]);
+    const int last = stack < 3 ? int(o2::tpc::Mapper::ROWOFFSETSTACK[stack + 1]) - 1 : nBinsX - 1;
+    softRow[row] = row - first < soft.stackRows || last - row < soft.stackRows;
+    for (int other = std::max(0, row - soft.spacerRows); other <= std::min(nBinsX - 1, row + soft.spacerRows); ++other) {
+      softRow[row] |= o2::tpc::Mapper::isBelowSpacerCross(other, -1);
+    }
+    const double padWidth = mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+    const double yEdge = 0.5 * mapper.getNumberOfPadsInRowSector(row) * padWidth;
+    const double x = binning.getX(row);
+    for (int bin = 0; bin < nBinsY2X; ++bin) {
+      const double halfWidth = 0.5 / binning.getDY2XI(row, bin);
+      const double low = x * (binning.getY2X(row, bin) - halfWidth);
+      const double high = x * (binning.getY2X(row, bin) + halfWidth);
+      softY2X[row][bin] = (low < soft.centrePads * padWidth && high > -soft.centrePads * padWidth) ||
+                          std::max(std::abs(low), std::abs(high)) > yEdge - soft.edgePads * padWidth;
+    }
+  }
+}
+
 /// the penalty's terms, the same in every sector (none across the stack boundaries). Per bin (curvature = false): the second difference
 /// with the prior rms tau[axis] (cm) per term. Curvature: the second derivative from the bin centres' positions in cm (x of the pad rows,
 /// y = y/x x, z = z/x x; unequal spacing allowed) weighted with the centre voxel's volume in cm^3, tau[axis] = the prior rms (cm / cm^2)
 /// of the curvature over 1 cm^3: the penalty ~ the integral of curvature^2 over the volume, the same prior for any binning and radius
-std::vector<Stencil> makeStencils(const TrackResiduals& binning, const std::array<double, 3>& tau, bool curvature)
+std::vector<Stencil> makeStencils(const TrackResiduals& binning, const std::array<double, 3>& tau, bool curvature, const SoftRegions& soft)
 {
   const int nBinsX = binning.getNXBins();
   const int nBinsY2X = binning.getNY2XBins();
   const int nBinsZ2X = binning.getNZ2XBins();
   const int bins[3] = {nBinsX, nBinsY2X, nBinsZ2X};
+  std::vector<char> softRow;
+  std::vector<std::vector<char>> softY2X;
+  if (soft.factor != 1.) {
+    softMasks(binning, soft, softRow, softY2X);
+  }
   std::vector<Stencil> stencils;
+  long nSoft = 0;
   for (int axis = 0; axis < 3; ++axis) {
     if (!(tau[axis] > 0.)) {
       continue;
@@ -1302,17 +1352,30 @@ std::vector<Stencil> makeStencils(const TrackResiduals& binning, const std::arra
             const double volume = (1. / binning.getDXI(centre[0])) * (x / binning.getDY2XI(centre[0], centre[1])) * (x / binning.getDZ2XI(centre[2]));
             stencil.lambda = lambda * volume;
           }
+          if (soft.factor != 1. && axis < 2) {
+            bool isSoft = false;
+            for (int k = 0; k < 3; ++k) {
+              isSoft |= axis == 0 ? softRow[binX + k] : softY2X[binX][binY2X + k];
+            }
+            if (isSoft) {
+              stencil.lambda /= soft.factor * soft.factor;
+              ++nSoft;
+            }
+          }
           stencils.push_back(stencil);
         }
       }
     }
+  }
+  if (soft.factor != 1.) {
+    LOGP(info, "Smoothing: {} of {} penalty terms softened (tau x {})", nSoft, stencils.size(), soft.factor);
   }
   return stencils;
 }
 
 /// the penalised fit per sector (see the file description); nodes: 3 per voxel of the grid (dX, dY, dZ); false if not finite
 bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxel>>& data, const std::array<double, 3>& tau, bool curvature,
-                 double tau0, int robust, int nThreads, std::vector<double>& nodes)
+                 double tau0, int robust, int nThreads, std::vector<double>& nodes, const SoftRegions& soft = SoftRegions())
 {
   const int nBinsX = binning.getNXBins();
   const int nBinsY2X = binning.getNY2XBins();
@@ -1321,7 +1384,7 @@ bool smoothNodes(const TrackResiduals& binning, std::vector<std::vector<DataVoxe
   const double ridge = tau0 > 0. ? 1. / (tau0 * tau0) : 0.;
 
   // the penalty's terms and their diagonal per node
-  const auto stencils = makeStencils(binning, tau, curvature);
+  const auto stencils = makeStencils(binning, tau, curvature, soft);
   std::vector<double> penaltyDiagonal(voxelsPerSector, 0.);
   for (const auto& stencil : stencils) {
     for (int k = 0; k < 3; ++k) {
@@ -1381,7 +1444,12 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     int robust = 0,            // Tukey reweighting cycles
                     int nThreads = 8,
                     bool curvaturePrior = true,  // the taus as the prior rms of the curvature over 1 cm^3 (um / cm^2): the same for any binning (makeStencils)
-                    std::string source = "auto") // "voxResTree", "fineSums" or "auto" (fineSums if present)
+                    std::string source = "auto", // "voxResTree", "fineSums" or "auto" (fineSums if present)
+                    float softFactor = 1.,       // tau x softFactor (1: off) for the penalty terms touching the GEM-frame regions (SoftRegions):
+                    int softStackRows = 2,       // ... the first / last rows of each stack,
+                    int softSpacerRows = 1,      // ... the rows within this of the rows below the spacer cross,
+                    float softCentrePads = 2.,   // ... the y/x bins within this many pads of the sector centre (the radial spacer bar),
+                    float softEdgePads = 2.)     // ... and of the pad plane's edge
 {
   using namespace voxel_smoother;
   std::unique_ptr<TFile> input(TFile::Open(inputFile.data()));
@@ -1659,9 +1727,10 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   }
   const std::string description = fmt::format(
     "penalised node fit (smoothVoxelMap.C): input {}, tau rows / y/x / z/x {} / {} / {} {}, tau0 {} um, trustFraction {} "
-    "({} untrusted inner IROC voxels), minEntries {}, errors {}, robust {}",
+    "({} untrusted inner IROC voxels), minEntries {}, errors {}, robust {}{}",
     source, tauRow, tauY2X, tauZ2X, curvaturePrior ? "um / cm^2 (curvature over 1 cm^3)" : "um (second difference per bin)", tau0, trustFraction, nUntrusted, minEntries,
-    useSums ? std::string("voxel solve") : (errorMode == 1 ? std::string("s / sqrt(entries)") : (errorMode == 2 ? std::string("from the fineSums voxel solve") : std::string("input"))), robust);
+    useSums ? std::string("voxel solve") : (errorMode == 1 ? std::string("s / sqrt(entries)") : (errorMode == 2 ? std::string("from the fineSums voxel solve") : std::string("input"))), robust,
+    softFactor != 1.f ? fmt::format(", soft x {} (stack rows {}, spacer rows +-{}, centre / edge pads {} / {})", softFactor, softStackRows, softSpacerRows, softCentrePads, softEdgePads) : std::string());
   LOGP(info, "{}: {} of {} voxels are data; {}", inputFile, nData, nVoxels, description);
 
   // the IDC join (staticMapCreatorCPM.C leaves meanIDC / medianIDC 0)
@@ -1676,7 +1745,13 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   }
 
   std::vector<double> nodes;
-  const bool finite = smoothNodes(*binning, data, {tauRow * Micron, tauY2X * Micron, tauZ2X * Micron}, curvaturePrior, tau0 * Micron, robust, nThreads, nodes);
+  SoftRegions soft;
+  soft.factor = softFactor;
+  soft.stackRows = softStackRows;
+  soft.spacerRows = softSpacerRows;
+  soft.centrePads = softCentrePads;
+  soft.edgePads = softEdgePads;
+  const bool finite = smoothNodes(*binning, data, {tauRow * Micron, tauY2X * Micron, tauZ2X * Micron}, curvaturePrior, tau0 * Micron, robust, nThreads, nodes, soft);
   if (!finite) {
     return;
   }
