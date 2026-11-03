@@ -452,12 +452,16 @@ class IDCDeltaCompressionHelper
     if (idcDeltaUncompressed.getIDCDelta().empty()) {
       return;
     }
-    idcCompressed.getIDCDelta().reserve(idcDeltaUncompressed.getIDCDelta().size());
     const auto minmaxIDC = std::minmax_element(std::begin(idcDeltaUncompressed.getIDCDelta()), std::end(idcDeltaUncompressed.getIDCDelta()));
-    const auto& paramIDCGroup = ParameterIDCCompression::Instance();
     const float minIDCDelta = std::clamp(*minmaxIDC.first, minValue, maxValue);
     const float maxIDCDelta = std::clamp(*minmaxIDC.second, minValue, maxValue);
     idcCompressed.setCompressionFactor(minIDCDelta, maxIDCDelta);
+    if (minIDCDelta == maxIDCDelta) {
+      // all values are identical (e.g. all values are 0 in case of missing data): avoid the division by zero in compressValue(). The decompressed value is minIDCDelta
+      idcCompressed.getIDCDelta().resize(idcDeltaUncompressed.getIDCDelta().size(), 0);
+      return;
+    }
+    idcCompressed.getIDCDelta().reserve(idcDeltaUncompressed.getIDCDelta().size());
     for (auto& idc : idcDeltaUncompressed.getIDCDelta()) {
       idcCompressed.emplace_back(idc);
     }
