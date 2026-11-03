@@ -51,7 +51,8 @@
 /// are data, the voxel's node and stat = the bin centre for the others, SmoothDone, entries at least 1 (TPCFastSpaceChargeCorrectionHelper
 /// takes voxels with entries as the map's points); D, E: the input's (voxResTree; with errorMode 1 the E used) or the voxel solve
 /// (fineSums). User info: the input voxResTree's (else the binning and nTracks of fineSums) + "smoothing"; the input's other trees
-/// (OrbitLumiInfo, MetaData) copied. joinIDC: meanIDC / medianIDC = mean / median of the TPC scalers (A + C) / 2 at the TFs of the
+/// (OrbitLumiInfo, MetaData) copied; the input's fineSums when read (source fineSums, errorMode 2) with one row per voxel (the rows of
+/// a voxel added per charge: e.g. the hadd of several runs' sums collapsed). joinIDC: meanIDC / medianIDC = mean / median of the TPC scalers (A + C) / 2 at the TFs of the
 /// input's OrbitLumiInfo (timeMSsel; CCDB TPC/Calib/Scaler and ScalerWeights, as SmoothingExtrapolate.C), -1: only if the input has no
 /// meanIDC > 0 (staticMapCreatorCPM.C leaves them 0), 1: always, 0: never.
 ///
@@ -1541,10 +1542,13 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
       }
     }
   }
-  // the fineSums per voxel, both charges added
+  // the fineSums per voxel, both charges added; per charge kept for the output's fineSums (one row per voxel: the rows of several runs,
+  // e.g. the hadd of a split stage 3's chunks, collapsed)
   std::vector<ChargeSums> sums;
+  std::vector<std::array<ChargeSums, 2>> chargeSums;
   auto readSums = [&]() {
     sums.assign(nVoxels, ChargeSums());
+    chargeSums.assign(nVoxels, {});
     int voxelIndex = 0;
     float entries[2] = {};
     float position[2][3] = {};
@@ -1561,15 +1565,16 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
         LOGP(error, "{}: fineSums voxel {} outside the grid", inputFile, voxelIndex);
         return false;
       }
-      auto& total = sums[voxelIndex];
       for (int charge = 0; charge < 2; ++charge) {
-        total.entries += entries[charge];
-        total.x += position[charge][0];
-        total.y2x += position[charge][1];
-        total.z2x += position[charge][2];
-        for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
-          total.y[sum] += channelY[charge][sum];
-          total.z[sum] += channelZ[charge][sum];
+        for (auto* total : {&sums[voxelIndex], &chargeSums[voxelIndex][charge]}) {
+          total->entries += entries[charge];
+          total->x += position[charge][0];
+          total->y2x += position[charge][1];
+          total->z2x += position[charge][2];
+          for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+            total->y[sum] += channelY[charge][sum];
+            total->z[sum] += channelZ[charge][sum];
+          }
         }
       }
     }
@@ -1843,6 +1848,41 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     }
   }
   tree.Write();
+  if (!chargeSums.empty()) {
+    TTree outputSums("fineSums", sumsTree->GetTitle());
+    for (auto* object : *sumsTree->GetUserInfo()) {
+      outputSums.GetUserInfo()->Add(object->Clone());
+    }
+    int voxelIndex = 0;
+    float entries[2] = {};
+    float position[2][3] = {};
+    float channelY[2][ChargeSums::NSums] = {};
+    float channelZ[2][ChargeSums::NSums] = {};
+    outputSums.Branch("voxel", &voxelIndex);
+    outputSums.Branch("entries", entries, "entries[2]/F");
+    outputSums.Branch("position", position, "position[2][3]/F");
+    outputSums.Branch("y", channelY, "y[2][6]/F");
+    outputSums.Branch("z", channelZ, "z[2][6]/F");
+    for (size_t voxel = 0; voxel < nVoxels; ++voxel) {
+      if (sums[voxel].entries <= 0.) {
+        continue;
+      }
+      voxelIndex = int(voxel);
+      for (int charge = 0; charge < 2; ++charge) {
+        const auto& total = chargeSums[voxel][charge];
+        entries[charge] = total.entries;
+        position[charge][0] = total.x;
+        position[charge][1] = total.y2x;
+        position[charge][2] = total.z2x;
+        for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+          channelY[charge][sum] = total.y[sum];
+          channelZ[charge][sum] = total.z[sum];
+        }
+      }
+      outputSums.Fill();
+    }
+    outputSums.Write();
+  }
   for (auto* key : *input->GetListOfKeys()) {
     auto* object = static_cast<TKey*>(key)->ReadObj();
     const std::string name = object->GetName();
