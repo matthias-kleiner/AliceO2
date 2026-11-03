@@ -1377,9 +1377,9 @@ class SpaceCharge
   /// calculate distortions/corrections by interpolation of local distortions/corrections
   void processGlobalDistCorr(const DataT radius, const DataT phi, const DataT z0Tmp, [[maybe_unused]] const DataT z1Tmp, DataT& ddR, DataT& ddPhi, DataT& ddZ, const DistCorrInterpolator<DataT>& localDistCorr) const
   {
-    ddR = localDistCorr.evaldR(z0Tmp, radius, phi);
-    ddZ = localDistCorr.evaldZ(z0Tmp, radius, phi);
-    ddPhi = localDistCorr.evaldRPhi(z0Tmp, radius, phi) / radius;
+    DataT ddRPhi;
+    localDistCorr.evalDistCorr(z0Tmp, radius, phi, ddZ, ddR, ddRPhi);
+    ddPhi = ddRPhi / radius;
   }
 
   /// dump the created electron tracks with calculateElectronDriftPath function to a tree

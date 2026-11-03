@@ -107,6 +107,20 @@ class AnalyticalFields
   /// \return returns the function value for electric field Ephi for given coordinate
   DataT evalFieldPhi(DataT z, DataT r, DataT phi) const { return mEphiFunc(z, r, phi); }
 
+  /// evaluate all three components of the electric field at the same coordinate
+  /// \param z z coordinate
+  /// \param r r coordinate
+  /// \param phi phi coordinate
+  /// \param eZ field in z direction (output)
+  /// \param eR field in r direction (output)
+  /// \param ePhi field in phi direction (output)
+  void evalFields(DataT z, DataT r, DataT phi, DataT& eZ, DataT& eR, DataT& ePhi) const
+  {
+    eZ = evalFieldZ(z, r, phi);
+    eR = evalFieldR(z, r, phi);
+    ePhi = evalFieldPhi(z, r, phi);
+  }
+
   /// \param r r coordinate
   /// \param phi phi coordinate
   /// \param z z coordinate
@@ -274,6 +288,15 @@ class NumericalFields
   /// \return returns the function value for electric field Ephi for given coordinate
   DataT evalFieldPhi(DataT z, DataT r, DataT phi) const { return mInterpolatorEphi(z, r, phi); }
 
+  /// evaluate all three components of the electric field at the same coordinate (the position in the grid and the weights of the interpolation are calculated only once)
+  /// \param z z coordinate
+  /// \param r r coordinate
+  /// \param phi phi coordinate
+  /// \param eZ field in z direction (output)
+  /// \param eR field in r direction (output)
+  /// \param ePhi field in phi direction (output)
+  void evalFields(DataT z, DataT r, DataT phi, DataT& eZ, DataT& eR, DataT& ePhi) const { mInterpolatorEz.interpolate(z, r, phi, mInterpolatorEr, mInterpolatorEphi, eZ, eR, ePhi); }
+
   o2::tpc::Side getSide() const { return mSide; }
 
   static constexpr unsigned int getID() { return ID; }
@@ -328,6 +351,21 @@ class BField
   {
     const double rphiz[]{r, phi, z};
     return getBPhi(rphiz);
+  }
+
+  /// evaluate all three components of the B field at the same coordinate
+  /// \param z z coordinate
+  /// \param r r coordinate
+  /// \param phi phi coordinate
+  /// \param bZ field in z direction (output)
+  /// \param bR field in r direction (output)
+  /// \param bPhi field in phi direction (output)
+  void evalFields(DataT z, DataT r, DataT phi, DataT& bZ, DataT& bR, DataT& bPhi) const
+  {
+    const double rphiz[]{r, phi, z};
+    bZ = getBZ(rphiz);
+    bR = getBR(rphiz);
+    bPhi = getBPhi(rphiz);
   }
 
   double getBR(const double rphiz[]) const { return (rphiz[2] >= 0) ? getBR_A(rphiz) : getBR_C(rphiz); }
@@ -407,6 +445,15 @@ class DistCorrInterpolator
   /// \param z z coordinate
   /// \return returns the function value for the local distortion or correction dRPhi for given coordinate
   DataT evaldRPhi(const DataT z, const DataT r, const DataT phi) const { return interpolatorDistCorrdRPhi(z, r, phi); }
+
+  /// evaluate the local distortions or corrections dZ, dR, dRPhi at the same coordinate (the position in the grid and the weights of the interpolation are calculated only once)
+  /// \param z z coordinate
+  /// \param r r coordinate
+  /// \param phi phi coordinate
+  /// \param dZ distortion or correction dZ (output)
+  /// \param dR distortion or correction dR (output)
+  /// \param dRPhi distortion or correction dRPhi (output)
+  void evalDistCorr(const DataT z, const DataT r, const DataT phi, DataT& dZ, DataT& dR, DataT& dRPhi) const { interpolatorDistCorrdZ.interpolate(z, r, phi, interpolatorDistCorrdR, interpolatorDistCorrdRPhi, dZ, dR, dRPhi); }
 
   o2::tpc::Side getSide() const { return mSide; }
 

@@ -132,5 +132,59 @@ BOOST_AUTO_TEST_CASE(TriCubic_vertices_test)
   }
 }
 
+BOOST_AUTO_TEST_CASE(TriCubic_threeComponents_test)
+{
+  // the combined interpolation of three data containers has to give the same results as three separate interpolations
+  const ParamSpaceCharge params{NR, NZ, NPHI};
+  const DataT rSpacing = o2::tpc::GridProperties<DataT>::getGridSpacingR(NR);
+  const DataT zSpacing = o2::tpc::GridProperties<DataT>::getGridSpacingZ(NZ);
+  const DataT phiSpacing = o2::tpc::GridProperties<DataT>::getGridSpacingPhi(NPHI);
+  const o2::tpc::RegularGrid3D<DataT> grid3D(GridProperties<DataT>::ZMIN, GridProperties<DataT>::RMIN, GridProperties<DataT>::PHIMIN, zSpacing, rSpacing, phiSpacing, params);
+  o2::tpc::DataContainer3D<DataT> dataR(NZ, NR, NPHI);
+  o2::tpc::DataContainer3D<DataT> dataZ(NZ, NR, NPHI);
+  o2::tpc::DataContainer3D<DataT> dataPhi(NZ, NR, NPHI);
+  o2::tpc::AnalyticalFields<DataT> field;
+  for (int iz = 0; iz < NZ; ++iz) {
+    for (int ir = 0; ir < NR; ++ir) {
+      for (int iphi = 0; iphi < NPHI; ++iphi) {
+        const DataT z = grid3D.getZVertex(iz);
+        const DataT r = grid3D.getRVertex(ir);
+        const DataT phi = grid3D.getPhiVertex(iphi);
+        dataR(iz, ir, iphi) = field.evalFieldR(z, r, phi);
+        dataZ(iz, ir, iphi) = field.evalFieldZ(z, r, phi);
+        dataPhi(iz, ir, iphi) = field.evalFieldPhi(z, r, phi);
+      }
+    }
+  }
+
+  for (const bool extrapolate : {true, false}) {
+    o2::tpc::TriCubicInterpolator<DataT> interpolatorR(dataR, grid3D);
+    o2::tpc::TriCubicInterpolator<DataT> interpolatorZ(dataZ, grid3D);
+    o2::tpc::TriCubicInterpolator<DataT> interpolatorPhi(dataPhi, grid3D);
+    interpolatorR.setExtrapolateValues(extrapolate);
+    interpolatorZ.setExtrapolateValues(extrapolate);
+    interpolatorPhi.setExtrapolateValues(extrapolate);
+
+    // query points inside and outside of the grid
+    const int nPoints = 40;
+    for (int iR = -2; iR < nPoints + 2; ++iR) {
+      const DataT r = GridProperties<DataT>::RMIN + iR * (GridProperties<DataT>::RMAX - GridProperties<DataT>::RMIN) / nPoints;
+      for (int iZ = -2; iZ < nPoints + 2; ++iZ) {
+        const DataT z = GridProperties<DataT>::ZMIN + iZ * (GridProperties<DataT>::ZMAX - GridProperties<DataT>::ZMIN) / nPoints;
+        for (int iPhi = -2; iPhi < nPoints + 2; ++iPhi) {
+          const DataT phi = iPhi * GridProperties<DataT>::PHIMAX / nPoints;
+          DataT valR = 0;
+          DataT valZ = 0;
+          DataT valPhi = 0;
+          interpolatorR.interpolate(z, r, phi, interpolatorZ, interpolatorPhi, valR, valZ, valPhi);
+          BOOST_CHECK_EQUAL(valR, interpolatorR(z, r, phi));
+          BOOST_CHECK_EQUAL(valZ, interpolatorZ(z, r, phi));
+          BOOST_CHECK_EQUAL(valPhi, interpolatorPhi(z, r, phi));
+        }
+      }
+    }
+  }
+}
+
 } // namespace tpc
 } // namespace o2

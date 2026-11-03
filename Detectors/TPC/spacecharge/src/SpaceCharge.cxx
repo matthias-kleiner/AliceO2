@@ -827,25 +827,34 @@ void SpaceCharge<DataT>::calcGlobalDistCorrIterative(const DistCorrInterpolator<
           }
 
           // interpolate global correction at new point and calculate position of global correction
-          corrdR = globCorr.evaldR(zCurrPos, rCurrPos, phiCurrPos);
+          DataT globCorrdZ, globCorrdR, globCorrdRPhi;
+          globCorr.evalDistCorr(zCurrPos, rCurrPos, phiCurrPos, globCorrdZ, globCorrdR, globCorrdRPhi);
+          DataT scaleCorrdZ = 0;
+          DataT scaleCorrdR = 0;
+          DataT scaleCorrdRPhi = 0;
           if (useScaling) {
-            corrdR += scale * scSCaleInterpolator->evaldR(zCurrPos, rCurrPos, phiCurrPos);
+            scSCaleInterpolator->evalDistCorr(zCurrPos, rCurrPos, phiCurrPos, scaleCorrdZ, scaleCorrdR, scaleCorrdRPhi);
+          }
+
+          corrdR = globCorrdR;
+          if (useScaling) {
+            corrdR += scale * scaleCorrdR;
           }
           const DataT rNewPos = rCurrPos + corrdR;
 
           DataT corrPhi = 0;
           if (useScaling) {
-            corrPhi = scale * scSCaleInterpolator->evaldRPhi(zCurrPos, rCurrPos, phiCurrPos);
+            corrPhi = scale * scaleCorrdRPhi;
           }
-          corrPhi += globCorr.evaldRPhi(zCurrPos, rCurrPos, phiCurrPos);
+          corrPhi += globCorrdRPhi;
           corrPhi /= rCurrPos;
 
           corrdRPhi = corrPhi * rNewPos; // normalize to new r coordinate
           const DataT phiNewPos = phiCurrPos + corrPhi;
 
-          corrdZ = globCorr.evaldZ(zCurrPos, rCurrPos, phiCurrPos);
+          corrdZ = globCorrdZ;
           if (useScaling) {
-            corrdZ += scale * scSCaleInterpolator->evaldZ(zCurrPos, rCurrPos, phiCurrPos);
+            corrdZ += scale * scaleCorrdZ;
           }
           const DataT zNewPos = zCurrPos + corrdZ;
 
@@ -1876,17 +1885,13 @@ std::vector<float> SpaceCharge<DataT>::getPotentialCyl(const std::vector<DataT>&
 template <typename DataT>
 void SpaceCharge<DataT>::getElectricFieldsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& eZ, DataT& eR, DataT& ePhi) const
 {
-  eZ = mInterpolatorEField[side].evalFieldZ(z, r, phi);
-  eR = mInterpolatorEField[side].evalFieldR(z, r, phi);
-  ePhi = mInterpolatorEField[side].evalFieldPhi(z, r, phi);
+  mInterpolatorEField[side].evalFields(z, r, phi, eZ, eR, ePhi);
 }
 
 template <typename DataT>
 void SpaceCharge<DataT>::getLocalCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& lcorrZ, DataT& lcorrR, DataT& lcorrRPhi) const
 {
-  lcorrZ = mInterpolatorLocalCorr[side].evaldZ(z, r, phi);
-  lcorrR = mInterpolatorLocalCorr[side].evaldR(z, r, phi);
-  lcorrRPhi = mInterpolatorLocalCorr[side].evaldRPhi(z, r, phi);
+  mInterpolatorLocalCorr[side].evalDistCorr(z, r, phi, lcorrZ, lcorrR, lcorrRPhi);
 }
 
 template <typename DataT>
@@ -1905,9 +1910,7 @@ void SpaceCharge<DataT>::getLocalCorrectionsCyl(const std::vector<DataT>& z, con
 template <typename DataT>
 void SpaceCharge<DataT>::getCorrectionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& corrZ, DataT& corrR, DataT& corrRPhi) const
 {
-  corrZ = mInterpolatorGlobalCorr[side].evaldZ(z, r, phi);
-  corrR = mInterpolatorGlobalCorr[side].evaldR(z, r, phi);
-  corrRPhi = mInterpolatorGlobalCorr[side].evaldRPhi(z, r, phi);
+  mInterpolatorGlobalCorr[side].evalDistCorr(z, r, phi, corrZ, corrR, corrRPhi);
 }
 
 template <typename DataT>
@@ -1950,9 +1953,7 @@ void SpaceCharge<DataT>::getCorrections(const DataT x, const DataT y, const Data
 template <typename DataT>
 void SpaceCharge<DataT>::getLocalDistortionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& ldistZ, DataT& ldistR, DataT& ldistRPhi) const
 {
-  ldistZ = mInterpolatorLocalDist[side].evaldZ(z, r, phi);
-  ldistR = mInterpolatorLocalDist[side].evaldR(z, r, phi);
-  ldistRPhi = mInterpolatorLocalDist[side].evaldRPhi(z, r, phi);
+  mInterpolatorLocalDist[side].evalDistCorr(z, r, phi, ldistZ, ldistR, ldistRPhi);
 }
 
 template <typename DataT>
@@ -1971,9 +1972,7 @@ void SpaceCharge<DataT>::getLocalDistortionsCyl(const std::vector<DataT>& z, con
 template <typename DataT>
 void SpaceCharge<DataT>::getLocalDistortionVectorCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& lvecdistZ, DataT& lvecdistR, DataT& lvecdistRPhi) const
 {
-  lvecdistZ = mInterpolatorLocalVecDist[side].evaldZ(z, r, phi);
-  lvecdistR = mInterpolatorLocalVecDist[side].evaldR(z, r, phi);
-  lvecdistRPhi = mInterpolatorLocalVecDist[side].evaldRPhi(z, r, phi);
+  mInterpolatorLocalVecDist[side].evalDistCorr(z, r, phi, lvecdistZ, lvecdistR, lvecdistRPhi);
 }
 
 template <typename DataT>
@@ -1992,9 +1991,10 @@ void SpaceCharge<DataT>::getLocalDistortionVectorCyl(const std::vector<DataT>& z
 template <typename DataT>
 void SpaceCharge<DataT>::getLocalCorrectionVectorCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& lveccorrZ, DataT& lveccorrR, DataT& lveccorrRPhi) const
 {
-  lveccorrZ = -mInterpolatorLocalVecDist[side].evaldZ(z, r, phi);
-  lveccorrR = -mInterpolatorLocalVecDist[side].evaldR(z, r, phi);
-  lveccorrRPhi = -mInterpolatorLocalVecDist[side].evaldRPhi(z, r, phi);
+  mInterpolatorLocalVecDist[side].evalDistCorr(z, r, phi, lveccorrZ, lveccorrR, lveccorrRPhi);
+  lveccorrZ = -lveccorrZ;
+  lveccorrR = -lveccorrR;
+  lveccorrRPhi = -lveccorrRPhi;
 }
 
 template <typename DataT>
@@ -2013,9 +2013,7 @@ void SpaceCharge<DataT>::getLocalCorrectionVectorCyl(const std::vector<DataT>& z
 template <typename DataT>
 void SpaceCharge<DataT>::getDistortionsCyl(const DataT z, const DataT r, const DataT phi, const Side side, DataT& distZ, DataT& distR, DataT& distRPhi) const
 {
-  distZ = mInterpolatorGlobalDist[side].evaldZ(z, r, phi);
-  distR = mInterpolatorGlobalDist[side].evaldR(z, r, phi);
-  distRPhi = mInterpolatorGlobalDist[side].evaldRPhi(z, r, phi);
+  mInterpolatorGlobalDist[side].evalDistCorr(z, r, phi, distZ, distR, distRPhi);
 }
 
 template <typename DataT>
@@ -2157,13 +2155,11 @@ template <typename Fields>
 void SpaceCharge<DataT>::integrateEFieldsTrapezoidal(const DataT p1r, const DataT p1phi, const DataT p1z, const DataT p2z, DataT& localIntErOverEz, DataT& localIntEPhiOverEz, DataT& localIntDeltaEz, const Fields& formulaStruct, const DataT ezField, const Side side) const
 {
   //========trapezoidal rule see: https://en.wikipedia.org/wiki/Trapezoidal_rule ==============
-  const DataT fielder0 = formulaStruct.evalFieldR(p1z, p1r, p1phi);
-  const DataT fieldez0 = formulaStruct.evalFieldZ(p1z, p1r, p1phi);
-  const DataT fieldephi0 = formulaStruct.evalFieldPhi(p1z, p1r, p1phi);
+  DataT fieldez0, fielder0, fieldephi0;
+  formulaStruct.evalFields(p1z, p1r, p1phi, fieldez0, fielder0, fieldephi0);
 
-  const DataT fielder1 = formulaStruct.evalFieldR(p2z, p1r, p1phi);
-  const DataT fieldez1 = formulaStruct.evalFieldZ(p2z, p1r, p1phi);
-  const DataT fieldephi1 = formulaStruct.evalFieldPhi(p2z, p1r, p1phi);
+  DataT fieldez1, fielder1, fieldephi1;
+  formulaStruct.evalFields(p2z, p1r, p1phi, fieldez1, fielder1, fieldephi1);
 
   const DataT eZ0 = isCloseToZero(ezField, fieldez0) ? 0 : 1. / (ezField + fieldez0);
   const DataT eZ1 = isCloseToZero(ezField, fieldez1) ? 0 : 1. / (ezField + fieldez1);
@@ -2179,20 +2175,19 @@ template <typename Fields>
 void SpaceCharge<DataT>::integrateEFieldsSimpson(const DataT p1r, const DataT p1phi, const DataT p1z, const DataT p2z, DataT& localIntErOverEz, DataT& localIntEPhiOverEz, DataT& localIntDeltaEz, const Fields& formulaStruct, const DataT ezField, const Side side) const
 {
   //==========simpsons rule see: https://en.wikipedia.org/wiki/Simpson%27s_rule =============================
-  const DataT fielder0 = formulaStruct.evalFieldR(p1z, p1r, p1phi);
-  const DataT fieldez0 = formulaStruct.evalFieldZ(p1z, p1r, p1phi);
-  const DataT fieldephi0 = formulaStruct.evalFieldPhi(p1z, p1r, p1phi);
+  DataT fieldez0, fielder0, fieldephi0;
+  formulaStruct.evalFields(p1z, p1r, p1phi, fieldez0, fielder0, fieldephi0);
 
-  const DataT fielder1 = formulaStruct.evalFieldR(p2z, p1r, p1phi);
-  const DataT fieldez1 = formulaStruct.evalFieldZ(p2z, p1r, p1phi);
-  const DataT fieldephi1 = formulaStruct.evalFieldPhi(p2z, p1r, p1phi);
+  DataT fieldez1, fielder1, fieldephi1;
+  formulaStruct.evalFields(p2z, p1r, p1phi, fieldez1, fielder1, fieldephi1);
 
   const DataT deltaX = p2z - p1z;
   const DataT xk2N = (p2z - static_cast<DataT>(0.5) * deltaX);
-  const DataT ezField2 = formulaStruct.evalFieldZ(xk2N, p1r, p1phi);
+  DataT ezField2, erField2, ephiField2;
+  formulaStruct.evalFields(xk2N, p1r, p1phi, ezField2, erField2, ephiField2);
   const DataT ezField2Denominator = isCloseToZero(ezField, ezField2) ? 0 : 1. / (ezField + ezField2);
-  const DataT fieldSum2ErOverEz = formulaStruct.evalFieldR(xk2N, p1r, p1phi) * ezField2Denominator;
-  const DataT fieldSum2EphiOverEz = formulaStruct.evalFieldPhi(xk2N, p1r, p1phi) * ezField2Denominator;
+  const DataT fieldSum2ErOverEz = erField2 * ezField2Denominator;
+  const DataT fieldSum2EphiOverEz = ephiField2 * ezField2Denominator;
 
   const DataT eZ0 = isCloseToZero(ezField, fieldez0) ? 0 : 1. / (ezField + fieldez0);
   const DataT eZ1 = isCloseToZero(ezField, fieldez1) ? 0 : 1. / (ezField + fieldez1);
@@ -2212,13 +2207,11 @@ void SpaceCharge<DataT>::integrateEFieldsSimpsonIterative(const DataT p1r, const
   // const DataT ezField = getEzField(side);
   const DataT p2phiSave = regulatePhi(p2phi, side);
 
-  const DataT fielder0 = formulaStruct.evalFieldR(p1z, p1r, p1phi);
-  const DataT fieldez0 = formulaStruct.evalFieldZ(p1z, p1r, p1phi);
-  const DataT fieldephi0 = formulaStruct.evalFieldPhi(p1z, p1r, p1phi);
+  DataT fieldez0, fielder0, fieldephi0;
+  formulaStruct.evalFields(p1z, p1r, p1phi, fieldez0, fielder0, fieldephi0);
 
-  const DataT fielder1 = formulaStruct.evalFieldR(p2z, p2r, p2phiSave);
-  const DataT fieldez1 = formulaStruct.evalFieldZ(p2z, p2r, p2phiSave);
-  const DataT fieldephi1 = formulaStruct.evalFieldPhi(p2z, p2r, p2phiSave);
+  DataT fieldez1, fielder1, fieldephi1;
+  formulaStruct.evalFields(p2z, p2r, p2phiSave, fieldez1, fielder1, fieldephi1);
 
   const DataT eZ0Inv = isCloseToZero(ezField, fieldez0) ? 0 : 1. / (ezField + fieldez0);
   const DataT eZ1Inv = isCloseToZero(ezField, fieldez1) ? 0 : 1. / (ezField + fieldez1);
@@ -2227,10 +2220,9 @@ void SpaceCharge<DataT>::integrateEFieldsSimpsonIterative(const DataT p1r, const
   const DataT pHalfPhiSave = regulatePhi(0.5 * (p1phi + p2phi), side); // needs to be regulated since p2phi is not regulated
   const DataT pHalfR = 0.5 * (p1r + p2r);
 
-  const DataT ezField2 = formulaStruct.evalFieldZ(pHalfZ, pHalfR, pHalfPhiSave);
+  DataT ezField2, fieldSum2ErOverEz, fieldSum2EphiOverEz;
+  formulaStruct.evalFields(pHalfZ, pHalfR, pHalfPhiSave, ezField2, fieldSum2ErOverEz, fieldSum2EphiOverEz);
   const DataT eZHalfInv = (isCloseToZero(ezField, ezField2) | isCloseToZero(ezField, fieldez0) | isCloseToZero(ezField, fieldez1)) ? 0 : 1. / (ezField + ezField2);
-  const DataT fieldSum2ErOverEz = formulaStruct.evalFieldR(pHalfZ, pHalfR, pHalfPhiSave);
-  const DataT fieldSum2EphiOverEz = formulaStruct.evalFieldPhi(pHalfZ, pHalfR, pHalfPhiSave);
 
   const DataT deltaXSimpsonSixth = (p2z - p1z) / 6;
   localIntErOverEz = deltaXSimpsonSixth * (4 * fieldSum2ErOverEz * eZHalfInv + fielder0 * eZ0Inv + fielder1 * eZ1Inv);

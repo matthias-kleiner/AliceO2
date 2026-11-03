@@ -42,6 +42,22 @@ class DataContainer3D;
 template <typename DataT, size_t N>
 class Vector;
 
+/// cell of the grid which is used for the tricubic interpolation of a query point and the weights of the interpolation (independent of the interpolated data)
+template <typename DataT>
+struct TriCubicCell {
+  int indexZ{};          ///< index of the cell in z
+  int indexR{};          ///< index of the cell in r
+  int indexPhi{};        ///< index of the cell in phi
+  int location{};        ///< position of the cell in the grid (TriCubicInterpolator::GridPos)
+  bool inGrid{};         ///< all 64 points used for the interpolation are on the grid (no extrapolation needed)
+  int dataIndex{};       ///< inGrid: index of the data at (iz - 1, ir - 1, iphi)
+  int sliceOffset[4]{};  ///< inGrid: offsets of the data for the 4 phi slices
+  int rowStride{};       ///< inGrid: offset of the data between the rows in r direction
+  DataT weightsZ[4]{};   ///< weights of the interpolation in z
+  DataT weightsR[4]{};   ///< weights of the interpolation in r
+  DataT weightsPhi[4]{}; ///< weights of the interpolation in phi
+};
+
 /// \tparam DataT the type of data which is used during the calculations
 template <typename DataT = double>
 class TriCubicInterpolator
@@ -73,6 +89,19 @@ class TriCubicInterpolator
   /// \param type interpolation algorithm
   /// \return returns the interpolated value at given coordinate
   DataT operator()(const DataT z, const DataT r, const DataT phi) const { return interpolateSparse(z, r, phi); }
+
+  /// interpolate the data of this and of two other interpolators at the same coordinate (e.g. the three components of a vector field).
+  /// The position in the grid and the weights of the interpolation are calculated only once, which is faster than three separate interpolations.
+  /// The other interpolators have to use the same grid. The extrapolation settings of this interpolator are used for all three.
+  /// \param z z coordinate
+  /// \param r r coordinate
+  /// \param phi phi coordinate
+  /// \param other1 second interpolator
+  /// \param other2 third interpolator
+  /// \param val0 interpolated value of this interpolator (output)
+  /// \param val1 interpolated value of other1 (output)
+  /// \param val2 interpolated value of other2 (output)
+  void interpolate(const DataT z, const DataT r, const DataT phi, const TriCubicInterpolator<DataT>& other1, const TriCubicInterpolator<DataT>& other2, DataT& val0, DataT& val1, DataT& val2) const;
 
   /// set which type of extrapolation is used at the grid boundaries (linear or parabol can be used with periodic phi axis and non periodic z and r axis).
   /// \param extrapolationType sets type of extrapolation. See enum ExtrapolationType for different types
@@ -149,10 +178,17 @@ class TriCubicInterpolator
     SideZLeft = 25
   };
 
+  /// \return returns the cell and the weights of the interpolation for given coordinate
+  TriCubicCell<DataT> getCell(const DataT z, const DataT r, const DataT phi) const;
+
+  /// \return returns the interpolated value of the data for given cell (the data has to be defined on the grid of this interpolator)
+  DataT interpolateData(const DataContainer& data, const TriCubicCell<DataT>& cell) const;
+
   /// set the 64 values (4 x 4 x 4) used for the interpolation in the cell with given indices. Missing values outside of the grid are extrapolated
+  /// \param data data which is interpolated
   /// \param location position of the cell in the grid (see findPos())
   /// \param cVals values of the points: cVals[4 * iphi + ir][iz] with iphi, ir, iz the relative index (-1, 0, 1, 2) + 1 to the cell
-  void setValues(const int iz, const int ir, const int iphi, const GridPos location, DataT (&cVals)[16][4]) const;
+  void setValues(const DataContainer& data, const int iz, const int ir, const int iphi, const GridPos location, DataT (&cVals)[16][4]) const;
 
   // interpolate value at given coordinate - this method doesnt compute and stores the coefficients and is faster when quering only a few values per cube
   /// \param z z coordinate
