@@ -62,6 +62,10 @@ class TPCFourierTransformAggregatorSpec : public o2::framework::Task
     mDumpFFT = ic.options().get<bool>("dump-coefficients-agg");
     mIntervalsSACs = ic.options().get<int>("intervalsSACs");
     mLengthIDCScalerSeconds = ic.options().get<float>("tpcScalerLengthS");
+    mMaxDelayIDCs = ic.options().get<int>("tpcScalerMaxDelay");
+    if (mMaxDelayIDCs <= 0) {
+      mMaxDelayIDCs = mInputLanes + 1;
+    }
     mDisableScaler = ic.options().get<bool>("disable-scaler");
     mEnableFFTCCDB = ic.options().get<bool>("enable-fft-CCDB");
     int nthreads = ic.options().get<int>("nthreads");
@@ -116,7 +120,10 @@ class TPCFourierTransformAggregatorSpec : public o2::framework::Task
     }
 
     // buffer IDCs for TPC scaler
-    if (!mProcessSACs && !mDisableScaler) {
+    if (!mProcessSACs && !mDisableScaler && (mCCDBBuffer[lane].back() <= mIDCSCalerEndTSLast)) {
+      // e.g. IDCs which were considered as lost, as they were received too late
+      LOGP(warning, "Received IDCs from {} to {}, which are already covered by the written TPC scalers (until {}). Not using the IDCs for the TPC scalers", mCCDBBuffer[lane].front(), mCCDBBuffer[lane].back(), mIDCSCalerEndTSLast);
+    } else if (!mProcessSACs && !mDisableScaler) {
       const long startTS = mCCDBBuffer[lane].front();
       TPCScalerProc& scaler = mTPCScalerCont.idcs[startTS];
       scaler.timestamp[0] = startTS;
@@ -238,6 +245,7 @@ class TPCFourierTransformAggregatorSpec : public o2::framework::Task
   int mExpectedInputLane{0};                                       ///< expeceted data from this input lane
   TPCScalerProcContainer mTPCScalerCont;                           ///< container for buffering the IDCs for the creation of the TPC scalers
   float mLengthIDCScalerSeconds = 300;                             ///< length of the IDC scaler in seconds
+  int mMaxDelayIDCs{1};                                            ///< maximum number of IDCs which can be received after a gap before the missing IDCs are considered as lost
   long mIDCSCalerEndTSLast = 0;                                    ///< end time stamp of last TPC IDC scaler object to ensure no gapps
   o2::tpc::TPCScaler mScalerLast;                                  ///< buffer last scaler to easily add internal overlap for the beginning
   bool mDisableScaler{false};                                      ///< disable the creation of TPC IDC scalers
@@ -289,11 +297,13 @@ class TPCFourierTransformAggregatorSpec : public o2::framework::Task
       const auto deltaTime = times[i].first - times[i - 1].second;
       // check if IDCs are contigous
       if (deltaTime > (timesDuration / checkGapp)) {
-        // check if the gap is very large - in this case the gapp might be lost, so just write out the TPC scaler until the gap
-        if (deltaTime > (checkGapp * timesDuration)) {
+        // check if the gap is very large or if more IDCs were received after the gap than expected from the maximum delay of the IDCs (e.g. due to the parallel processing in the factorize lanes)
+        // in this case the missing IDCs are probably lost, so just write out the TPC scaler until the gap
+        const int nIDCsAfterGap = times.size() - i;
+        if ((deltaTime > (checkGapp * timesDuration)) || (nIDCsAfterGap > mMaxDelayIDCs)) {
           lastValidIdx = i - 1;
         }
-        LOGP(info, "Breaking as big gap between IDCs of {} detected", deltaTime);
+        LOGP(info, "Breaking as gap between IDCs of {} detected ({} IDCs received after the gap)", deltaTime, nIDCsAfterGap);
         break;
       }
 
@@ -452,6 +462,7 @@ DataProcessorSpec getTPCFourierTransformAggregatorSpec(const unsigned int rangeI
     Options{{"intervalsSACs", VariantType::Int, 11, {"Number of integration intervals which will be sampled for the fourier coefficients"}},
             {"dump-coefficients-agg", VariantType::Bool, false, {"Dump fourier coefficients to file"}},
             {"tpcScalerLengthS", VariantType::Float, 300.f, {"Length of the TPC scalers in seconds"}},
+            {"tpcScalerMaxDelay", VariantType::Int, 0, {"Maximum number of IDC objects (aggregation intervals) which can be received after missing IDCs before the missing IDCs are considered as lost and the TPC scalers are written until the gap (<=0: number of input lanes + 1)"}},
             {"disable-scaler", VariantType::Bool, false, {"Disable creation of IDC scaler"}},
             {"enable-fft-CCDB", VariantType::Bool, false, {"Enable writing of FFT coefficients to CCDB"}},
             {"nthreads", VariantType::Int, 1, {"Number of threads which will be used during the calculation of the fourier coefficients."}}}};
