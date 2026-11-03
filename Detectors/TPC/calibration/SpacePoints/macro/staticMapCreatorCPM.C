@@ -566,14 +566,17 @@ std::vector<std::string> getInputFileList(const std::string& fileInput)
   return fileListVerified;
 }
 
-bool revalidateTrack(const TrackData& trk, const SpacePointsCalibConfParam& params)
+/// maxTrackTgl > 0: tracks with |tgl| above it are rejected; <= 0: no tgl cut (clusters outside the map's z/x range are dropped per
+/// cluster anyway). A cut at the map's own z/x edge biases the outermost z/x bins: through the vertex spread and the distortions their
+/// clusters come from tracks on both sides of it (568041: last bin of maxZ2X 1.4 dX -1.6 mm vs the map without the cut)
+bool revalidateTrack(const TrackData& trk, const SpacePointsCalibConfParam& params, float maxTrackTgl)
 {
 
   if (hasPositiveFilterFlag(trk)) {
     return false;
   }
 
-  if (fabs(trk.par.getTgl()) > params.maxZ2X) {
+  if (maxTrackTgl > 0.f && fabs(trk.par.getTgl()) > maxTrackTgl) {
     return false;
   }
   if (trk.nClsITS < params.minITSNCls) {
@@ -856,6 +859,7 @@ void doFileProcessing(const int iThread,
                       const float maxdEdxExp,
                       const float maxDevdEdxOverExp,
                       const float skipEdgePads,
+                      const float maxTrackTgl,
                       std::vector<long int>& nEdgeClustersSkipped_thread,
                       std::vector<long int>& nTracksSkippedByBadRangeList_thread,
                       std::vector<long int>& nTFs_thread,
@@ -1580,7 +1584,7 @@ void doFileProcessing(const int iThread,
           return;
         }
         const auto& trk = pkg->trackDataVec[iTrack];
-        if (!revalidateTrack(trk, params_thread)) {
+        if (!revalidateTrack(trk, params_thread, maxTrackTgl)) {
           return;
         }
 
@@ -2005,7 +2009,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                          float maxDevdEdxOverExp = -1,          // maximum deviation of dE/dx / expected value, above the track is rejected
                          bool skipEdgePads = 1,                 // skip edge pads in the calibration, by default on
                          std::string badRangeSelection = "ALL", // use bad time ranges only for specific comment e.g. C1
-                         float maxZ2XCut = 1.f,                 // overrides scdcalib.maxZ2X (the track tgl cut applied in revalidateTrack).
+                         float maxZ2XCut = 1.f,                 // overrides scdcalib.maxZ2X: the z/x range of the map (binning).
                                                                 // Defaults to the SpacePointsCalibConfParam compiled-in value of 1.0
                          int maxTrackWorkers = -1,              // number of threads used for the track loop within one file. <=0 (default)
                                                                 // auto-detects via hardware_concurrency(), which reports the machine's core
@@ -2016,8 +2020,10 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                                                                 // not thread-safe (see below)
                          int voxelMethod = 0,                   // voxResTree from 0: CPM, 1: the residual slope method (D with the errors E,
                                                                 // EXYCorr, at the voxel's mean position; see ChargeSums)
-                         bool writeSlopeSums = false)           // also write the residual slope method's per-voxel sums (tree fineSums, the
+                         bool writeSlopeSums = false,           // also write the residual slope method's per-voxel sums (tree fineSums, the
                                                                 // layout of fineMapCreatorGBL.C); either option costs ~260 B per voxel
+                         float maxTrackTgl = -1.f)              // |tgl| cut of the tracks; <= 0 (default): none (see revalidateTrack). Before,
+                                                                // the tracks were cut at maxZ2XCut (= maxTrackTgl = maxZ2XCut)
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2249,6 +2255,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   const bool useSlopeSums = voxelMethod == 1 || writeSlopeSums;
   std::vector<std::array<ChargeSums, 2>> slopeSums(useSlopeSums ? voxels.size() : 0);
   LOGP(info, "voxResTree from the {}{}", voxelMethod == 1 ? "residual slope method" : "CPM", writeSlopeSums ? ", residual slope sums written (fineSums)" : "");
+  LOGP(info, "Track |tgl| cut: {}", maxTrackTgl > 0.f ? std::to_string(maxTrackTgl) : std::string("none"));
 
   // The per-file input handles (TFile, TTreeReaders, TTreeReaderValues) and the I/O-rate sampling state
   // are plain locals inside doFileProcessing: each thread only ever used its own slot, so they never
@@ -2281,6 +2288,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              maxdEdxExp,
                              maxDevdEdxOverExp,
                              skipEdgePads,
+                             maxTrackTgl,
                              std::ref(nEdgeClustersSkipped_thread),
                              std::ref(nTracksSkippedByBadRangeList_thread),
                              std::ref(nTFs_thread),
@@ -2474,6 +2482,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   // the one this tree's voxels were actually filled with. Stored here so stage 2 can apply the exact
   // same value it was built with, not a separately-configured guess.
   userInfo->Add(new TNamed("maxZ2X", std::to_string(maxZ2XCut).data()));
+  userInfo->Add(new TNamed("maxTrackTgl", std::to_string(maxTrackTgl).data()));
   userInfo->Add(new TNamed("nSlicesPhiZ", std::to_string(nSlices)));
   userInfo->Add(new TNamed("maxTracks", std::to_string(maxTracks)));
   userInfo->Add(new TNamed("minTracks", std::to_string(minTracks)));
