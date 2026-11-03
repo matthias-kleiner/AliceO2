@@ -18,6 +18,8 @@
 #ifndef ALICEO2_TPC_VECTOR3D_H_
 #define ALICEO2_TPC_VECTOR3D_H_
 
+#include <vector>
+
 namespace o2
 {
 namespace tpc
@@ -30,11 +32,11 @@ template <typename DataT = double>
 class Vector3D
 {
  public:
-  /// Constructor for a tricubic interpolator
-  /// \param nr number of data points in r directions
-  /// \param nz number of data points in r directions
-  /// \param nphi number of data points in r directions
-  Vector3D(const unsigned int nr, const unsigned int nz, const unsigned int nphi) : mNr{nr}, mNz{nz}, mNphi{nphi}, mStorage{nr * nz * nphi} {};
+  /// constructor
+  /// \param nr number of data points in r direction
+  /// \param nz number of data points in z direction
+  /// \param nphi number of data points in phi direction
+  Vector3D(const unsigned int nr, const unsigned int nz, const unsigned int nphi) : mNr{nr}, mNz{nz}, mNphi{nphi}, mStorage(nr * nz * nphi){};
 
   /// default constructor
   Vector3D() = default;
@@ -72,9 +74,9 @@ class Vector3D
   }
 
   /// resize the vector
-  /// \param nr number of data points in r directions
-  /// \param nz number of data points in r directions
-  /// \param nphi number of data points in r directions
+  /// \param nr number of data points in r direction
+  /// \param nz number of data points in z direction
+  /// \param nphi number of data points in phi direction
   void resize(const unsigned int nr, const unsigned int nz, const unsigned int nphi)
   {
     mNr = nr;

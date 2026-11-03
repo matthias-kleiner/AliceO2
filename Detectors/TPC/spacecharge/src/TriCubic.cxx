@@ -16,7 +16,7 @@
 
 #include "TPCSpaceCharge/TriCubic.h"
 #include "TPCSpaceCharge/DataContainer3D.h"
-#include "TPCSpaceCharge/Vector.h"
+#include <Vc/Vc>
 #include <algorithm>
 #include <type_traits>
 

@@ -19,10 +19,6 @@
 
 #include "TPCSpaceCharge/RegularGrid3D.h"
 
-// forward declare VC Memory
-template <typename DataT, size_t, size_t, bool>
-class Memory;
-
 namespace o2
 {
 namespace tpc
