@@ -872,21 +872,16 @@ std::vector<unsigned int> o2::tpc::IDCFactorization::getAllIntegrationIntervalsP
       }
 
       if (intervalsInTF == -1) {
-        if ((ordering.size() != nTFs)) {
-          if (iTF == 0) {
-            intervalsInTF = ordering.front();
-          } else if (iTF == 1) {
-            intervalsInTF = ordering[1];
-          }
+        // no data received for this TF: get the number of integration intervals from the ordering of the previous (iter=0) or next (iter=1) TFs
+        // the neighbouring TFs can only be checked if they exist (e.g. if no three consecutive TFs with data were found, firstTF=0 and the TFs at the beginning might be empty)
+        const int m1Val = (iter == 0) ? -1 : +1;
+        const int iTFm1 = iTF + m1Val;
+        const int iTFm2 = iTF + 2 * m1Val;
+        const bool checkNeighbours = (nTFs == nMaxTFs) && (iTFm2 >= 0) && (iTFm2 < static_cast<int>(mTimeFrames));
+        if (checkNeighbours && (integrationIntervalsPerTF[iTFm1] == ordering[1]) && (integrationIntervalsPerTF[iTFm2] == ordering[2])) {
+          intervalsInTF = ordering[0];
         } else {
-          const int m1Val = (iter == 0) ? -1 : +1;
-          const int intervalsLastm1 = integrationIntervalsPerTF[iTF + m1Val];
-          const int intervalsLastm2 = integrationIntervalsPerTF[iTF + 2 * m1Val];
-          if ((intervalsLastm1 == ordering[1]) && (intervalsLastm2 == ordering[2])) {
-            intervalsInTF = ordering[0];
-          } else {
-            intervalsInTF = ordering[1];
-          }
+          intervalsInTF = ordering[std::min(1, nTFs - 1)];
         }
       }
 
@@ -932,7 +927,7 @@ void o2::tpc::IDCFactorization::factorizeIDCs(const bool norm, const bool calcDe
   mIntegrationIntervalsPerTF = getAllIntegrationIntervalsPerTF();
   stop = timer::now();
   time = stop - start;
-  totalTime = time.count();
+  totalTime += time.count();
   LOGP(info, "Getting integration intervals for all TFs time: {}", time.count());
 
   LOGP(info, "Calculating IDC1");
