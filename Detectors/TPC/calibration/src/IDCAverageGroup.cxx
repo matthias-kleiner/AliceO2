@@ -122,22 +122,24 @@ void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupCRU>::processIDCs(const Ca
 template <>
 void o2::tpc::IDCAverageGroup<o2::tpc::IDCAverageGroupTPC>::processIDCs(const CalDet<PadFlags>* padStatusFlags)
 {
-  std::vector<IDCAverageGroupHelper<IDCAverageGroupTPC>> idcStruct(sNThreads, IDCAverageGroupHelper<IDCAverageGroupTPC>{this->mIDCsGrouped, this->mWeightsPad, this->mWeightsRow, this->mIDCsUngrouped, this->mRobustAverage, this->mIDCGroupHelperSector});
-  for (int thread = 0; thread < sNThreads; ++thread) {
-    idcStruct[thread].setThreadNum(thread);
-  }
-
   const int cruStart = (mSide == Side::A) ? 0 : CRU::MaxCRU / 2;
   const int cruEnd = (mSide == Side::A) ? CRU::MaxCRU / 2 : CRU::MaxCRU;
+  const unsigned int nIntegrationIntervals = this->getNIntegrationIntervals();
 
-#pragma omp parallel for num_threads(sNThreads)
-  for (unsigned int i = cruStart; i < cruEnd; ++i) {
-    const unsigned int threadNum = omp_get_thread_num();
-    const CRU cru(i);
-    idcStruct[threadNum].setCRU(cru);
-    for (unsigned int integrationInterval = 0; integrationInterval < this->getNIntegrationIntervals(); ++integrationInterval) {
-      idcStruct[threadNum].setIntegrationInterval(integrationInterval);
-      loopOverGroups(idcStruct[threadNum], padStatusFlags);
+#pragma omp parallel num_threads(sNThreads)
+  {
+    // each thread creates its own helper and averaging object: storing the objects of all threads next to each other in a vector leads to false sharing (the averaging object is modified for each pad)
+    std::vector<RobustAverage> robustAverage(1);
+    IDCAverageGroupHelper<IDCAverageGroupTPC> idcStruct{this->mIDCsGrouped, this->mWeightsPad, this->mWeightsRow, this->mIDCsUngrouped, robustAverage, this->mIDCGroupHelperSector};
+    idcStruct.setThreadNum(0);
+
+#pragma omp for
+    for (int i = cruStart; i < cruEnd; ++i) {
+      idcStruct.setCRU(CRU(i));
+      for (unsigned int integrationInterval = 0; integrationInterval < nIntegrationIntervals; ++integrationInterval) {
+        idcStruct.setIntegrationInterval(integrationInterval);
+        loopOverGroups(idcStruct, padStatusFlags);
+      }
     }
   }
 }
