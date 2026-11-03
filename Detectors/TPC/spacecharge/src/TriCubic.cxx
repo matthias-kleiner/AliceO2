@@ -17,6 +17,7 @@
 #include "TPCSpaceCharge/TriCubic.h"
 #include "TPCSpaceCharge/DataContainer3D.h"
 #include "TPCSpaceCharge/Vector.h"
+#include <algorithm>
 #include <type_traits>
 
 using namespace o2::tpc;
@@ -27,6 +28,7 @@ TriCubicInterpolator<DataT>::TriCubicInterpolator(TriCubicInterpolator<DataT>&& 
 {
   if (this != &other) {
     mExtrapolationType = other.mExtrapolationType;
+    mExtraPolateValues = other.mExtraPolateValues;
     // do not change address of old pointers!
     other.mGridData = nullptr;
     other.mGridProperties = nullptr;
@@ -38,6 +40,7 @@ TriCubicInterpolator<DataT>& TriCubicInterpolator<DataT>::operator=(TriCubicInte
 {
   if (this != &other) {
     mExtrapolationType = other.mExtrapolationType;
+    mExtraPolateValues = other.mExtraPolateValues;
     // do not change address of old pointers!
     other.mGridData = nullptr;
     other.mGridProperties = nullptr;
@@ -168,8 +171,9 @@ DataT TriCubicInterpolator<DataT>::interpolateSparse(const DataT z, const DataT 
   posRel[FZ] = mGridProperties->clampToGridRel(posRel[FZ], FZ);
   posRel[FR] = mGridProperties->clampToGridRel(posRel[FR], FR);
   if (!mExtraPolateValues) {
-    posRelN[FZ] = posRel[FZ];
-    posRelN[FR] = posRel[FR];
+    // restrict the query position to the grid. The index of the cell is at most the second last vertex (see clampToGridRel()), but the position has to be clamped to the last vertex
+    posRelN[FZ] = std::min(std::max(posRelN[FZ], DataT(0)), mGridProperties->getMaxIndexZ());
+    posRelN[FR] = std::min(std::max(posRelN[FR], DataT(0)), mGridProperties->getMaxIndexR());
   }
 
   // index of the cell: the relative positions are >= 0 after the clamping, so the conversion to int is equal to floor()
