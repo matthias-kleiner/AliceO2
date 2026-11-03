@@ -41,6 +41,7 @@
 #include "Framework/Logger.h"
 #include "GPU/TPCFastTransform.h"
 #include "SpacePoints/TrackResiduals.h"
+#include "TPCBase/Mapper.h"
 #include "TPCReconstruction/TPCFastTransformHelperO2.h"
 #include "TPCCalibration/TPCFastSpaceChargeCorrectionHelper.h"
 
@@ -63,6 +64,36 @@ using namespace o2::gpu;
 namespace mu = o2::math_utils;
 
 void createFastTransform(std::string outFileName, TTree* voxResTree, o2::tpc::TrackResiduals& trackResiduals, bool useSmoothed, bool invertSigns, float meanIDC = 0.f, float meanCTP = 0.f, int debug = 0, int useCTPLumi = 0);
+
+/// the y/x grid edge of the TrackResiduals this runs with: "padplane" (the pad plane's edge in each row; O2 with the y/x edge fix) or
+/// "deadzone" (x tan 10 deg - 1.5 cm; before). Written to the user info "y2xEdge" of the maps (missing in older files: "deadzone")
+static std::string y2xEdgeDefinition(const o2::tpc::TrackResiduals& binning)
+{
+  const auto& mapper = o2::tpc::Mapper::instance();
+  const float x = binning.getX(0);
+  int row = 0;
+  for (int other = 1; other < o2::tpc::param::NPadRows; ++other) {
+    if (std::abs(o2::tpc::param::RowX[other] - x) < std::abs(o2::tpc::param::RowX[row] - x)) {
+      row = other;
+    }
+  }
+  const double halfWidth = 0.5 * mapper.getNumberOfPadsInRowSector(row) * mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+  return std::abs(binning.getMaxY2X(0) * x - halfWidth) < 1e-3 ? "padplane" : "deadzone";
+}
+
+/// warns if a map was binned with another y/x grid edge than the TrackResiduals this runs with (its bin centres then differ by up to
+/// about a pad at the sector edges: read it with an O2 version of its own definition)
+static void checkY2XEdge(const TList* userInfo, const o2::tpc::TrackResiduals& binning, const std::string& file)
+{
+  const auto* stored = userInfo ? userInfo->FindObject("y2xEdge") : nullptr;
+  const std::string storedEdge = stored ? stored->GetTitle() : "deadzone";
+  const std::string currentEdge = y2xEdgeDefinition(binning);
+  if (storedEdge != currentEdge) {
+    LOGP(warning, "{}: binned with the y/x grid edge \"{}\"{}, this O2 has \"{}\": the bin centres differ by up to about a pad at the sector "
+                  "edges -- use an O2 version with the map's definition",
+         file, storedEdge, stored ? "" : " (no y2xEdge: an older file)", currentEdge);
+  }
+}
 
 void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
                              const char* outFileName = "TPCFastTransform_VoxRes.root",
@@ -155,6 +186,7 @@ void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
   trackResiduals.setY2XBinning(y2xBins);
   trackResiduals.setZ2XBinning(z2xBins);
   trackResiduals.init();
+  checkY2XEdge(userInfo, trackResiduals, fileName);
 
   auto getFromUserInfo = [userInfo](std::string value, float& valueF) {
     if (valueF != 0) {

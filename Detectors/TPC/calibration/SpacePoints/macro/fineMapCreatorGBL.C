@@ -248,6 +248,36 @@ std::unique_ptr<TrackResiduals> makeBinning(const std::string& y2xBinning, const
   return binning;
 }
 
+/// the y/x grid edge of the TrackResiduals this runs with: "padplane" (the pad plane's edge in each row; O2 with the y/x edge fix) or
+/// "deadzone" (x tan 10 deg - 1.5 cm; before). Written to the user info "y2xEdge" of the maps (missing in older files: "deadzone")
+static std::string y2xEdgeDefinition(const o2::tpc::TrackResiduals& binning)
+{
+  const auto& mapper = o2::tpc::Mapper::instance();
+  const float x = binning.getX(0);
+  int row = 0;
+  for (int other = 1; other < o2::tpc::param::NPadRows; ++other) {
+    if (std::abs(o2::tpc::param::RowX[other] - x) < std::abs(o2::tpc::param::RowX[row] - x)) {
+      row = other;
+    }
+  }
+  const double halfWidth = 0.5 * mapper.getNumberOfPadsInRowSector(row) * mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+  return std::abs(binning.getMaxY2X(0) * x - halfWidth) < 1e-3 ? "padplane" : "deadzone";
+}
+
+/// warns if a map was binned with another y/x grid edge than the TrackResiduals this runs with (its bin centres then differ by up to
+/// about a pad at the sector edges: read it with an O2 version of its own definition)
+static void checkY2XEdge(const TList* userInfo, const o2::tpc::TrackResiduals& binning, const std::string& file)
+{
+  const auto* stored = userInfo ? userInfo->FindObject("y2xEdge") : nullptr;
+  const std::string storedEdge = stored ? stored->GetTitle() : "deadzone";
+  const std::string currentEdge = y2xEdgeDefinition(binning);
+  if (storedEdge != currentEdge) {
+    LOGP(warning, "{}: binned with the y/x grid edge \"{}\"{}, this O2 has \"{}\": the bin centres differ by up to about a pad at the sector "
+                  "edges -- use an O2 version with the map's definition",
+         file, storedEdge, stored ? "" : " (no y2xEdge: an older file)", currentEdge);
+  }
+}
+
 /// pad-row x, pad width and the pad plane's edge (|y| of the outer edge of the outermost pad) per row
 struct RowGeometry {
   std::array<double, NRows> x{};
@@ -364,6 +394,7 @@ struct FineMapInput {
       return false;
     }
     binning = makeBinning(info("y2xBinning"), info("z2xBinning"), std::stof(info("maxZ2X")));
+    checkY2XEdge(tree->GetUserInfo(), *binning, fileName);
     voxelsPerSector = binning->getNVoxelsPerSector();
     TrackResiduals::VoxRes* result = nullptr;
     tree->SetBranchAddress("voxRes", &result);
@@ -1424,6 +1455,7 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
   userInfo->Add(new TNamed("y2xBinning", y2xBinning.data()));
   userInfo->Add(new TNamed("z2xBinning", z2xBinning.data()));
   userInfo->Add(new TNamed("maxZ2X", std::to_string(maxZ2X).data()));
+  userInfo->Add(new TNamed("y2xEdge", y2xEdgeDefinition(binning).data()));
   userInfo->Add(new TNamed("nTracks", std::to_string(nTracks).data()));
   userInfo->Add(new TNamed("nTracksProcessed", std::to_string(nTracks).data()));
   userInfo->Add(new TNamed("runNumber", std::to_string(runNumber).data()));
@@ -1508,7 +1540,7 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
 
   auto writeSumsTree = [&](const char* name, const char* title, const std::vector<std::array<ChargeSums, 2>>& treeSums) {
     TTree sumsTree(name, title);
-    for (const char* key : {"y2xBinning", "z2xBinning", "maxZ2X", "nTracks"}) {
+    for (const char* key : {"y2xBinning", "z2xBinning", "maxZ2X", "nTracks", "y2xEdge"}) {
       sumsTree.GetUserInfo()->Add(userInfo->FindObject(key)->Clone());
     }
     int voxelIndex = 0;

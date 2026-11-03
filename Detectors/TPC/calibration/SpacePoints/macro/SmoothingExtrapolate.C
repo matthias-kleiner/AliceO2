@@ -24,6 +24,7 @@
 
 #include "Algorithm/RangeTokenizer.h"
 #include "SpacePoints/TrackResiduals.h"
+#include "TPCBase/Mapper.h"
 #include "TPCCalibration/TPCFastSpaceChargeCorrectionHelper.h"
 #include "CCDB/BasicCCDBManager.h"
 #include "TPCCalibration/TPCScaler.h"
@@ -152,6 +153,36 @@ bool getScalerValues(o2::ccdb::BasicCCDBManager& ccdbmgr, long tfTimeInMS, float
   return true;
 }
 
+/// the y/x grid edge of the TrackResiduals this runs with: "padplane" (the pad plane's edge in each row; O2 with the y/x edge fix) or
+/// "deadzone" (x tan 10 deg - 1.5 cm; before). Written to the user info "y2xEdge" of the maps (missing in older files: "deadzone")
+static std::string y2xEdgeDefinition(const o2::tpc::TrackResiduals& binning)
+{
+  const auto& mapper = o2::tpc::Mapper::instance();
+  const float x = binning.getX(0);
+  int row = 0;
+  for (int other = 1; other < o2::tpc::param::NPadRows; ++other) {
+    if (std::abs(o2::tpc::param::RowX[other] - x) < std::abs(o2::tpc::param::RowX[row] - x)) {
+      row = other;
+    }
+  }
+  const double halfWidth = 0.5 * mapper.getNumberOfPadsInRowSector(row) * mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+  return std::abs(binning.getMaxY2X(0) * x - halfWidth) < 1e-3 ? "padplane" : "deadzone";
+}
+
+/// warns if a map was binned with another y/x grid edge than the TrackResiduals this runs with (its bin centres then differ by up to
+/// about a pad at the sector edges: read it with an O2 version of its own definition)
+static void checkY2XEdge(const TList* userInfo, const o2::tpc::TrackResiduals& binning, const std::string& file)
+{
+  const auto* stored = userInfo ? userInfo->FindObject("y2xEdge") : nullptr;
+  const std::string storedEdge = stored ? stored->GetTitle() : "deadzone";
+  const std::string currentEdge = y2xEdgeDefinition(binning);
+  if (storedEdge != currentEdge) {
+    LOGP(warning, "{}: binned with the y/x grid edge \"{}\"{}, this O2 has \"{}\": the bin centres differ by up to about a pad at the sector "
+                  "edges -- use an O2 version with the map's definition",
+         file, storedEdge, stored ? "" : " (no y2xEdge: an older file)", currentEdge);
+  }
+}
+
 void SmoothingExtrapolate(const char* fileName = "debugVoxRes.root", TString fileOutName = "SmoothVoxRes.root",
                           int do_smoothing = 1, int do_extrapolation = 2,
                           int A11maxZ2X = -1, bool maskIA11 = false,
@@ -239,6 +270,7 @@ void SmoothingExtrapolate(const char* fileName = "debugVoxRes.root", TString fil
   trackResiduals.setY2XBinning(y2xBins);
   trackResiduals.setZ2XBinning(z2xBins);
   trackResiduals.init();
+  checkY2XEdge(userInfo, trackResiduals, fileName);
   LOGP(info, "trackResiduals initialized");
   //----------------------------------------------------------------
 

@@ -569,6 +569,22 @@ std::vector<std::string> getInputFileList(const std::string& fileInput)
 /// maxTrackTgl > 0: tracks with |tgl| above it are rejected; <= 0: no tgl cut (clusters outside the map's z/x range are dropped per
 /// cluster anyway). A cut at the map's own z/x edge biases the outermost z/x bins: through the vertex spread and the distortions their
 /// clusters come from tracks on both sides of it (568041: last bin of maxZ2X 1.4 dX -1.6 mm vs the map without the cut)
+/// the y/x grid edge of the TrackResiduals this runs with: "padplane" (the pad plane's edge in each row; O2 with the y/x edge fix) or
+/// "deadzone" (x tan 10 deg - 1.5 cm; before). Written to the user info "y2xEdge" of the maps (missing in older files: "deadzone")
+static std::string y2xEdgeDefinition(const o2::tpc::TrackResiduals& binning)
+{
+  const auto& mapper = o2::tpc::Mapper::instance();
+  const float x = binning.getX(0);
+  int row = 0;
+  for (int other = 1; other < o2::tpc::param::NPadRows; ++other) {
+    if (std::abs(o2::tpc::param::RowX[other] - x) < std::abs(o2::tpc::param::RowX[row] - x)) {
+      row = other;
+    }
+  }
+  const double halfWidth = 0.5 * mapper.getNumberOfPadsInRowSector(row) * mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+  return std::abs(binning.getMaxY2X(0) * x - halfWidth) < 1e-3 ? "padplane" : "deadzone";
+}
+
 bool revalidateTrack(const TrackData& trk, const SpacePointsCalibConfParam& params, float maxTrackTgl)
 {
 
@@ -2483,6 +2499,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   // same value it was built with, not a separately-configured guess.
   userInfo->Add(new TNamed("maxZ2X", std::to_string(maxZ2XCut).data()));
   userInfo->Add(new TNamed("maxTrackTgl", std::to_string(maxTrackTgl).data()));
+  userInfo->Add(new TNamed("y2xEdge", y2xEdgeDefinition(trackResiduals).data()));
   userInfo->Add(new TNamed("nSlicesPhiZ", std::to_string(nSlices)));
   userInfo->Add(new TNamed("maxTracks", std::to_string(maxTracks)));
   userInfo->Add(new TNamed("minTracks", std::to_string(minTracks)));
@@ -2598,7 +2615,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     // per voxel with entries and charge the residual slope method's sums, as fineMapCreatorGBL.C's tree fineSums (voxel = sector x
     // voxels per sector + getGlbVoxBin(row, y/x bin, z/x bin))
     TTree sumsTree("fineSums", "per voxel and charge the residual slope method's sums of the residuals to the reference track (staticMapCreatorCPM.C)");
-    for (const char* key : {"y2xBinning", "z2xBinning", "maxZ2X"}) {
+    for (const char* key : {"y2xBinning", "z2xBinning", "maxZ2X", "y2xEdge"}) {
       sumsTree.GetUserInfo()->Add(userInfo->FindObject(key)->Clone());
     }
     sumsTree.GetUserInfo()->Add(new TNamed("nTracks", std::to_string(nTracksProcessed_final).data()));

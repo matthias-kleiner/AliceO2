@@ -995,6 +995,36 @@ std::unique_ptr<TrackResiduals> makeBinning(const std::string& y2xBinning, const
   return binning;
 }
 
+/// the y/x grid edge of the TrackResiduals this runs with: "padplane" (the pad plane's edge in each row; O2 with the y/x edge fix) or
+/// "deadzone" (x tan 10 deg - 1.5 cm; before). Written to the user info "y2xEdge" of the maps (missing in older files: "deadzone")
+static std::string y2xEdgeDefinition(const o2::tpc::TrackResiduals& binning)
+{
+  const auto& mapper = o2::tpc::Mapper::instance();
+  const float x = binning.getX(0);
+  int row = 0;
+  for (int other = 1; other < o2::tpc::param::NPadRows; ++other) {
+    if (std::abs(o2::tpc::param::RowX[other] - x) < std::abs(o2::tpc::param::RowX[row] - x)) {
+      row = other;
+    }
+  }
+  const double halfWidth = 0.5 * mapper.getNumberOfPadsInRowSector(row) * mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+  return std::abs(binning.getMaxY2X(0) * x - halfWidth) < 1e-3 ? "padplane" : "deadzone";
+}
+
+/// warns if a map was binned with another y/x grid edge than the TrackResiduals this runs with (its bin centres then differ by up to
+/// about a pad at the sector edges: read it with an O2 version of its own definition)
+static void checkY2XEdge(const TList* userInfo, const o2::tpc::TrackResiduals& binning, const std::string& file)
+{
+  const auto* stored = userInfo ? userInfo->FindObject("y2xEdge") : nullptr;
+  const std::string storedEdge = stored ? stored->GetTitle() : "deadzone";
+  const std::string currentEdge = y2xEdgeDefinition(binning);
+  if (storedEdge != currentEdge) {
+    LOGP(warning, "{}: binned with the y/x grid edge \"{}\"{}, this O2 has \"{}\": the bin centres differ by up to about a pad at the sector "
+                  "edges -- use an O2 version with the map's definition",
+         file, storedEdge, stored ? "" : " (no y2xEdge: an older file)", currentEdge);
+  }
+}
+
 /// the mean TPC scalers (IDC) of the A and C sides at a TF time from the CCDB objects TPC/Calib/Scaler and ScalerWeights (as
 /// SmoothingExtrapolate.C); false if missing or not positive
 bool getScalerValues(o2::ccdb::BasicCCDBManager& manager, long timeMS, float& scalerA, float& scalerC)
@@ -1485,6 +1515,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     return;
   }
   const auto binning = makeBinning(info("y2xBinning"), info("z2xBinning"), std::stof(info("maxZ2X")));
+  checkY2XEdge(infoTree->GetUserInfo(), *binning, inputFile);
   const int voxelsPerSector = binning->getNVoxelsPerSector();
   const size_t nVoxels = size_t(NSectors) * voxelsPerSector;
 
@@ -1764,7 +1795,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   tree.Branch("voxRes", &resultPointer);
   for (auto* object : *treeWithInfo->GetUserInfo()) {
     const std::string name = object->GetName();
-    if (name != "smoothing" && (!joinedIDC || (name != "meanIDC" && name != "medianIDC"))) {
+    if (name != "smoothing" && name != "y2xEdge" && (!joinedIDC || (name != "meanIDC" && name != "medianIDC"))) {
       tree.GetUserInfo()->Add(object->Clone());
     }
   }
@@ -1776,6 +1807,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     tree.GetUserInfo()->Add(new TNamed("nTracksProcessed", info("nTracks").data()));
   }
   tree.GetUserInfo()->Add(new TNamed("smoothing", description.data()));
+  tree.GetUserInfo()->Add(new TNamed("y2xEdge", y2xEdgeDefinition(*binning).data()));
   for (const char* alias : {"z2xBin:bvox[0]", "y2xBin:bvox[1]", "xBin:bvox[2]", "z2xAV:stat[0]", "y2xAV:stat[1]", "xAV:stat[2]", "entries:stat[3]",
                             "dX:D[0]", "dY:D[1]", "dZ:D[2]", "dXS:DS[0]", "dYS:DS[1]", "dZS:DS[2]", "dXE:E[0]", "dYE:E[1]", "dZE:E[2]"}) {
     const std::string pair(alias);
