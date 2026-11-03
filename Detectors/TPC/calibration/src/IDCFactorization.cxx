@@ -254,6 +254,7 @@ void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
     const unsigned int nIDCsPerCRU = mNIDCsPerCRU[region];
     const auto factorIndexGlob = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
     float* idcZero = mIDCZero[mSideIndex[side]].mIDCZero.data() + factorIndexGlob;
+    std::vector<unsigned int> nIDCsPad(nIDCsPerCRU); // number of IDCs per pad which are used for IDC0
     for (unsigned int timeframe = 0; timeframe < mTimeFrames; ++timeframe) {
       auto& idcs = mIDCs[cru][timeframe];
       // loop over the integration intervals and the pads separately to avoid the integer division for each IDC
@@ -268,28 +269,21 @@ void o2::tpc::IDCFactorization::calcIDCZero(const bool norm)
             idcsInterval[pad] *= Mapper::INVPADAREA[region];
           }
           idcZero[pad] += idcsInterval[pad];
+          ++nIDCsPad[pad];
         }
       }
     }
-  }
 
-// perform normalization per CRU (in case some CRUs lack data)
-#pragma omp parallel for num_threads(sNThreads)
-  for (unsigned int cruInd = 0; cruInd < mCRUs.size(); ++cruInd) {
-    const unsigned int cru = mCRUs[cruInd];
-    const o2::tpc::CRU cruTmp(cru);
-    const auto side = cruTmp.side();
-    const unsigned int region = cruTmp.region();
-    const auto indexStart = mRegionOffs[region] + mNIDCsPerSector * (cruTmp.sector() % o2::tpc::SECTORSPERSIDE);
-    const auto indexEnd = indexStart + mNIDCsPerCRU[region];
-
-    const auto normFac = getNIntegrationIntervals(cru);
-    if (normFac == 0) {
+    // normalize to the number of IDCs which were used for each pad: IDCs which were not received (value -1) are not used, normalizing to the number of integration intervals of the CRU would bias IDC0 of these pads
+    if (getNIntegrationIntervals(cru) == 0) {
       LOGP(info, "number of integration intervals is zero for CRU {}! Skipping normalization of IDC0", cru);
       continue;
     }
-
-    std::transform(mIDCZero[mSideIndex[side]].mIDCZero.begin() + indexStart, mIDCZero[mSideIndex[side]].mIDCZero.begin() + indexEnd, mIDCZero[mSideIndex[side]].mIDCZero.begin() + indexStart, [normVal = normFac](auto& val) { return val / normVal; });
+    for (unsigned int pad = 0; pad < nIDCsPerCRU; ++pad) {
+      if (nIDCsPad[pad] > 0) {
+        idcZero[pad] /= nIDCsPad[pad];
+      }
+    }
   }
 }
 
