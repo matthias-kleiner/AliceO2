@@ -604,6 +604,7 @@ void SpaceCharge<DataT>::poissonSolver(const Side side, const DataT stoppingConv
   initContainer(mDensity[side], true);
   initContainer(mPotential[side], true);
   PoissonSolver<DataT>::setConvergenceError(stoppingConvergence);
+  PoissonSolver<DataT>::setNThreads(sNThreads);
   PoissonSolver<DataT> poissonSolver(mGrid3D[0]);
   poissonSolver.poissonSolver3D(mPotential[side], mDensity[side], symmetry);
 }
@@ -611,7 +612,7 @@ void SpaceCharge<DataT>::poissonSolver(const Side side, const DataT stoppingConv
 template <typename DataT>
 void SpaceCharge<DataT>::poissonSolver(const DataT stoppingConvergence, const int symmetry)
 {
-#pragma omp parallel for num_threads(2)
+  // the sides are processed one after the other: the calculation for each side is parallelised (nested OpenMP regions are not active by default, so a parallel loop over the two sides would use only two threads in total)
   for (int iside = 0; iside < FNSIDES; ++iside) {
     const o2::tpc::Side side = (iside == 0) ? Side::A : Side::C;
     poissonSolver(side, stoppingConvergence, symmetry);
@@ -744,7 +745,7 @@ void SpaceCharge<DataT>::calcGlobalDistWithGlobalCorrIterative(const Side side, 
 template <typename DataT>
 void SpaceCharge<DataT>::calcGlobalDistWithGlobalCorrIterative(const SpaceCharge<DataT>* scSCale, float scale, const int maxIter, const DataT approachZ, const DataT approachR, const DataT approachPhi, const DataT diffCorr)
 {
-#pragma omp parallel for num_threads(sNThreads)
+  // the sides are processed one after the other: the calculation for each side is parallelised (nested OpenMP regions are not active by default, so a parallel loop over the two sides would use only two threads in total)
   for (int iside = 0; iside < FNSIDES; ++iside) {
     const o2::tpc::Side side = (iside == 0) ? Side::A : Side::C;
     calcGlobalDistWithGlobalCorrIterative(side, scSCale, scale, maxIter, approachZ, approachR, approachPhi, diffCorr);
@@ -760,7 +761,7 @@ void SpaceCharge<DataT>::calcGlobalCorrWithGlobalDistIterative(const Side side, 
 template <typename DataT>
 void SpaceCharge<DataT>::calcGlobalCorrWithGlobalDistIterative(const SpaceCharge<DataT>* scSCale, float scale, const int maxIter, const DataT approachZ, const DataT approachR, const DataT approachPhi, const DataT diffCorr)
 {
-#pragma omp parallel for num_threads(sNThreads)
+  // the sides are processed one after the other: the calculation for each side is parallelised (nested OpenMP regions are not active by default, so a parallel loop over the two sides would use only two threads in total)
   for (int iside = 0; iside < FNSIDES; ++iside) {
     const o2::tpc::Side side = (iside == 0) ? Side::A : Side::C;
     calcGlobalCorrWithGlobalDistIterative(side, scSCale, scale, maxIter, approachZ, approachR, approachPhi, diffCorr);
@@ -902,7 +903,7 @@ void SpaceCharge<DataT>::calcGlobalDistWithGlobalCorrIterativeLinearCartesian(co
 template <typename DataT>
 void SpaceCharge<DataT>::calcGlobalDistWithGlobalCorrIterativeLinearCartesian(const SpaceCharge<DataT>* scSCale, float scale, const int maxIter, const DataT approachX, const DataT approachY, const DataT approachZ, const DataT diffCorr)
 {
-#pragma omp parallel for num_threads(sNThreads)
+  // the sides are processed one after the other: the calculation for each side is parallelised (nested OpenMP regions are not active by default, so a parallel loop over the two sides would use only two threads in total)
   for (int iside = 0; iside < FNSIDES; ++iside) {
     const o2::tpc::Side side = (iside == 0) ? Side::A : Side::C;
     calcGlobalDistWithGlobalCorrIterativeLinearCartesian(side, scSCale, scale, maxIter, approachX, approachY, approachZ, diffCorr);
@@ -918,7 +919,7 @@ void SpaceCharge<DataT>::calcGlobalCorrWithGlobalDistIterativeLinearCartesian(co
 template <typename DataT>
 void SpaceCharge<DataT>::calcGlobalCorrWithGlobalDistIterativeLinearCartesian(const SpaceCharge<DataT>* scSCale, float scale, const int maxIter, const DataT approachX, const DataT approachY, const DataT approachZ, const DataT diffCorr)
 {
-#pragma omp parallel for num_threads(sNThreads)
+  // the sides are processed one after the other: the calculation for each side is parallelised (nested OpenMP regions are not active by default, so a parallel loop over the two sides would use only two threads in total)
   for (int iside = 0; iside < FNSIDES; ++iside) {
     const o2::tpc::Side side = (iside == 0) ? Side::A : Side::C;
     calcGlobalCorrWithGlobalDistIterativeLinearCartesian(side, scSCale, scale, maxIter, approachX, approachY, approachZ, diffCorr);
