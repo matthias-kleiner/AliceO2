@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(PoissonSolver3D_test)
   const int nphiPointsLoop = NPHI * nFacLoop;
   const DataT rSpacingLoop = GridProperties<DataT>::getGridSpacingR(nrPointsLoop);
   const DataT zSpacingLoop = GridProperties<DataT>::getGridSpacingZ(nzPointsLoop);
-  const DataT phiSpacingLoop = GridProperties<DataT>::getGridSpacingZ(nphiPointsLoop);
+  const DataT phiSpacingLoop = GridProperties<DataT>::getGridSpacingPhi(nphiPointsLoop);
 
   for (int iR = -2; iR < nrPointsLoop + 2; ++iR) {
     const DataT r = rmin + iR * rSpacingLoop;
@@ -93,6 +93,39 @@ BOOST_AUTO_TEST_CASE(PoissonSolver3D_test)
           BOOST_CHECK_SMALL(trueValue - interpolatedSparse, facTol * ABSTOLERANCE);
         } else {
           BOOST_CHECK_CLOSE(interpolatedSparse, trueValue, facTol * TOLERANCE);
+        }
+      }
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(TriCubic_vertices_test)
+{
+  // the tricubic interpolation has to reproduce the values at the vertices of the grid: checks the indexing in the inner volume and at the boundaries of the grid (extrapolation)
+  const ParamSpaceCharge params{NR, NZ, NPHI};
+  const DataT rSpacing = o2::tpc::GridProperties<DataT>::getGridSpacingR(NR);
+  const DataT zSpacing = o2::tpc::GridProperties<DataT>::getGridSpacingZ(NZ);
+  const DataT phiSpacing = o2::tpc::GridProperties<DataT>::getGridSpacingPhi(NPHI);
+  const o2::tpc::RegularGrid3D<DataT> grid3D(GridProperties<DataT>::ZMIN, GridProperties<DataT>::RMIN, GridProperties<DataT>::PHIMIN, zSpacing, rSpacing, phiSpacing, params);
+  o2::tpc::DataContainer3D<DataT> data3D(NZ, NR, NPHI);
+
+  // fill with values without any symmetry
+  for (int iz = 0; iz < NZ; ++iz) {
+    for (int ir = 0; ir < NR; ++ir) {
+      for (int iphi = 0; iphi < NPHI; ++iphi) {
+        data3D(iz, ir, iphi) = 1 + iz + 1000 * ir + 1e6 * iphi + std::sin(iz * ir + iphi);
+      }
+    }
+  }
+
+  for (const bool extrapolate : {true, false}) {
+    o2::tpc::TriCubicInterpolator<DataT> interpolator(data3D, grid3D);
+    interpolator.setExtrapolateValues(extrapolate);
+    for (int iz = 0; iz < NZ; ++iz) {
+      for (int ir = 0; ir < NR; ++ir) {
+        for (int iphi = 0; iphi < NPHI; ++iphi) {
+          const DataT interpolated = interpolator(grid3D.getZVertex(iz), grid3D.getRVertex(ir), grid3D.getPhiVertex(iphi));
+          BOOST_CHECK_CLOSE(interpolated, data3D(iz, ir, iphi), 1e-8);
         }
       }
     }
