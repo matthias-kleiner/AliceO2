@@ -285,6 +285,10 @@ void o2::tpc::IDCAverageGroup<Type>::loopOverGroups(IDCAverageGroupHelper<LoopTy
       for (int iYLocalSide = 0; iYLocalSide < 2; ++iYLocalSide) {
         int pad = 0;
         for (int padGroup = 0; padGroup < groupedPads; ++padGroup) {
+          if constexpr (std::is_same_v<LoopType, IDCAverageGroupCRU> || std::is_same_v<LoopType, IDCAverageGroupTPC>) {
+            // clear the values of the previous group (for the first group, the values of the last group of the previous call are still stored)
+            idcStruct.clearRobustAverage();
+          }
           const int nPadsPerGroup = idcStruct.getPadsInGroupSectorEdges(padGroup);
           for (int padInGroup = 0; padInGroup < nPadsPerGroup; ++padInGroup) {
             const int endRow = (groupRowsEdge && (ulrow + stepRow >= Mapper::ROWSPERREGION[region] || !bNotLastrow)) ? (Mapper::ROWSPERREGION[region] - ulrow) : stepRow; // last row in this group
@@ -311,7 +315,6 @@ void o2::tpc::IDCAverageGroup<Type>::loopOverGroups(IDCAverageGroupHelper<LoopTy
           if constexpr (std::is_same_v<LoopType, IDCAverageGroupCRU> || std::is_same_v<LoopType, IDCAverageGroupTPC>) {
             const int ungroupedPad = !iYLocalSide ? pad - 1 : Mapper::PADSPERROW[region][ulrow] - pad;
             idcStruct.setSectorEdgeIDC(ulrow, ungroupedPad);
-            idcStruct.clearRobustAverage();
           } else {
             ++idcStruct.mGroupCounter;
             ++idcStruct.mCol;

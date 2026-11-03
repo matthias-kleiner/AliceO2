@@ -21,6 +21,7 @@
 #include "TPCCalibration/IDCAverageGroup.h"
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 namespace o2
 {
@@ -180,6 +181,84 @@ BOOST_AUTO_TEST_CASE(AverageGroupSector_test)
       // comparing the reference sum of IDCs per sector with the grouped IDCs per sector
       for (const auto idcsSec : sumGroupedIDCsSector) {
         BOOST_CHECK(refSumIDCs / sumGroupedIDCsSector.size() == idcsSec);
+      }
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(AverageGroupSector_inverse_mapping_test)
+{
+  // each grouped IDC has to be the average of exactly the ungrouped IDCs which are mapped to it by IDCGroupHelperSector::getIndexUngrouped() (used to access the grouped IDCs)
+  std::srand(std::time(nullptr));
+
+  const static auto& paramIDCGroup = ParameterIDCGroup::Instance();
+  BOOST_CHECK(paramIDCGroup.method == AveragingMethod::FAST);
+
+  for (int iter = 0; iter < NITER; ++iter) {
+    // type=0: do nothing special for grouping at sector edges, typ1=1: do group pads at sector edges in pad direction, typ1=2: group pads at sector edges in pad+row direction
+    for (int type = 0; type < 3; ++type) {
+      std::array<unsigned char, Mapper::NREGIONS> grPad{};
+      std::array<unsigned char, Mapper::NREGIONS> grRow{};
+      std::array<unsigned char, Mapper::NREGIONS> grRowThr{};
+      std::array<unsigned char, Mapper::NREGIONS> grPadThr{};
+      for (int region = 0; region < Mapper::NREGIONS; ++region) {
+        grPad[region] = genRand(MAXGRPAD) + 1;
+        grRow[region] = genRand(MAXGRROW) + 1;
+        grRowThr[region] = genRand(MAXGRTHR);
+        grPadThr[region] = genRand(MAXGRTHR);
+      }
+      const unsigned int groupPadsSectorEdges = type == 0 ? 0 : 10 * genRandSecEdge() + type - 1;
+      IDCAverageGroup<IDCAverageGroupTPC> idcaverage(grPad, grRow, grRowThr, grPadThr, groupPadsSectorEdges);
+      const auto& helper = idcaverage.getIDCGroupHelperSector();
+      const unsigned int nGroupedIDCs = helper.getNIDCsPerSector() * SECTORSPERSIDE * NINTEGRATIONINTERVALS;
+
+      // the same object is used for both sides to check that no values from the previous grouping are used
+      for (const auto side : {Side::A, Side::C}) {
+        IDCDelta<float> idcs;
+        idcs.getIDCDelta().resize(NINTEGRATIONINTERVALS * Mapper::getNumberOfPadsPerSide());
+        std::generate(idcs.getIDCDelta().begin(), idcs.getIDCDelta().end(), []() { return genRand(1000) / 100.f; });
+        idcaverage.setIDCs(idcs, side);
+        idcaverage.processIDCs();
+
+        // reference: average of the ungrouped IDCs which are mapped to the same grouped IDC
+        std::vector<double> sumIDCs(nGroupedIDCs);
+        std::vector<int> nIDCs(nGroupedIDCs);
+        int nInvalidIndex = 0;
+        const unsigned int firstSector = (side == Side::A) ? 0 : SECTORSPERSIDE;
+        for (unsigned int i = 0; i < NINTEGRATIONINTERVALS; ++i) {
+          for (unsigned int sector = firstSector; sector < firstSector + SECTORSPERSIDE; ++sector) {
+            for (unsigned int region = 0; region < Mapper::NREGIONS; ++region) {
+              for (unsigned int irow = 0; irow < Mapper::ROWSPERREGION[region]; ++irow) {
+                for (unsigned int ipad = 0; ipad < Mapper::PADSPERROW[region][irow]; ++ipad) {
+                  const unsigned int index = helper.getIndexUngrouped(sector, region, irow, ipad, i);
+                  if (index >= nGroupedIDCs) {
+                    ++nInvalidIndex;
+                    continue;
+                  }
+                  sumIDCs[index] += idcaverage.getUngroupedIDCDeltaVal(sector, region, irow, ipad, i);
+                  ++nIDCs[index];
+                }
+              }
+            }
+          }
+        }
+        BOOST_CHECK_EQUAL(nInvalidIndex, 0);
+
+        // compare to the grouped IDCs
+        int nEmptyGroups = 0;
+        int nWrongValues = 0;
+        for (unsigned int index = 0; index < nGroupedIDCs; ++index) {
+          if (nIDCs[index] == 0) {
+            ++nEmptyGroups;
+            continue;
+          }
+          const float refVal = sumIDCs[index] / nIDCs[index];
+          if (std::abs(idcaverage.getIDCGroupData().getValue(index) - refVal) > 1e-4f) {
+            ++nWrongValues;
+          }
+        }
+        BOOST_CHECK_EQUAL(nEmptyGroups, 0);
+        BOOST_CHECK_EQUAL(nWrongValues, 0);
       }
     }
   }
