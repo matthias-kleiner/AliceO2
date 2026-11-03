@@ -33,19 +33,11 @@
 /// Voxel model ((dX, dY, dZ) = measured - true, as voxResTree): r_y = dY - t dX, r_z = dZ - c dX with t = dy/dx, c = dz/dx of the track;
 /// dX, dY from the y channel, then dZ = <r_z> + <c> dX. Errors scaled by sqrt(chi2 / ndf) if > 1.
 ///
-/// Smoothing (smoothTau > 0): a discrete smoothing spline with one node per voxel and component at the bin centre, bilinear in y/x and z/x
-/// within the pad row in between (as a fine map is applied), so a voxel's sums enter at their mean position through the bilinear weights.
-/// Per voxel with entries the chi2 of its residuals as a quadratic form in (dX, dY, dZ) (the y channel, and the z channel's mean
-/// W_z (<r_z> - dZ + <c> dX)^2 as in the voxel solve), divided by max(1, chi2 / ndf) of its solve (the median of the solved voxels for the
-/// others); penalties: the second differences along the rows (none across a stack boundary), y/x and z/x with weight 1 / smoothTau^2, and
-/// a ridge 1 / smoothTau0^2 towards 0 (no data: no fine correction). Per sector one sparse system, solved with conjugate gradients (3 x 3
-/// block-Jacobi preconditioner); smoothRobust > 0: that many reweightings of the voxels with Tukey's bisquare of sqrt(excess chi2 / rank)
-/// at the solution (the voxel's chi2 there minus its own minimum).
-///
-/// Two passes (nPasses = 2, needs the smoothing): the TFs split alternately in time; pass 1 on the even ones, smoothed: S1; pass 2 on the
-/// odd ones with S1 subtracted from the clusters (after a fineMapInput), smoothed: S2. Every track is fitted once. Output DS = S1 + S2,
-/// D = pass 2's voxel solve + S1 at its mean position (E and the entries pass 2's). Cross-validation (log and user info): the chi2 change
-/// of pass 2's residuals with pass 1's raw voxels and with S1, relative to no fine correction.
+/// No smoothing here: DS = D (the voxel solve). The map is smoothed from the per-voxel sums (writeSums: tree fineSums) with smoothVoxelMap.C
+/// (source "fineSums"), which also adds the sums of several runs (e.g. the chunks of a split GRID stage 3). Iterations: a second run with
+/// fineMapInput = the smoothed map of the first, subtracted from the clusters after the base correction; with addBackFineMap the
+/// subtracted correction is added back to each residual (r_y + S_Y - t S_X, r_z + S_Z - c S_X, the voxel model), so the output (D, sums)
+/// is the full fine map S + what the first one left, else only the latter (e.g. injection tests: the recovered part of an injected map).
 ///
 /// ITS clusters and primary vertex in the fit (itsInFit, for tests; ITS-TPC tracks with at least MinITSClusters ITS clusters): the points
 /// of the residual stream (reference + residual; ITS in the sensor's tracking frame of the ideal geometry for MC, the aligned one for data)
@@ -67,8 +59,7 @@
 /// the fit threads take chunks of its tracks. With a derivative map, TFs without a valid scaler object are skipped; without one, the map
 /// is applied as is (no IDC needed, e.g. the coarse map of the same time window).
 ///
-/// Output: voxResTree (D = (dX, dY, dZ), E, flags DistDone | DispDone where solved; DS = the smoothed map in every voxel with SmoothDone,
-/// without smoothing DS = D; binning, CTP / IDC means and medians in the user info) and the OrbitLumiInfo tree as staticMapCreatorCPM.C, with the per-TF IDC values; with writeSums also the tree fineSums
+/// Output: voxResTree (D = (dX, dY, dZ), E, flags DistDone | DispDone where solved; DS = D; binning, CTP / IDC means and medians in the user info) and the OrbitLumiInfo tree as staticMapCreatorCPM.C, with the per-TF IDC values; with writeSums also the tree fineSums
 /// (per voxel and charge the sums of the solve, float) for adding outputs.
 ///
 /// The GBL, Mille (GBL >= V04 includes its headers) and Eigen headers and libGBL are not on ROOT's paths in an O2 environment; e.g. in alienv:
@@ -315,7 +306,7 @@ int stackOfRow(int row)
 
 /// the bilinear interpolation between the bin centres of the pad row in y/x and the side-oriented z/x (z/x on the A side, -z/x on the C
 /// side; constant beyond the outermost centres): up to 4 voxels (sector-local index) and their weights; returns their number. A fine
-/// map is applied with it, and it defines the smoothed map between its nodes.
+/// map is applied with it.
 int bilinearNodes(const TrackResiduals& binning, int row, double y2x, double z2xSide, int voxels[4], double weights[4])
 {
   auto bracket = [](int nBins, double value, auto centre, int& low, double& fraction) {
@@ -391,7 +382,8 @@ struct FineMapInput {
     return true;
   }
 
-  void apply(int sector, int row, double& x, double& y, double& z) const
+  /// subtracts the map from (x, y, z); the correction subtracted in applied (optional)
+  void apply(int sector, int row, double& x, double& y, double& z, double* applied = nullptr) const
   {
     int voxels[4];
     double weights[4];
@@ -406,6 +398,9 @@ struct FineMapInput {
     x -= correction[0];
     y -= correction[1];
     z -= correction[2];
+    if (applied) {
+      std::copy(correction, correction + 3, applied);
+    }
   }
 };
 
@@ -745,311 +740,6 @@ bool solveVoxel(const ChargeSums& sums, double minEntries, VoxelSolution& soluti
   return std::isfinite(dX) && std::isfinite(dY) && std::isfinite(dZ);
 }
 
-/// one voxel with entries in the smoothing: the chi2 of its residuals theta^T A theta - 2 b^T theta + const at its mean position
-/// (theta = (dX, dY, dZ)), divided by its chi2 scale, and the nodes there
-struct SmoothVoxel {
-  Eigen::Matrix3d a;
-  Eigen::Vector3d b;
-  double weight = 1.; ///< robust weight
-  int nNodes = 0;
-  std::array<int, 4> node{}; ///< sector-local
-  std::array<double, 4> nodeWeight{};
-};
-
-/// the smoothing (see the file description): per sector the nodes (dX, dY, dZ) of every voxel, filled into nodes (3 per voxel); false if
-/// a sector's solution is not finite
-bool smoothMap(const TrackResiduals& binning, const std::vector<std::array<ChargeSums, 2>>& sums, double minEntries, double tau, double tau0,
-               int robust, int nThreads, std::vector<double>& nodes)
-{
-  using S = ChargeSums;
-  const int nBinsX = binning.getNXBins();
-  const int nBinsY2X = binning.getNY2XBins();
-  const int nBinsZ2X = binning.getNZ2XBins();
-  const int voxelsPerSector = binning.getNVoxelsPerSector();
-  const int bins[3] = {nBinsX, nBinsY2X, nBinsZ2X};
-  const int strides[3] = {1, nBinsX, nBinsX * nBinsY2X}; // getGlbVoxBin = row + nX * (y/x bin + nY2X * z/x bin)
-  const double lambda = 1. / (tau * tau);
-  const double ridge = 1. / (tau0 * tau0);
-  constexpr double Coefficients[3] = {1., -2., 1.};
-
-  // the chi2 scale of the voxels without a solve: the median of the solved ones
-  std::vector<double> scales;
-  for (const auto& voxelSums : sums) {
-    ChargeSums total = voxelSums[0];
-    total.add(voxelSums[1]);
-    VoxelSolution solution;
-    if (solveVoxel(total, minEntries, solution)) {
-      scales.push_back(solution.chi2Scale);
-    }
-  }
-  double medianScale = 1.;
-  if (!scales.empty()) {
-    std::nth_element(scales.begin(), scales.begin() + scales.size() / 2, scales.end());
-    medianScale = scales[scales.size() / 2];
-  }
-
-  // the second differences, the same in every sector: per stencil the axis and its first node; the penalty's diagonal per node
-  std::vector<std::pair<int, int>> stencils;
-  std::vector<double> penaltyDiagonal(voxelsPerSector, 0.);
-  for (int axis = 0; axis < 3; ++axis) {
-    for (int binZ2X = 0; binZ2X < nBinsZ2X; ++binZ2X) {
-      for (int binY2X = 0; binY2X < nBinsY2X; ++binY2X) {
-        for (int binX = 0; binX < nBinsX; ++binX) {
-          const int bin[3] = {binX, binY2X, binZ2X};
-          if (bin[axis] + 3 > bins[axis] || (axis == 0 && stackOfRow(binX) != stackOfRow(binX + 2))) {
-            continue;
-          }
-          const int first = int(binning.getGlbVoxBin(binX, binY2X, binZ2X));
-          stencils.emplace_back(axis, first);
-          for (int k = 0; k < 3; ++k) {
-            penaltyDiagonal[first + k * strides[axis]] += lambda * Coefficients[k] * Coefficients[k];
-          }
-        }
-      }
-    }
-  }
-
-  nodes.assign(sums.size() * 3, 0.);
-  std::array<long, NSectors> nVoxels{};
-  std::array<int, NSectors> iterations{};
-  std::array<double, NSectors> residuals{};
-  std::array<bool, NSectors> finite{};
-  std::array<long, NSectors> nLowWeight{};
-  std::array<long, NSectors> nZeroWeight{};
-  auto smoothSector = [&](int sector) {
-    finite[sector] = true;
-    std::vector<SmoothVoxel> voxels;
-    for (int local = 0; local < voxelsPerSector; ++local) {
-      const auto& voxelSums = sums[size_t(sector) * voxelsPerSector + local];
-      ChargeSums total = voxelSums[0];
-      total.add(voxelSums[1]);
-      if (total.entries <= 0. || total.y[S::W] <= 0. || total.z[S::W] <= 0.) {
-        continue;
-      }
-      VoxelSolution solution;
-      const double scale = solveVoxel(total, minEntries, solution) ? solution.chi2Scale : medianScale;
-      // the y channel (J = (-t, 1, 0)) and the z channel's mean W_z (<r_z> - dZ + <c> dX)^2
-      const double meanSlopeZ = total.z[S::WS] / total.z[S::W];
-      SmoothVoxel voxel;
-      voxel.a << total.y[S::WSS] + total.z[S::WS] * meanSlopeZ, -total.y[S::WS], -total.z[S::WS], -total.y[S::WS], total.y[S::W], 0., -total.z[S::WS], 0.,
-        total.z[S::W];
-      voxel.b << -total.y[S::WSR] - meanSlopeZ * total.z[S::WR], total.y[S::WR], total.z[S::WR];
-      voxel.a /= scale;
-      voxel.b /= scale;
-      int nodeIndices[4];
-      double nodeWeights[4];
-      voxel.nNodes = bilinearNodes(binning, local % nBinsX, total.y2x / total.entries, (sector < 18 ? 1. : -1.) * total.z2x / total.entries, nodeIndices,
-                                   nodeWeights);
-      for (int j = 0; j < voxel.nNodes; ++j) {
-        voxel.node[j] = nodeIndices[j];
-        voxel.nodeWeight[j] = nodeWeights[j];
-      }
-      voxels.push_back(voxel);
-    }
-    nVoxels[sector] = voxels.size();
-    if (voxels.empty()) {
-      return;
-    }
-    const int n = 3 * voxelsPerSector;
-    double* sectorNodes = nodes.data() + 3 * size_t(sector) * voxelsPerSector;
-    auto nodeValue = [&](const SmoothVoxel& voxel, const double* x) {
-      Eigen::Vector3d theta = Eigen::Vector3d::Zero();
-      for (int j = 0; j < voxel.nNodes; ++j) {
-        theta += voxel.nodeWeight[j] * Eigen::Map<const Eigen::Vector3d>(x + 3 * voxel.node[j]);
-      }
-      return theta;
-    };
-    for (int cycle = 0; cycle <= robust; ++cycle) {
-      if (cycle > 0) {
-        // Tukey's bisquare of sqrt(excess chi2 / rank): the voxel's chi2 at the solution minus its minimum -b^T A^+ b
-        nLowWeight[sector] = 0;
-        nZeroWeight[sector] = 0;
-        for (auto& voxel : voxels) {
-          const Eigen::Vector3d theta = nodeValue(voxel, sectorNodes);
-          Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen(voxel.a);
-          const double largest = eigen.eigenvalues().maxCoeff();
-          double minimum = 0.;
-          int rank = 0;
-          for (int k = 0; k < 3; ++k) {
-            const double value = eigen.eigenvalues()(k);
-            if (value > 1e-12 * largest) {
-              const double projection = eigen.eigenvectors().col(k).dot(voxel.b);
-              minimum -= projection * projection / value;
-              ++rank;
-            }
-          }
-          const double excess = theta.dot(voxel.a * theta) - 2. * voxel.b.dot(theta) - minimum;
-          const double normalised = rank > 0 ? std::sqrt(std::max(0., excess) / rank) / SmoothTukey : 0.;
-          voxel.weight = normalised < 1. ? (1. - normalised * normalised) * (1. - normalised * normalised) : 0.;
-          nLowWeight[sector] += voxel.weight < 0.5;
-          nZeroWeight[sector] += voxel.weight == 0.;
-        }
-      }
-      // the normal equations: ridge + penalty + sum over the voxels of w_j w_k A at their nodes; preconditioner = the inverse 3 x 3 diagonal blocks
-      Eigen::VectorXd rhs = Eigen::VectorXd::Zero(n);
-      std::vector<Eigen::Matrix3d> block(voxelsPerSector);
-      for (int l = 0; l < voxelsPerSector; ++l) {
-        block[l] = (penaltyDiagonal[l] + ridge) * Eigen::Matrix3d::Identity();
-      }
-      std::vector<Eigen::Matrix3d> weighted(voxels.size());
-      for (size_t i = 0; i < voxels.size(); ++i) {
-        const auto& voxel = voxels[i];
-        weighted[i] = voxel.weight * voxel.a;
-        const Eigen::Vector3d r = voxel.weight * voxel.b;
-        for (int j = 0; j < voxel.nNodes; ++j) {
-          rhs.segment<3>(3 * voxel.node[j]) += voxel.nodeWeight[j] * r;
-          block[voxel.node[j]] += voxel.nodeWeight[j] * voxel.nodeWeight[j] * weighted[i];
-        }
-      }
-      for (auto& matrix : block) {
-        matrix = matrix.inverse().eval();
-      }
-      auto apply = [&](const Eigen::VectorXd& x, Eigen::VectorXd& y) {
-        y = ridge * x;
-        for (const auto& [axis, first] : stencils) {
-          const int step = strides[axis];
-          for (int c = 0; c < 3; ++c) {
-            double difference = 0.;
-            for (int k = 0; k < 3; ++k) {
-              difference += Coefficients[k] * x(3 * (first + k * step) + c);
-            }
-            for (int k = 0; k < 3; ++k) {
-              y(3 * (first + k * step) + c) += lambda * Coefficients[k] * difference;
-            }
-          }
-        }
-        for (size_t i = 0; i < voxels.size(); ++i) {
-          const auto& voxel = voxels[i];
-          const Eigen::Vector3d u = weighted[i] * nodeValue(voxel, x.data());
-          for (int j = 0; j < voxel.nNodes; ++j) {
-            y.segment<3>(3 * voxel.node[j]) += voxel.nodeWeight[j] * u;
-          }
-        }
-      };
-      auto precondition = [&](const Eigen::VectorXd& r, Eigen::VectorXd& z) {
-        for (int l = 0; l < voxelsPerSector; ++l) {
-          z.segment<3>(3 * l) = block[l] * r.segment<3>(3 * l);
-        }
-      };
-      // preconditioned conjugate gradients from the previous cycle's solution
-      Eigen::VectorXd x = Eigen::Map<Eigen::VectorXd>(sectorNodes, n);
-      Eigen::VectorXd r(n);
-      Eigen::VectorXd z(n);
-      Eigen::VectorXd q(n);
-      const double rhsNorm = rhs.norm();
-      iterations[sector] = 0;
-      residuals[sector] = 0.;
-      if (rhsNorm == 0.) {
-        std::fill(sectorNodes, sectorNodes + n, 0.);
-        continue;
-      }
-      apply(x, q);
-      r = rhs - q;
-      precondition(r, z);
-      Eigen::VectorXd p = z;
-      double rz = r.dot(z);
-      residuals[sector] = r.norm() / rhsNorm;
-      while (residuals[sector] > SmoothCGTolerance && iterations[sector] < SmoothCGMaxIterations) {
-        apply(p, q);
-        const double alpha = rz / p.dot(q);
-        x += alpha * p;
-        r -= alpha * q;
-        residuals[sector] = r.norm() / rhsNorm;
-        ++iterations[sector];
-        precondition(r, z);
-        const double rzNew = r.dot(z);
-        p = z + (rzNew / rz) * p;
-        rz = rzNew;
-      }
-      finite[sector] = finite[sector] && x.allFinite();
-      Eigen::Map<Eigen::VectorXd>(sectorNodes, n) = x;
-    }
-  };
-  std::atomic<int> nextSector{0};
-  std::vector<std::thread> threads;
-  for (int thread = 0; thread < std::clamp(nThreads, 1, NSectors); ++thread) {
-    threads.emplace_back([&]() {
-      for (int sector = nextSector++; sector < NSectors; sector = nextSector++) {
-        smoothSector(sector);
-      }
-    });
-  }
-  for (auto& thread : threads) {
-    thread.join();
-  }
-
-  const long nWithEntries = std::accumulate(nVoxels.begin(), nVoxels.end(), 0L);
-  const int nNotConverged = std::count_if(residuals.begin(), residuals.end(), [](double residual) { return residual > SmoothCGTolerance; });
-  const int nNotFinite = std::count(finite.begin(), finite.end(), false);
-  LOGP(info, "Smoothing: {} voxels with entries ({} solved, median chi2 / ndf scale {:.3f}), {} stencils per sector, tau {} um, tau0 {} um; CG iterations per sector {} - {}, worst relative residual {:.2e}",
-       nWithEntries, scales.size(), medianScale, stencils.size(), tau * 1e4, tau0 * 1e4, *std::min_element(iterations.begin(), iterations.end()),
-       *std::max_element(iterations.begin(), iterations.end()), *std::max_element(residuals.begin(), residuals.end()));
-  if (robust > 0) {
-    LOGP(info, "Smoothing: {} Tukey reweightings (c = {}), at the last {} voxels below weight 0.5, {} at 0", robust, SmoothTukey,
-         std::accumulate(nLowWeight.begin(), nLowWeight.end(), 0L), std::accumulate(nZeroWeight.begin(), nZeroWeight.end(), 0L));
-  }
-  if (nNotConverged) {
-    LOGP(warning, "Smoothing: the conjugate gradients did not reach the tolerance {} in {} sectors", SmoothCGTolerance, nNotConverged);
-  }
-  if (nNotFinite) {
-    LOGP(error, "Smoothing: the solution is not finite in {} sectors", nNotFinite);
-  }
-  return nNotFinite == 0;
-}
-
-/// the cross-validation of pass 1 on the residuals of pass 2 (taken with pass 1's smoothed map S1 subtracted), per channel (y, z): the chi2
-/// change of pass 2's residuals with pass 1's raw voxels (where solved, else none) and with S1, relative to no fine correction; the
-/// corrections at the voxels' mean positions
-struct CrossValidation {
-  double entries = 0.;
-  std::array<double, 2> raw{};
-  std::array<double, 2> smoothed{};
-};
-
-CrossValidation crossValidate(const TrackResiduals& binning, const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<double>& passOne,
-                              const std::vector<float>& rawPassOne)
-{
-  using S = ChargeSums;
-  // chi2 of one channel's residuals at (dX, d) minus at (0, 0): sum w (r - d + s dX)^2 - sum w r^2
-  auto channelChi2 = [](const std::array<double, S::NSums>& channel, double dX, double d) {
-    return d * d * channel[S::W] + dX * dX * channel[S::WSS] - 2. * dX * d * channel[S::WS] - 2. * d * channel[S::WR] + 2. * dX * channel[S::WSR];
-  };
-  const int voxelsPerSector = binning.getNVoxelsPerSector();
-  CrossValidation result;
-  for (size_t voxel = 0; voxel < sums.size(); ++voxel) {
-    ChargeSums total = sums[voxel][0];
-    total.add(sums[voxel][1]);
-    if (total.entries <= 0. || total.y[S::W] <= 0. || total.z[S::W] <= 0.) {
-      continue;
-    }
-    const int sector = int(voxel / voxelsPerSector);
-    const int local = int(voxel % voxelsPerSector);
-    int nodes[4];
-    double weights[4];
-    const int nNodes = bilinearNodes(binning, local % binning.getNXBins(), total.y2x / total.entries, (sector < 18 ? 1. : -1.) * total.z2x / total.entries,
-                                     nodes, weights);
-    std::array<double, 3> smoothed{};
-    for (int j = 0; j < nNodes; ++j) {
-      for (int c = 0; c < 3; ++c) {
-        smoothed[c] += weights[j] * passOne[3 * (size_t(sector) * voxelsPerSector + nodes[j]) + c];
-      }
-    }
-    // relative to S1: no fine correction = -S1, the raw voxel = raw - S1, S1 = 0
-    std::array<double, 3> raw{};
-    for (int c = 0; c < 3; ++c) {
-      raw[c] = rawPassOne[3 * voxel + c] - smoothed[c];
-    }
-    const double noneY = channelChi2(total.y, -smoothed[0], -smoothed[1]);
-    const double noneZ = channelChi2(total.z, -smoothed[0], -smoothed[2]);
-    result.entries += total.entries;
-    result.raw[0] += channelChi2(total.y, raw[0], raw[1]) - noneY;
-    result.raw[1] += channelChi2(total.z, raw[0], raw[2]) - noneZ;
-    result.smoothed[0] -= noneY;
-    result.smoothed[1] -= noneZ;
-  }
-  return result;
-}
-
 /// GBL's parameters (q/p, snp, tgl, y, z) of a state: a scattering kink changes only snp and tgl
 std::array<double, 5> toGbl(const TrackParD& track)
 {
@@ -1120,6 +810,7 @@ struct Cluster {
   bool excluded = false; ///< de-weighted in the fit
   double sigmaY = 0.;    ///< the cluster's own error
   double sigmaZ = 0.;
+  double fineCorrection[3] = {0., 0., 0.}; ///< TPC: the fineMapInput correction subtracted from (x, y, z)
 };
 
 /// the fit of a track: active = the clusters in the final pass, reference the states at their planes, outlier the last pass's flags
@@ -1364,7 +1055,7 @@ struct FitContext {
   GID::mask_t sources;
   const BaseCorrection* baseCorrection = nullptr; ///< nullptr: no base correction
   const FineMapInput* fineMap = nullptr;          ///< nullptr: no previous fine map
-  const FineMapInput* passOne = nullptr;          ///< pass 2: the smoothed map of pass 1, subtracted after fineMap
+  bool addBackFineMap = false;                    ///< the fineMap correction added back to the summed residuals
   const TrackResiduals* binning = nullptr;
   const RowGeometry* geometry = nullptr;
   float maxZ2X = 0.f;
@@ -1549,10 +1240,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.z = z;
     }
     if (context.fineMap) {
-      context.fineMap->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z);
-    }
-    if (context.passOne) {
-      context.passOne->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z);
+      context.fineMap->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z, cluster.fineCorrection);
     }
     cluster.excluded = isExcludedFromFit(cluster.row, cluster.padY, *context.geometry);
     nFitClusters += !cluster.excluded;
@@ -1657,6 +1345,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     contribution.weightY = weight[0];
     contribution.slopeZ = tgl / cosPhi;
     contribution.residualZ = unbiased[1];
+    if (context.addBackFineMap) {
+      // the residual of the uncorrected cluster: (dX, dY, dZ) = fine correction + what is left (r_y = dY - t dX, r_z = dZ - c dX)
+      const double* correction = cluster.fineCorrection;
+      contribution.residualY += correction[1] - contribution.slopeY * correction[0];
+      contribution.residualZ += correction[2] - contribution.slopeZ * correction[0];
+    }
     contribution.weightZ = weight[1];
     batch.push_back(contribution);
     ++counters[Residuals];
@@ -1675,12 +1369,10 @@ struct SelectedTFs {
   std::vector<float> idc; ///< (A + C) / 2 of the TFs with IDC
 };
 
-/// voxResTree (with the binning, the CTP / IDC means and medians in the user info), OrbitLumiInfo and optionally fineSums. smoothed: the
-/// nodes of the map (empty: DS = D); two passes: sums = pass 2's, passOne = S1 (added to pass 2's voxel solve at the mean position: D),
-/// sumsPassOne = pass 1's (if writeSums: fineSums, pass 2's in fineSumsPass2); extraInfo: more user info
+/// voxResTree (DS = D; with the binning, the CTP / IDC means and medians in the user info), OrbitLumiInfo and optionally fineSums;
+/// extraInfo: more user info
 void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, const std::string& y2xBinning, const std::string& z2xBinning, float maxZ2X,
-                 const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<double>& smoothed, const std::vector<double>& passOne,
-                 const std::vector<std::array<ChargeSums, 2>>& sumsPassOne, const std::vector<std::pair<std::string, std::string>>& extraInfo, long nTracks,
+                 const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<std::pair<std::string, std::string>>& extraInfo, long nTracks,
                  double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected)
 {
   // CTP luminosity and IDC of the selected TFs, as staticMapCreatorCPM.C (PbPb: mean CTP luminosity x 2.414)
@@ -1770,17 +1462,6 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
           VoxelSolution solution;
           if (solveVoxel(total, minEntries, solution)) {
             ++nSolved;
-            if (!passOne.empty()) {
-              int nodes[4];
-              double weights[4];
-              const int nNodes = bilinearNodes(binning, binX, result.stat[TrackResiduals::VoxF], (sector < 18 ? 1. : -1.) * result.stat[TrackResiduals::VoxZ],
-                                               nodes, weights);
-              for (int j = 0; j < nNodes; ++j) {
-                for (int coordinate = 0; coordinate < 3; ++coordinate) {
-                  solution.value[coordinate] += weights[j] * passOne[3 * (size_t(sector) * voxelsPerSector + nodes[j]) + coordinate];
-                }
-              }
-            }
             for (int coordinate = 0; coordinate < 3; ++coordinate) {
               result.D[coordinate] = solution.value[coordinate];
               result.DS[coordinate] = solution.value[coordinate];
@@ -1793,19 +1474,13 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
             result.DS[TrackResiduals::ResD] = solution.rmsY;
             result.flags = TrackResiduals::DistDone | TrackResiduals::DispDone;
           }
-          if (!smoothed.empty()) {
-            for (int coordinate = 0; coordinate < 3; ++coordinate) {
-              result.DS[coordinate] = smoothed[3 * voxel + coordinate];
-            }
-            result.flags |= TrackResiduals::SmoothDone;
-          }
           voxTree.Fill();
         }
       }
     }
   }
   voxTree.Write();
-  LOGP(info, "{}: {} voxels, {} solved (min entries {}), {}", fileOutput, sums.size(), nSolved, minEntries, smoothed.empty() ? "not smoothed" : "smoothed");
+  LOGP(info, "{}: {} voxels, {} solved (min entries {}), not smoothed (DS = D)", fileOutput, sums.size(), nSolved, minEntries);
 
   TTree orbitLumiTree("OrbitLumiInfo", "Orbit and Lumi Info");
   int64_t orbitResetTimeMS = orbitResetMS;
@@ -1866,11 +1541,8 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
     }
     sumsTree.Write();
   };
-  if (writeSums && sumsPassOne.empty()) {
+  if (writeSums) {
     writeSumsTree("fineSums", "per voxel and charge the sums of the unbiased TPC-only residuals", sums);
-  } else if (writeSums) {
-    writeSumsTree("fineSums", "pass 1: per voxel and charge the sums of the unbiased TPC-only residuals", sumsPassOne);
-    writeSumsTree("fineSumsPass2", "pass 2: per voxel and charge the sums of the unbiased TPC-only residuals with pass 1's smoothed map subtracted", sums);
   }
 
   const std::filesystem::path outputPath(fileOutput);
@@ -2089,13 +1761,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        int minEntries = 15,                                                          // residuals for a voxel to be solved
                        bool writeSums = false,                                                       // also write the per-voxel sums (tree fineSums)
                        int nThreads = 8,                                                             // fit threads; one more thread reads the input
-                       float smoothTau = 1000.f,                                                     // [um] prior rms of the second differences of the smoothed map (DS); 0: no smoothing, DS = D
-                       float smoothTau0 = 1000.f,                                                    // [um] prior rms of a node of the smoothed map (the ridge towards 0)
-                       int smoothRobust = 0,                                                         // Tukey reweightings of the voxels in the smoothing
-                       int nPasses = 1,                                                              // 2: pass 1 on the even TFs in time, pass 2 on the odd ones with pass 1's smoothed map subtracted
                        int itsInFit = 0,                                                             // tests: 1 the ITS clusters in the track fit, 2 also the primary vertex; 0 TPC clusters only
                        bool fitSlopes = false,                                                       // the slopes of the voxel model from the fitted track at the cluster instead of the reference
-                       int kinkQAEvery = 0)                                                          // with itsInFit: the kinks before the TPC of every n-th fitted track (per thread) to <output stem>.kinkQA.root; 0 off
+                       int kinkQAEvery = 0,                                                          // with itsInFit: the kinks before the TPC of every n-th fitted track (per thread) to <output stem>.kinkQA.root; 0 off
+                       bool addBackFineMap = false)                                                  // with fineMapInput: its correction added back to the summed residuals (an iteration: the output is the full fine map)
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2104,17 +1773,11 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     LOGP(fatal, "A run number is required");
   }
   nThreads = std::max(1, nThreads);
-  if (smoothTau > 0.f && !(smoothTau0 > 0.f)) {
-    LOGP(fatal, "smoothTau0 must be > 0 (the ridge keeps the voxels without entries defined)");
-  }
-  if (nPasses != 1 && nPasses != 2) {
-    LOGP(fatal, "nPasses {}: 1 or 2", nPasses);
-  }
   if (itsInFit < 0 || itsInFit > 2) {
     LOGP(fatal, "itsInFit {}: 0, 1 or 2", itsInFit);
   }
-  if (nPasses == 2 && !(smoothTau > 0.f)) {
-    LOGP(fatal, "Two passes need the smoothing (smoothTau > 0): pass 2 subtracts pass 1's smoothed map");
+  if (addBackFineMap && fineMapInput.empty()) {
+    LOGP(fatal, "addBackFineMap needs a fineMapInput");
   }
   // a local CCDB snapshot keeps one object per path: the time-dependent TPC scalers need the server
   if (gSystem->Getenv("ALICEO2_CCDB_LOCALCACHE")) {
@@ -2210,37 +1873,22 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     nTFsNoIDC += !tf.hasIDC;
   }
   const bool needIDC = baseCorrection.derivative != nullptr;
-  LOGP(info, "fineMapCreatorGBL: {} files, {} TFs ({} without IDC{}); correction map {}, derivative {}, fine map {}; grid y/x {}, z/x {} up to {} ({} voxels per sector); {} fit threads, {} passes",
+  LOGP(info, "fineMapCreatorGBL: {} files, {} TFs ({} without IDC{}); correction map {}, derivative {}, fine map {}{}; grid y/x {}, z/x {} up to {} ({} voxels per sector); {} fit threads",
        files.size(), tfs.size(), nTFsNoIDC, needIDC ? ": skipped" : "", corrMap.empty() ? "none" : corrMap, corrMapDerivative.empty() ? "none" : corrMapDerivative,
-       fineMapInput.empty() ? "none" : fineMapInput, y2xBinning, z2xBinning, maxZ2X, voxelsPerSector, nThreads, nPasses);
+       fineMapInput.empty() ? "none" : fineMapInput, addBackFineMap ? " (added back to the residuals)" : "", y2xBinning, z2xBinning, maxZ2X, voxelsPerSector, nThreads);
 
-  // the TFs to fit (with a derivative map those with IDC) in input order; two passes: pass 1 the even TFs in time, pass 2 the odd ones
+  // the TFs to fit (with a derivative map those with IDC) in input order
   std::vector<const TFInfo*> fitTFs;
   for (const auto& tf : tfs) {
     if (!needIDC || tf.hasIDC) {
       fitTFs.push_back(&tf);
     }
   }
-  std::array<std::vector<const TFInfo*>, 2> passTFs;
-  if (nPasses == 2) {
-    std::vector<const TFInfo*> byTime = fitTFs;
-    std::stable_sort(byTime.begin(), byTime.end(), [](const TFInfo* first, const TFInfo* second) { return first->timeMS < second->timeMS; });
-    std::vector<char> isOdd(tfs.size(), 0);
-    for (size_t rank = 1; rank < byTime.size(); rank += 2) {
-      isOdd[byTime[rank] - tfs.data()] = 1;
-    }
-    for (const TFInfo* tf : fitTFs) {
-      passTFs[isOdd[tf - tfs.data()]].push_back(tf);
-    }
-    LOGP(info, "Two passes: {} TFs (even in time) in pass 1, {} (odd) in pass 2", passTFs[0].size(), passTFs[1].size());
-  } else {
-    passTFs[0] = fitTFs;
-  }
-
   FitContext context;
   context.sources = GID::getSourcesMask(trackSources);
   context.baseCorrection = baseCorrection.map ? &baseCorrection : nullptr;
   context.fineMap = fineMap.nodes.empty() ? nullptr : &fineMap;
+  context.addBackFineMap = addBackFineMap;
   context.binning = binning.get();
   context.geometry = &geometry;
   context.maxZ2X = maxZ2X;
@@ -2261,71 +1909,14 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
   SelectedTFs selected;
-  long nFitted = runPass(passTFs[0], files, context, nThreads, sums, selected, nPasses == 2 ? " pass 1" : "");
-
-  // the smoothing; two passes: S1 of pass 1, pass 2 with S1 subtracted, S2 of pass 2, DS = S1 + S2
-  auto smooth = [&](const std::vector<std::array<ChargeSums, 2>>& passSums, std::vector<double>& nodes, const std::string& label) {
-    const auto smoothStart = std::chrono::steady_clock::now();
-    const bool ok = smoothMap(*binning, passSums, minEntries, smoothTau * 1e-4, smoothTau0 * 1e-4, smoothRobust, nThreads, nodes);
-    LOGP(info, "fineMapCreatorGBL{}: smoothing {:.1f} s", label, std::chrono::duration<double>(std::chrono::steady_clock::now() - smoothStart).count());
-    return ok;
-  };
+  const long nFitted = runPass(fitTFs, files, context, nThreads, sums, selected, "");
   std::vector<std::pair<std::string, std::string>> extraInfo;
-  std::vector<double> smoothed;
-  std::vector<double> passOne;
-  std::vector<std::array<ChargeSums, 2>> sumsPassOne;
-  if (nPasses == 2) {
-    if (!smooth(sums, passOne, " pass 1")) {
-      LOGP(fatal, "Smoothing of pass 1 failed");
-    }
-    // pass 1's raw voxels for the cross-validation; its smoothed map subtracted in pass 2
-    std::vector<float> rawPassOne(3 * sums.size(), 0.f);
-    for (size_t voxel = 0; voxel < sums.size(); ++voxel) {
-      ChargeSums total = sums[voxel][0];
-      total.add(sums[voxel][1]);
-      VoxelSolution solution;
-      if (solveVoxel(total, minEntries, solution)) {
-        for (int coordinate = 0; coordinate < 3; ++coordinate) {
-          rawPassOne[3 * voxel + coordinate] = solution.value[coordinate];
-        }
-      }
-    }
-    FineMapInput passOneMap;
-    passOneMap.binning = makeBinning(y2xBinning, z2xBinning, maxZ2X);
-    passOneMap.voxelsPerSector = voxelsPerSector;
-    passOneMap.nodes.assign(passOne.begin(), passOne.end());
-    context.passOne = &passOneMap;
-    if (writeSums) {
-      sumsPassOne = sums;
-    }
-    std::fill(sums.begin(), sums.end(), std::array<ChargeSums, 2>{});
-    nFitted += runPass(passTFs[1], files, context, nThreads, sums, selected, " pass 2");
-    std::vector<double> passTwo;
-    if (!smooth(sums, passTwo, " pass 2")) {
-      LOGP(fatal, "Smoothing of pass 2 failed");
-    }
-    smoothed.resize(passOne.size());
-    for (size_t node = 0; node < smoothed.size(); ++node) {
-      smoothed[node] = passOne[node] + passTwo[node];
-    }
-    const auto validation = crossValidate(*binning, sums, passOne, rawPassOne);
-    const double perMillion = 1e6 / std::max(1., validation.entries);
-    const std::string validationText = fmt::format("pass 1 on pass 2's {:.0f} residuals, chi2 change per 1e6 residuals y / z: raw voxels {:.1f} / {:.1f}, smoothed {:.1f} / {:.1f}",
-                                                   validation.entries, validation.raw[0] * perMillion, validation.raw[1] * perMillion,
-                                                   validation.smoothed[0] * perMillion, validation.smoothed[1] * perMillion);
-    LOGP(info, "Cross-validation: {}", validationText);
-    extraInfo.emplace_back("nPasses", "2");
-    extraInfo.emplace_back("passTFs", fmt::format("{} {}", passTFs[0].size(), passTFs[1].size()));
-    extraInfo.emplace_back("crossValidation", validationText);
-  } else if (smoothTau > 0.f && !smooth(sums, smoothed, "")) {
-    LOGP(error, "Smoothing failed: DS = D");
-    smoothed.clear();
-  }
+  extraInfo.emplace_back("smoothing", "none");
+  extraInfo.emplace_back("fineMapInput", fineMapInput.empty() ? std::string("none") : fineMapInput + (addBackFineMap ? " (added back)" : " (subtracted)"));
   if (kinkQA) {
     kinkQA->Close();
   }
-  extraInfo.emplace_back("smoothing", smoothed.empty() ? std::string("none") : fmt::format("tau {} um, tau0 {} um, robust {}", smoothTau, smoothTau0, smoothRobust));
-  writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, smoothed, passOne, sumsPassOne, extraInfo, nFitted, minEntries, writeSums, runNumber,
+  writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, extraInfo, nFitted, minEntries, writeSums, runNumber,
               orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected);
   LOGP(info, "fineMapCreatorGBL: {:.1f} s", std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime).count());
 }
