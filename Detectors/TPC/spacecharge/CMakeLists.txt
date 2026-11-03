@@ -17,7 +17,6 @@ o2_add_library(TPCSpaceCharge
                        src/DataContainer3D.cxx
                PUBLIC_LINK_LIBRARIES O2::TPCBaseRecSim
                                      O2::Field
-                                     Vc::Vc
                                      ROOT::Core
                                      O2::DataFormatsParameters)
 

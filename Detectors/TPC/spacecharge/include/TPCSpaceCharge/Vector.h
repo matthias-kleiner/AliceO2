@@ -25,7 +25,7 @@ namespace o2
 namespace tpc
 {
 
-/// simple fixed size vector (previously based on Vc::Memory, the SIMD operations which were used only in the tricubic interpolation are implemented there)
+/// simple fixed size vector
 /// \tparam DataT type of the data
 /// \tparam N number of elements
 template <typename DataT, size_t N>
