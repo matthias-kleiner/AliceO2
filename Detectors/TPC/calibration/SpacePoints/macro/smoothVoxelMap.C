@@ -1015,7 +1015,7 @@ bool getScalerValues(o2::ccdb::BasicCCDBManager& manager, long timeMS, float& sc
   return scalerA > 0.f && scalerC > 0.f;
 }
 
-/// the IDC join: mean and median of (A + C) / 2 over the TFs of the input's OrbitLumiInfo (timeMSsel, sorted: the CCDB cache hits while
+/// the IDC join: mean and median of (A + C) / 2 over the TFs of the input's OrbitLumiInfo (timeMSsel of all entries, sorted: the CCDB cache hits while
 /// consecutive TFs share a validity window); false without TFs or valid scalers
 bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
 {
@@ -1025,8 +1025,14 @@ bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
     LOGP(warning, "IDC join: no OrbitLumiInfo with timeMSsel in the input");
     return false;
   }
-  orbitLumiTree->GetEntry(0);
-  std::vector<long> sortedTimes(times ? *times : std::vector<long>());
+  // every entry: an hadd of several inputs (e.g. the chunks of a split fine pass) has one per input
+  std::vector<long> sortedTimes;
+  for (long entry = 0; entry < orbitLumiTree->GetEntries(); ++entry) {
+    orbitLumiTree->GetEntry(entry);
+    if (times) {
+      sortedTimes.insert(sortedTimes.end(), times->begin(), times->end());
+    }
+  }
   orbitLumiTree->ResetBranchAddresses();
   delete times;
   if (sortedTimes.empty()) {
