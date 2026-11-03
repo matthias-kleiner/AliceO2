@@ -86,10 +86,10 @@ class Vector3D
   const auto& data() const { return mStorage; }
   auto& data() { return mStorage; }
 
-  unsigned int getNr() const { return mNr; }          ///< get number of data points in r direction
-  unsigned int getNz() const { return mNz; }          ///< get number of data points in z direction
-  unsigned int getNphi() const { return mNphi; }      ///< get number of data points in phi direction
-  unsigned int size() const { return mStorage.size; } ///< get number of data points
+  unsigned int getNr() const { return mNr; }            ///< get number of data points in r direction
+  unsigned int getNz() const { return mNz; }            ///< get number of data points in z direction
+  unsigned int getNphi() const { return mNphi; }        ///< get number of data points in phi direction
+  unsigned int size() const { return mStorage.size(); } ///< get number of data points
 
   auto begin() const { return mStorage.begin(); }
   auto begin() { return mStorage.begin(); }

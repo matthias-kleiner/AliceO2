@@ -23,6 +23,7 @@
 #include "Framework/Logger.h"
 #include <numeric>
 #include <algorithm>
+#include <chrono>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -127,6 +128,7 @@ void PoissonSolver<DataT>::poissonMultiGrid2D(DataContainer& matricesV, const Da
       }
     } else {
       restrict2D(tvChargeFMG[index], tvChargeFMG[count - 2], tnRRow, tnZColumn, 0);
+      restrictBoundary2D(tvArrayV[index], tvArrayV[count - 2], tnRRow, tnZColumn, 0);
     }
     iOne *= 2;
     jOne *= 2;
@@ -142,7 +144,7 @@ void PoissonSolver<DataT>::poissonMultiGrid2D(DataContainer& matricesV, const Da
     jOne /= 2;
     tnRRow = iOne == 1 ? mParamGrid.NRVertices : mParamGrid.NRVertices / iOne + 1;
     tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
-    const DataT h = gridSpacingR * nLoop;
+    const DataT h = gridSpacingR * iOne;
     const DataT h2 = h * h;
     const DataT tempRatio = ratioZ * iOne * iOne / (jOne * jOne);
     const DataT tempFourth = 1 / (2 + 2 * tempRatio);
@@ -592,7 +594,7 @@ void PoissonSolver<DataT>::wCycle2D(const int gridFrom, const int gridTo, const 
   int tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
 
   std::vector<DataT> coefficient1(mParamGrid.NRVertices);
-  std::vector<DataT> coefficient2(mParamGrid.NZVertices);
+  std::vector<DataT> coefficient2(mParamGrid.NRVertices);
 
   // 1) Go to coarsest level
   for (int count = gridFrom; count <= gridTo - 2; ++count) {
@@ -672,7 +674,7 @@ void PoissonSolver<DataT>::vCycle2D(const int gridFrom, const int gridTo, const 
   int tnZColumn = jOne == 1 ? mParamGrid.NZVertices : mParamGrid.NZVertices / jOne + 1;
 
   std::vector<DataT> coefficient1(mParamGrid.NRVertices);
-  std::vector<DataT> coefficient2(mParamGrid.NZVertices);
+  std::vector<DataT> coefficient2(mParamGrid.NRVertices);
 
   // 1) Go to coarsest level
   for (int count = gridFrom; count <= gridTo - 1; ++count) {
@@ -1488,7 +1490,7 @@ template <typename DataT>
 void PoissonSolver<DataT>::calcCoefficients(unsigned int from, unsigned int to, const DataT h, const DataT tempRatioZ, const DataT tempRatioPhi, std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2, std::vector<DataT>& coefficient3, std::vector<DataT>& coefficient4) const
 {
   for (unsigned int i = from; i < to; ++i) {
-    const DataT radiusInv = 1 / (TPCParameters<DataT>::IFCRADIUS + i * h);
+    const DataT radiusInv = 1 / (mGrid3D.getGridMinR() + i * h);
     const DataT hRadiusTmp = h * radiusInv / 2;
     coefficient1[i] = 1 + hRadiusTmp;
     coefficient2[i] = 1 - hRadiusTmp;
@@ -1500,8 +1502,8 @@ void PoissonSolver<DataT>::calcCoefficients(unsigned int from, unsigned int to, 
 template <typename DataT>
 void PoissonSolver<DataT>::calcCoefficients2D(unsigned int from, unsigned int to, const DataT h, std::vector<DataT>& coefficient1, std::vector<DataT>& coefficient2) const
 {
-  for (int i = from; i < to; ++i) {
-    DataT radiusInvHalf = h / (2 * (TPCParameters<DataT>::IFCRADIUS + i * h));
+  for (unsigned int i = from; i < to; ++i) {
+    DataT radiusInvHalf = h / (2 * (mGrid3D.getGridMinR() + i * h));
     coefficient1[i] = 1 + radiusInvHalf;
     coefficient2[i] = 1 - radiusInvHalf;
   }
