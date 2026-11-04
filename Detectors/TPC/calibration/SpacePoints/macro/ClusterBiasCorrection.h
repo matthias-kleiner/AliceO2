@@ -37,8 +37,9 @@
 ///   S <stack> <iDrift> <iSlope> <class> <v_0> ... <v_{nPhase-1}>   S-curve: mean inward bias [um] at the phase nodes
 ///   E <stack> <iDrift> <iSlope> <class> <v_0> ... <v_{nDist-1}>    edge part: mean inward bias [um] per d bin, S-curve subtracted
 /// stack: 0 IROC, 1 OROC1, 2 OROC2, 3 OROC3. class: 0 golden (no flag of 0x19), 1 split pad / shared (0x1 or 0x10 without 0x8),
-/// 2 single pad or time (0x8); a class without records falls back to class 0. The S-curve part is taken everywhere, the edge
-/// part only for d inside [dLo, dHi).
+/// 2 single pad (flag 0x8 AND exactly on the pad centre: a single-pad cluster sits there; 0x8 elsewhere is a single-time cluster,
+/// several pads, treated as class 0); a class without records falls back to class 0. The S-curve part is taken everywhere, the
+/// edge part only for d inside [dLo, dHi).
 ///
 /// Interpolation: periodic and linear in the phase between the nodes; linear in the drift length and in |tgSlp| between the
 /// bin centres, clamped to the first / last centre outside; linear in d between the bin centres, clamped below the first centre,
@@ -80,14 +81,15 @@ inline int stackOfRow(int row)
   return row < 63 ? 0 : (row < 97 ? 1 : (row < 127 ? 2 : 3));
 }
 
-/// class of a cluster from its flags (UnbinnedResid::channel); a negative value (no flags stored) counts as golden
-inline int classOfFlags(int flags)
+/// class of a cluster from its flags (UnbinnedResid::channel) and whether it sits exactly on a pad centre; a negative flags value
+/// (no flags stored) counts as golden. flagSingle is single pad OR single time: only on the pad centre it is a single-pad cluster
+inline int classOfFlags(int flags, bool onPadCentre)
 {
   if (flags < 0) {
     return 0;
   }
   if (flags & FlagSingle) {
-    return 2;
+    return onPadCentre ? 2 : 0;
   }
   if (flags & (FlagSplitPad | FlagShared)) {
     return 1;
@@ -221,7 +223,7 @@ struct ClusterBiasCorrection {
     const double pad = d - 0.5;
     const double phase = pad - std::round(pad);
     const int stack = stackOfRow(row);
-    const int cls = classOfFlags(flags);
+    const int cls = classOfFlags(flags, std::abs(phase) < 0.25 / 64.); // snapped: on the pad centre to the float precision of y
     const double bias = interpolate(stack, cls, drift, std::abs(tSlope), [&](size_t r, bool& ok) { return scurveAt(r, phase, ok); }) +
                         interpolate(stack, cls, drift, std::abs(tSlope), [&](size_t r, bool& ok) { return edgeAt(r, d, ok); });
     return float(side * bias);

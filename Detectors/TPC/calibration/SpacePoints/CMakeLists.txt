@@ -93,6 +93,10 @@ o2_add_test_root_macro(macro/smoothVoxelMap.C
                                              O2::TPCBaseRecSim
                        LABELS tpc COMPILE_ONLY)
 
+o2_add_test_root_macro(macro/makeClusterBiasTable.C
+                       PUBLIC_LINK_LIBRARIES O2::Framework
+                       LABELS tpc COMPILE_ONLY)
+
 o2_add_test_root_macro(macro/voxResQA.C
                        PUBLIC_LINK_LIBRARIES O2::SpacePoints
                                              O2::TPCBaseRecSim
@@ -106,6 +110,7 @@ install(FILES macro/staticMapCreator.C
 install(FILES macro/staticMapCreatorCPM.C
               macro/fineMapCreatorGBL.C
               macro/ClusterBiasCorrection.h
+              macro/makeClusterBiasTable.C
               macro/SmoothingExtrapolate.C
               macro/smoothVoxelMap.C
               macro/voxResQA.C

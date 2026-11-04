@@ -150,14 +150,18 @@ int main()
     checkClose(corr.inwardBias(1, 0, 25., 0.05, 3.25) - scurveTrue(0, 0, -0.25) * um, 0., 1e-9, "edge zero beyond dHi");
     checkClose(corr.inwardBias(1, 0, 75., 0.05, 0.875) - scurveTrue(1, 0, 0.375) * um, edgeTrue(1, 0.875) * um, 1e-7, "edge at the last centre");
   }
-  // 5. classes from the flags: single (0x8) has its own record where present, else class 0; split / shared fall back to class 0
+  // 5. classes from the flags: single pad (0x8 on the pad centre) has its own record where present, else class 0; 0x8 off the pad
+  //    centre is a single-time cluster (class 0); split / shared fall back to class 0 without records
   {
-    const double d = 20.5 + 16. / 64.;
-    checkClose(corr.dy(Row, yAt(d, +1), 25.f, 0.05f, 0x8), 77. * um, 1e-7, "single class record");
-    checkClose(corr.dy(Row, yAt(d, +1), 25.f, 0.05f, 0x9), 77. * um, 1e-7, "single wins over split pad");
-    checkClose(corr.dy(Row, yAt(d, +1), 75.f, 0.05f, 0x8), AmpS[1][0] * um, 1e-7, "single without record: class 0");
-    checkClose(corr.dy(Row, yAt(d, +1), 25.f, 0.05f, 0x10), AmpS[0][0] * um, 1e-7, "shared: class 1 missing -> class 0");
-    checkClose(corr.dy(Row, yAt(d, +1), 25.f, 0.05f, -1), AmpS[0][0] * um, 1e-7, "no flags stored (-1): golden");
+    const double dCentre = 20.5;          // phase 0: single-pad clusters sit here
+    const double dOff = 20.5 + 16. / 64.; // phase 0.25
+    checkClose(corr.dy(Row, yAt(dCentre, +1), 25.f, 0.05f, 0x8), 77. * um, 1e-7, "single pad on the pad centre: class-2 record");
+    checkClose(corr.dy(Row, yAt(dCentre, -1), 25.f, 0.05f, 0x9), -77. * um, 1e-7, "single wins over split pad, -y side");
+    checkClose(corr.dy(Row, yAt(dCentre, +1), 25.f, 0.05f, 0), scurveTrue(0, 0, 0.) * um, 1e-7, "golden on the pad centre: class 0");
+    checkClose(corr.dy(Row, yAt(dOff, +1), 25.f, 0.05f, 0x8), AmpS[0][0] * um, 1e-7, "0x8 off the pad centre (single time): class 0");
+    checkClose(corr.dy(Row, yAt(dCentre, +1), 75.f, 0.05f, 0x8), scurveTrue(1, 0, 0.) * um, 1e-7, "single without record: class 0");
+    checkClose(corr.dy(Row, yAt(dOff, +1), 25.f, 0.05f, 0x10), AmpS[0][0] * um, 1e-7, "shared: class 1 missing -> class 0");
+    checkClose(corr.dy(Row, yAt(dOff, +1), 25.f, 0.05f, -1), AmpS[0][0] * um, 1e-7, "no flags stored (-1): golden");
   }
   // 6. a stack without records: no correction
   checkClose(corr.dy(10, 5.f, 25.f, 0.05f, 0), 0., 0., "IROC row without geometry");
