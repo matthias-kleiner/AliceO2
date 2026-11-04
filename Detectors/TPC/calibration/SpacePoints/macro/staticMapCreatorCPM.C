@@ -28,6 +28,7 @@
 #include "DetectorsBase/Propagator.h"
 #include "TPCBase/Mapper.h"
 #include "ReconstructionDataFormats/TrackUtils.h"
+#include "ClusterBiasCorrection.h"
 
 #include <TFile.h>
 #include <TTree.h>
@@ -889,6 +890,7 @@ void doFileProcessing(const int iThread,
                       const float skipEdgePads,
                       const float maxTrackTgl,
                       const int clusterFlagMask,
+                      const o2::tpc::cluster_bias::ClusterBiasCorrection& clusterBias,
                       std::vector<long int>& nEdgeClustersSkipped_thread,
                       std::vector<long int>& nFlagClustersSkipped_thread,
                       std::vector<long int>& nTracksSkippedByBadRangeList_thread,
@@ -1323,13 +1325,16 @@ void doFileProcessing(const int iThread,
     // Do not disable res.dy/dz/y/z/row/sec/rejected or trackInfo.idxFirstResidual/nResiduals/sourceId --
     // all of those are read below. Note trackInfo.filterFlag (on TrackDataCompact) is unused, while the
     // separate trk.filterFlag (on TrackData, read further down) is used; they are different fields.
-    // res.tgSlp stays 0: the residual slope method takes its slopes from the propagated track.
+    // res.tgSlp stays 0 unless the cluster-bias correction is on: the residual slope method takes its slopes from the propagated track.
     {
       TTree* residTree = treeUnbinnedResiduals->GetTree();
       for (const char* br : {"res.tgSlp", "res.channel", "trackInfo.multStack*",
                              "trackInfo.nExtDetResid", "trackInfo.filterFlag"}) {
-        if (clusterFlagMask != 0 && std::string_view(br) == "res.channel") {
-          continue; // the TPC cluster flags (clusterFlagMask) live in res.channel
+        if ((clusterFlagMask != 0 || clusterBias.isActive()) && std::string_view(br) == "res.channel") {
+          continue; // the TPC cluster flags (clusterFlagMask, the class of the cluster-bias correction) live in res.channel
+        }
+        if (clusterBias.isActive() && std::string_view(br) == "res.tgSlp") {
+          continue; // the track slope at the cluster for the cluster-bias correction
         }
         residTree->SetBranchStatus(br, 0);
       }
@@ -1694,6 +1699,14 @@ void doFileProcessing(const int iThread,
           // back on the 1/64-pad cluster grid (undoes the packing shift, see snapClusterY), before the edge cut and the binning
           yPos = snapClusterY(yPos, padWidthByRow[residIn.row], padAtYZeroByRow[residIn.row]);
           float zPos = residIn.z * param::MaxZ / 0x7fff + residIn.dz * param::MaxResid / 0x7fff;
+          // per-cluster correction of the cluster-position biases of the reconstruction (pad-phase S-curve, sector-edge truncation;
+          // ClusterBiasCorrection.h) on the snapped position, before the edge cut and the binning; also added to the residual
+          float clusterBiasDy = 0.f;
+          if (clusterBias.isActive()) {
+            const float tgSlpCluster = residIn.isPositionOnly() ? 0.f : residIn.tgSlp * param::MaxTgSlp / 0x7fff;
+            clusterBiasDy = clusterBias.dy(residIn.row, yPos, o2::tpc::cluster_bias::driftLength(zPos), tgSlpCluster, residIn.channel);
+            yPos += clusterBiasDy;
+          }
           // exclude the edge pads as they are biased!
           // get max y-position of edge pad: pad centre last pad - pad width/2
           if (skipEdgePads && std::abs(yPos) > yMaxCentrePadByRow[residIn.row]) {
@@ -1754,7 +1767,7 @@ void doFileProcessing(const int iThread,
           }
 
           // residual slope method: the cluster's residual to the reference track; the slopes from the ITS track propagated to the row
-          // (independent of the TPC clusters; res.tgSlp is not read, see the branch status above)
+          // (independent of the TPC clusters; res.tgSlp is only read for the cluster-bias correction, see the branch status above)
           if (!slopeSums.empty() && propagatedToRow) {
             const float snp = trkPar.getSnp();
             const float tgSlp = snp / std::sqrt((1.f - snp) * (1.f + snp));
@@ -1767,7 +1780,7 @@ void doFileProcessing(const int iThread,
             sums.x += xPos;
             sums.y2x += yPos / xPos;
             sums.z2x += zPos / xPos;
-            ChargeSums::fill(sums.y, tgSlp, residIn.dy * param::MaxResid / 0x7fff, 1. / (sigmaY * sigmaY));
+            ChargeSums::fill(sums.y, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, 1. / (sigmaY * sigmaY));
             ChargeSums::fill(sums.z, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, 1. / (sigmaZ * sigmaZ));
           }
 
@@ -2075,9 +2088,12 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                                                                 // layout of fineMapCreatorGBL.C); either option costs ~260 B per voxel
                          float maxTrackTgl = -1.f,              // |tgl| cut of the tracks; <= 0 (default): none (see revalidateTrack). Before,
                                                                 // the tracks were cut at maxZ2XCut (= maxTrackTgl = maxZ2XCut)
-                         int clusterFlagMask = 0)               // skip the TPC cluster residuals with any of these flags (UnbinnedResid::channel):
+                         int clusterFlagMask = 0,               // skip the TPC cluster residuals with any of these flags (UnbinnedResid::channel):
                                                                 // 0x1 split pad, 0x2 split time, 0x4 edge, 0x8 single pad or time, 0x10 shared
                                                                 // (merger); 0 (default): keep all. "Golden" clusters: 0x19
+                         std::string clusterBiasFile = "")      // table of the per-cluster correction of the cluster-position biases (pad-phase
+                                                                // S-curve, sector-edge truncation; format in ClusterBiasCorrection.h), applied to the
+                                                                // snapped cluster y before the edge cut and the binning; empty (default): off
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2097,6 +2113,20 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   fair::Logger::SetFileSeverity(fair::Severity::info);
 
   const Mapper& mapper = Mapper::instance();
+
+  // per-cluster correction of the cluster-position biases (empty file name: off)
+  o2::tpc::cluster_bias::ClusterBiasCorrection clusterBias;
+  if (!clusterBiasFile.empty()) {
+    std::string error;
+    if (!clusterBias.load(clusterBiasFile, &error)) {
+      LOGP(fatal, "cluster-bias correction: cannot use {}: {}", clusterBiasFile, error);
+    }
+    for (int irow = 0; irow < NRows; ++irow) {
+      clusterBias.setRowGeometry(irow, mapper.getPadRegionInfo(Mapper::REGION[irow]).getPadWidth(), mapper.getNumberOfPadsInRowSector(irow));
+    }
+    LOGP(info, "cluster-bias correction from {}: {} drift x {} slope bins, {} phase nodes, {} distance bins", clusterBiasFile,
+         clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
+  }
 
   // Obtain configuration
   const SpacePointsCalibConfParam& params = SpacePointsCalibConfParam::Instance();
@@ -2346,6 +2376,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              skipEdgePads,
                              maxTrackTgl,
                              clusterFlagMask,
+                             std::cref(clusterBias),
                              std::ref(nEdgeClustersSkipped_thread),
                              std::ref(nFlagClustersSkipped_thread),
                              std::ref(nTracksSkippedByBadRangeList_thread),

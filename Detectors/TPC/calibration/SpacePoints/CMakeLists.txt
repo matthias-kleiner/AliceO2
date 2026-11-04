@@ -105,6 +105,7 @@ install(FILES macro/staticMapCreator.C
 
 install(FILES macro/staticMapCreatorCPM.C
               macro/fineMapCreatorGBL.C
+              macro/ClusterBiasCorrection.h
               macro/SmoothingExtrapolate.C
               macro/smoothVoxelMap.C
               macro/voxResQA.C

@@ -14,7 +14,9 @@
 /// unbiased residuals of its clusters summed per voxel of the map-creation grid, and the voxel solve of the slope model.
 ///
 /// Per track:
-/// - the TPC clusters as the residual stream stores them (uncorrected, at the track's time), corrected with the base correction
+/// - the TPC clusters as the residual stream stores them (uncorrected, at the track's time), y snapped back to the 1/64-pad cluster grid
+///   and, with clusterBiasFile, corrected for the cluster-position biases of the reconstruction (ClusterBiasCorrection.h: pad-phase
+///   S-curve, sector-edge truncation), then corrected with the base correction
 ///   d = d_map + lumiScale * d_derivative (both evaluated at the cluster; lumiScale from the TF's IDC as in the reconstruction,
 ///   LumiScaleMode::DerivativeMap) and optionally with a previous fine map (the iteration); along the motion (a cluster on a row not
 ///   beyond the previous one is dropped);
@@ -129,6 +131,8 @@
 #include "TPCBaseRecSim/CDBTypes.h"
 #include "TPCCalibration/TPCScaler.h"
 #include "TPCFastTransform.h"
+
+#include "ClusterBiasCorrection.h"
 R__LOAD_LIBRARY(libGBL)
 #else
 #error This macro must run in compiled mode
@@ -837,7 +841,7 @@ struct Cluster {
   double x = 0.;     ///< TPC: corrected
   double y = 0.;
   double z = 0.;
-  double padY = 0.; ///< measured y on the pad plane, before any correction
+  double padY = 0.; ///< measured y on the pad plane (snapped, cluster-bias corrected), before the map corrections
   double tgSlp = 0.;
   bool tgSlpValid = true;
   bool excluded = false; ///< de-weighted in the fit
@@ -1095,6 +1099,7 @@ struct FitContext {
   const RowGeometry* geometry = nullptr;
   float maxZ2X = 0.f;
   int clusterFlagMask = 0; ///< TPC cluster flags (UnbinnedResid::channel) whose clusters are de-weighted in the fit and not summed
+  const o2::tpc::cluster_bias::ClusterBiasCorrection* clusterBias = nullptr; ///< nullptr: no per-cluster bias correction
   int voxelsPerSector = 0;
   int itsInFit = 0;                                  ///< 1: the ITS clusters in the fit, 2: also the primary vertex
   bool fitSlopes = false;                            ///< the slopes of the voxel model from the fitted track instead of the reference
@@ -1272,10 +1277,16 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.y = (padAtYZero - std::round(pad * 64.) / 64.) * padWidth;
     }
     cluster.z = residual.z * o2::tpc::param::MaxZ / 0x7fff + decodeResidual(residual.dz);
-    cluster.padY = cluster.y;
     // position-only cluster or saturated tgSlp: the reference's angle instead
     cluster.tgSlpValid = !residual.isPositionOnly() && !residual.isTgSlpClamped();
     cluster.tgSlp = residual.tgSlp * o2::tpc::param::MaxTgSlp / 0x7fff;
+    // per-cluster correction of the cluster-position biases of the reconstruction (pad-phase S-curve, sector-edge truncation;
+    // ClusterBiasCorrection.h) on the snapped position, before the edge cut and the binning
+    if (context.clusterBias) {
+      cluster.y += context.clusterBias->dy(cluster.row, cluster.y, o2::tpc::cluster_bias::driftLength(cluster.z),
+                                           residual.isPositionOnly() ? 0. : cluster.tgSlp, residual.channel);
+    }
+    cluster.padY = cluster.y;
     if (context.baseCorrection) {
       float x = cluster.x;
       float y = cluster.y;
@@ -1750,7 +1761,7 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     if (tf->file != openFile) {
       openFile = tf->file;
       LOGP(info, "Reading {}", files[tf->file]);
-      fileOpen = input.open(files[tf->file], context.itsInFit > 0, context.clusterFlagMask != 0);
+      fileOpen = input.open(files[tf->file], context.itsInFit > 0, context.clusterFlagMask != 0 || context.clusterBias != nullptr);
     }
     auto task = std::make_shared<TFTask>();
     task->info = tf;
@@ -1823,8 +1834,11 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        bool fitSlopes = false,                                                       // the slopes of the voxel model from the fitted track at the cluster instead of the reference
                        int kinkQAEvery = 0,                                                          // with itsInFit: the kinks before the TPC of every n-th fitted track (per thread) to <output stem>.kinkQA.root; 0 off
                        bool addBackFineMap = false,                                                  // with fineMapInput: its correction added back to the summed residuals (an iteration: the output is the full fine map)
-                       int clusterFlagMask = 0)                                                      // TPC clusters with any of these flags (UnbinnedResid::channel: 0x1 split pad, 0x2 split time, 0x4 edge,
+                       int clusterFlagMask = 0,                                                      // TPC clusters with any of these flags (UnbinnedResid::channel: 0x1 split pad, 0x2 split time, 0x4 edge,
                                                                                                      // 0x8 single pad or time, 0x10 shared) are de-weighted in the fit and not summed; 0: none. "Golden": 0x19
+                       std::string clusterBiasFile = "")                                             // table of the per-cluster correction of the cluster-position biases (pad-phase S-curve,
+                                                                                                     // sector-edge truncation; format in ClusterBiasCorrection.h), applied to the snapped cluster
+                                                                                                     // y before the edge cut and the binning; empty: off
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -1900,6 +1914,20 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   auto binning = makeBinning(y2xBinning, z2xBinning, maxZ2X);
   const int voxelsPerSector = binning->getNVoxelsPerSector();
   const RowGeometry geometry;
+  // per-cluster correction of the cluster-position biases (empty file name: off)
+  o2::tpc::cluster_bias::ClusterBiasCorrection clusterBias;
+  if (!clusterBiasFile.empty()) {
+    std::string error;
+    if (!clusterBias.load(clusterBiasFile, &error)) {
+      LOGP(fatal, "cluster-bias correction: cannot use {}: {}", clusterBiasFile, error);
+    }
+    const auto& mapper = o2::tpc::Mapper::instance();
+    for (int row = 0; row < NRows; ++row) {
+      clusterBias.setRowGeometry(row, geometry.padWidth[row], mapper.getNumberOfPadsInRowSector(row));
+    }
+    LOGP(info, "cluster-bias correction from {}: {} drift x {} slope bins, {} phase nodes, {} distance bins", clusterBiasFile,
+         clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
+  }
 
   // the TFs, their time and IDC (all CCDB access before the fit threads start)
   long nTFsOutsideWindow = 0;
@@ -1953,6 +1981,7 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.geometry = &geometry;
   context.maxZ2X = maxZ2X;
   context.clusterFlagMask = clusterFlagMask;
+  context.clusterBias = clusterBias.isActive() ? &clusterBias : nullptr;
   context.voxelsPerSector = voxelsPerSector;
   context.itsInFit = itsInFit;
   context.fitSlopes = fitSlopes;

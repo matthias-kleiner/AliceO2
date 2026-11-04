@@ -67,6 +67,13 @@ constexpr int NStacks = 4;
 constexpr int NClasses = 3;
 constexpr int NRows = 152;
 
+/// drift length [cm] of a cluster at z [cm] as the tables bin it: 250 cm - |z|
+constexpr float TPCLength = 250.f;
+inline float driftLength(float z)
+{
+  return TPCLength - std::abs(z);
+}
+
 /// stack of a pad row: 0 IROC (rows 0-62), 1 OROC1 (63-96), 2 OROC2 (97-126), 3 OROC3 (127-151)
 inline int stackOfRow(int row)
 {
