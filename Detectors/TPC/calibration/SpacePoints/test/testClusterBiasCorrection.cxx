@@ -11,10 +11,12 @@
 
 /// \file testClusterBiasCorrection.cxx
 /// \brief Standalone test of macro/ClusterBiasCorrection.h (no ROOT, no Boost): table reading, interpolation in phase / drift /
-/// slope / distance, the sign on the two sides of the pad plane, clamping, the cluster classes and the inactive / error paths.
+/// slope / distance, the sign on the two sides of the pad plane, clamping, the cluster classes and the inactive / error paths; and of
+/// macro/ClusterBiasSmoothFit.h (the smooth-table numerics of makeClusterBiasTable.C): B-spline basis, solver, penalised fits.
 ///   g++ -std=c++17 -Wall -Wextra -I../macro testClusterBiasCorrection.cxx -o testClusterBiasCorrection && ./testClusterBiasCorrection
 
 #include "ClusterBiasCorrection.h"
+#include "ClusterBiasSmoothFit.h"
 
 #include <cmath>
 #include <cstdio>
@@ -202,6 +204,74 @@ int main()
     check(!bad.load("does_not_exist.txt", &err), "missing file rejected");
     std::ofstream("testClusterBiasCorrection.bad2.txt") << "drift 1 0 50\nslope 1 0 1\nphase 4\n";
     check(!bad.load("testClusterBiasCorrection.bad2.txt", &err), "missing version rejected");
+  }
+  // 9. smooth-fit numerics (ClusterBiasSmoothFit.h)
+  {
+    namespace sm = o2::tpc::cluster_bias::smooth;
+    const std::vector<double> knots = {0., 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5};
+    bool unity = true;
+    bool nonNeg = true;
+    for (int i = 0; i <= 100; ++i) {
+      const auto b = sm::bsplineBasis(0.5 * i / 100., knots);
+      double sum = 0.;
+      for (const double v : b) {
+        sum += v;
+        nonNeg = nonNeg && v >= -1e-15;
+      }
+      unity = unity && std::abs(sum - 1.) < 1e-12;
+    }
+    check(sm::bsplineBasis(0.1, knots).size() == knots.size() + 2, "cubic basis size = knots + 2");
+    check(unity && nonNeg, "B-spline basis: partition of unity, non-negative (incl. the clipped right end)");
+    checkClose(sm::bsplineBasis(0., knots)[0], 1., 1e-12, "clamped: first basis = 1 at the left knot");
+    const auto x = sm::solve({{4., 1., 2.}, {1., 3., 0.}, {2., 0., 5.}}, {1., 2., 3.});
+    checkClose(4. * x[0] + x[1] + 2. * x[2], 1., 1e-12, "solve: row 1");
+    checkClose(x[0] + 3. * x[1], 2., 1e-12, "solve: row 2");
+    checkClose(2. * x[0] + 5. * x[2], 3., 1e-12, "solve: row 3");
+    check(sm::solve({{1., 2.}, {2., 4.}}, {1., 2.}).empty(), "solve: singular matrix -> empty");
+    const auto h = sm::driftHats(60., {25., 75., 125.});
+    checkClose(h[0], 0.3, 1e-12, "drift hats: weight of the lower centre");
+    checkClose(h[1], 0.7, 1e-12, "drift hats: weight of the upper centre");
+    checkClose(sm::driftHats(300., {25., 75., 125.})[2], 1., 1e-12, "drift hats: constant beyond the last centre");
+    // S: a cubic in |u| vanishing at 0.5 times a linear function of x is in the spline space: recovered without penalty
+    const std::vector<double> xKnots = {1., 2., 4., 8.};
+    auto truth = [](double u, double xx) { return (u - 0.5) * (u + 0.3) * (u - 2.) * (100. + 10. * xx); };
+    std::vector<sm::SCurvePoint> pts;
+    for (int k = 1; k < 32; ++k) {
+      for (const double xx : {1., 1.5, 2.5, 3., 5., 6., 7.9}) {
+        pts.push_back({k / 64., xx, truth(k / 64., xx), 1.});
+      }
+    }
+    const auto f = sm::fitSCurve(pts, knots, xKnots, 0.);
+    check(f.valid() && f.nu == 10 && f.nx == 6, "S fit: valid, 10 x 6 coefficients");
+    double maxDev = 0.;
+    for (const double u : {0.013, 0.11, 0.27, 0.43}) {
+      for (const double xx : {1.2, 3.7, 7.}) {
+        maxDev = std::max(maxDev, std::abs(sm::evalSCurve(f, knots, xKnots, u, xx) - truth(u, xx)));
+      }
+    }
+    checkClose(maxDev, 0., 0.02, "S fit: an exactly representable surface is recovered between the points (up to the 1e-9 ridge)");
+    checkClose(sm::evalSCurve(f, knots, xKnots, 0.5, 3.), 0., 1e-9, "S fit: S(0.5) = 0 by construction");
+    const auto fp = sm::fitSCurve(pts, knots, xKnots, 1e3);
+    check(fp.valid() && fp.chi2 > f.chi2, "S fit: a strong penalty costs chi2");
+    // E: linear in d (zero at the last knot) x linear in drift, recovered; single class = interpolation weights only
+    const std::vector<double> dKnots = {0.5, 0.7, 1.0, 1.4, 2.4};
+    const std::vector<double> centres = {25., 75., 125.};
+    auto etruth = [](double d, double dr) { return (2.4 - d) * (500. + 4. * dr); };
+    std::vector<sm::EdgePoint> ep;
+    for (int i = 0; i < 38; ++i) {
+      for (const double dr : centres) {
+        ep.push_back({0.525 + 0.05 * i, dr, etruth(0.525 + 0.05 * i, dr), 10.});
+      }
+    }
+    const auto e = sm::fitEdge(ep, centres, dKnots, 0., false);
+    check(e.valid() && e.nd == 6, "E fit: valid, 6 d coefficients");
+    checkClose(sm::evalEdge(e, dKnots, 1.23, 100.), etruth(1.23, 100.), 2e-3, "E fit: recovered between the drift centres");
+    checkClose(sm::evalEdge(e, dKnots, 0.3, 75.), etruth(0.5, 75.), 2e-3, "E fit: constant below the first knot");
+    checkClose(sm::evalEdge(e, dKnots, 2.5, 75.), 0., 1e-12, "E fit: 0 from the last knot on");
+    std::vector<sm::EdgePoint> sp = {{0.525, 25., 3000., 10.}, {0.525, 75., 3400., 10.}, {0.525, 125., 3600., 10.}};
+    const auto se = sm::fitEdge(sp, centres, dKnots, 0., true);
+    checkClose(sm::evalEdge(se, dKnots, 0.5, 100., 1.), 3500., 2e-3, "E single: linear in drift between the centres");
+    checkClose(sm::evalEdge(se, dKnots, 1.2, 100., 1.), 0., 1e-12, "E single: 0 from singleMax on");
   }
   std::printf("%d checks, %d failed\n", nChecks, nFailed);
   return nFailed == 0 ? 0 : 1;
