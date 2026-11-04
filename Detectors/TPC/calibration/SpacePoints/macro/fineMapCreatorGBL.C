@@ -1923,10 +1923,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     }
     const auto& mapper = o2::tpc::Mapper::instance();
     for (int row = 0; row < NRows; ++row) {
-      clusterBias.setRowGeometry(row, geometry.padWidth[row], mapper.getNumberOfPadsInRowSector(row));
+      clusterBias.setRowGeometry(row, geometry.padWidth[row], mapper.getNumberOfPadsInRowSector(row), o2::tpc::Mapper::REGION[row]);
     }
-    LOGP(info, "cluster-bias correction from {}: {} drift x {} slope bins, {} phase nodes, {} distance bins", clusterBiasFile,
-         clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
+    LOGP(info, "cluster-bias correction from {}: per {}, {} drift x {} slope bins, {} phase nodes, {} distance bins", clusterBiasFile,
+         clusterBias.byRegion ? "pad region" : "stack", clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
   }
 
   // the TFs, their time and IDC (all CCDB access before the fit threads start)

@@ -11,29 +11,38 @@
 
 /// \file makeClusterBiasTable.C
 /// \brief Producer of the ClusterBiasCorrection.h table (per-cluster correction of the pad-phase S-curve and the sector-edge
-/// truncation) from two CSV tables of mean inward cluster residuals:
+/// truncation) from CSV tables of mean inward cluster residuals (plain or gzip-compressed, read through gzip -dc).
 ///
-/// - S-curve, from DATA (residuals to the track, clusters snapped to the 1/64-pad grid, far from the edge):
-///     stack,drift_lo_cm,drift_hi_cm,class,abs_tgSlp,phase_lo,phase_hi,count,mean_rIn_um,rms_rIn_um
-///   stack IROC / OROC1 / OROC2 / OROC3; class golden / splitshared / single (flags as ClusterBiasCorrection.h); abs_tgSlp lt0.1 /
-///   0.1-0.3 / ge0.3; phase = p - round(p) of the pad coordinate p counted from the nearest edge, bins [phase_lo, phase_hi).
-///   Per stack x drift x slope the golden mean over the phase is the smooth distortion: it is subtracted from all classes.
-/// - edge part, from a SIMULATION with the truth as reference (no distortion):
-///     stack,drift_lo_cm,drift_hi_cm,class,abs_t,d_meas_lo,d_meas_hi,count,mean_dyIn_um,rms_dyIn_um
+/// - S-curve, from DATA (residuals to the track, clusters snapped to the 1/64-pad grid, far from the edge), one of two formats:
+///   v2: region,stack,pad_width_cm,drift_lo_cm,drift_hi_cm,class,tOut_lo,tOut_hi,phase_node,count,mean_rIn_um,rms_rIn_um,
+///       count_trim3mm,mean_trim3mm_um
+///       per pad region (0-9) x drift x class x SIGNED slope tOut = tgSlp * sign(y) x phase node k / 64 (k = -32 ... 31)
+///       => a table per pad region, the 64 nodes copied 1:1;
+///   v1: stack,drift_lo_cm,drift_hi_cm,class,abs_tgSlp,phase_lo,phase_hi,count,mean_rIn_um,rms_rIn_um
+///       per stack x drift x class x |tgSlp| (lt0.1 / 0.1-0.3 / ge0.3) x phase bin => a table per stack, interpolated onto the nodes.
+///   The phase is p - round(p) of the pad coordinate p counted from the nearest edge; class golden / splitshared / single (flags as
+///   in ClusterBiasCorrection.h). Only the ODD part [b(phase) - b(-phase)] / 2 of each profile is kept: it removes the smooth
+///   distortion (a constant over the phase) and the even part, which is not a cluster bias but an artefact of the residual stream's
+///   reference (odd in the signed slope, present in MC residuals, absent against the MC truth). The odd part is even in the slope,
+///   so the signed slope bins of v2 are folded into |t| bins (count weighted) after the anti-symmetrisation. Single-pad clusters sit
+///   on the pad centre, where the odd part is 0: no record for them (class 0 is used, also 0 there). Bins without enough clusters
+///   (minCount; e.g. the innermost IROC rows at short drift have no tracks) take the nearest filled |t|, then drift bin.
+///   The plain means are used: the residuals contain the distortion (up to cm), so a truncation around 0 (the v2 trimmed columns,
+///   useTrimmedMean) biases the profile wherever the distortion exceeds the cut.
+/// - edge part, from a SIMULATION with the truth as reference (no distortion), one or several files (comma separated, e.g. two slope
+///   arms; their sums add):
+///       stack,drift_lo_cm,drift_hi_cm,class,abs_t,d_meas_lo,d_meas_hi,count,mean_dyIn_um,rms_dyIn_um
 ///   class golden / split / singletime / single (single = single PAD: the table's class 2; singletime clusters spread over several
-///   pads and are merged into golden, as ClusterBiasCorrection.h treats flag 0x8 off the pad centre); d_meas = measured distance
-///   from the pad-plane edge in pads (pad-0 centre at 0.5, snapped). The S-curve of the same table (d_meas >= sMin) is subtracted
-///   per phase, so that only the truncation is kept; beyond distHi the edge part is 0. Single-pad clusters: only the last pad
-///   (d < singleEdgeMax) is taken and nothing is subtracted (in the bulk the single-pad class of a simulation is dominated by
-///   noise clusters). The edge rows are matched to the S-curve's drift / slope bins by the bin centres.
+///   pads and go to golden, as ClusterBiasCorrection.h treats flag 0x8 off the pad centre); d_meas = measured distance from the
+///   pad-plane edge in pads (pad-0 centre at 0.5, snapped). The S-curve of the same table (d_meas >= sMin) is subtracted per phase,
+///   so that only the truncation is kept; beyond distHi the edge part is 0. Single-pad clusters: only the last pad
+///   (d < singleEdgeMax), nothing subtracted (in the bulk the single-pad class of a simulation is dominated by noise clusters).
+///   An edge row fills every output drift / |t| bin whose centre lies in its range and every pad region of its stack; bins still
+///   empty take the nearest filled |t| bin, then the nearest filled drift bin, of the same unit and class.
 ///
-/// The S-curve is written on 64 phase nodes (the 1/64-pad grid): copied for an input with 64 bins (one grid point per bin,
-/// at the bin's lower edge), otherwise interpolated periodically between the bin centres. Single-pad clusters sit on the pad
-/// centre and have no S-curve by symmetry: their record is 0 unless singleScurveFromData (then the data's value at phase 0, minus
-/// the golden mean, everywhere: the data's single class mixes single-time clusters and has long tails). nHarmonics > 0 replaces each S-curve by its
-/// Fourier series up to that order (even and odd terms) for low-statistics inputs; 0 (default) keeps the measured profile.
-///   root -l -b -q 'makeClusterBiasTable.C+("scurve_phase.csv", "edge.csv", "clusterBias.txt")'
-/// The edge part can be scaled (edgeScale) when the simulated cloud is known to differ from the data.
+/// nHarmonics > 0 replaces each S-curve by its sine series up to that order (low-statistics inputs); 0 (default) keeps the profile.
+/// edgeScale scales the edge part (a simulated cloud known to differ from the data).
+///   root -l -b -q 'makeClusterBiasTable.C+("scurve_v2.csv.gz", "edgeA.csv,edgeB.csv", "clusterBias.txt")'
 
 #if !defined(__CLING__) || defined(__ROOTCLING__)
 #include <algorithm>
@@ -55,18 +64,69 @@ namespace cluster_bias_table
 {
 
 constexpr double TwoPi = 6.283185307179586;
+constexpr int NPhase = 64;
+constexpr int NClasses = 3;
+constexpr int NSelfPhase = 20;
+constexpr double DistLo = 0.40;
+constexpr double DistW = 0.05;
 
-struct Row {
-  int stack = -1;
-  double driftLo = 0.;
-  double driftHi = 0.;
-  int cls = -1;
-  int slope = -1;
-  double xLo = 0.;
-  double xHi = 0.;
-  double count = 0.;
-  double mean = 0.;
-};
+/// the lines of a plain or gzip-compressed (.gz) text file
+std::vector<std::string> readLines(const std::string& fileName)
+{
+  std::vector<std::string> lines;
+  const bool gz = fileName.size() > 3 && fileName.compare(fileName.size() - 3, 3, ".gz") == 0;
+  if (gz) {
+    FILE* pipe = popen(("gzip -dc '" + fileName + "'").c_str(), "r");
+    if (!pipe) {
+      LOGP(fatal, "makeClusterBiasTable: cannot read {}", fileName);
+    }
+    std::string line;
+    std::array<char, 4096> buffer{};
+    while (std::fgets(buffer.data(), buffer.size(), pipe)) {
+      line += buffer.data();
+      if (!line.empty() && line.back() == '\n') {
+        line.pop_back();
+        lines.push_back(line);
+        line.clear();
+      }
+    }
+    if (!line.empty()) {
+      lines.push_back(line);
+    }
+    pclose(pipe);
+  } else {
+    std::ifstream in(fileName);
+    if (!in) {
+      LOGP(fatal, "makeClusterBiasTable: cannot open {}", fileName);
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+      lines.push_back(line);
+    }
+  }
+  if (lines.empty()) {
+    LOGP(fatal, "makeClusterBiasTable: {} is empty", fileName);
+  }
+  return lines;
+}
+
+std::vector<std::string> splitCSV(const std::string& line)
+{
+  std::vector<std::string> fields;
+  std::stringstream ss(line);
+  std::string field;
+  while (std::getline(ss, field, ',')) {
+    fields.push_back(field);
+  }
+  return fields;
+}
+
+/// column index by name in a CSV header (-1 if absent)
+int column(const std::vector<std::string>& header, const std::string& name)
+{
+  const auto it = std::find(header.begin(), header.end(), name);
+  return it == header.end() ? -1 : int(it - header.begin());
+}
 
 int stackIndex(const std::string& name)
 {
@@ -79,18 +139,9 @@ int stackIndex(const std::string& name)
   return -1;
 }
 
-int slopeIndex(const std::string& name)
+int stackOfRegion(int region)
 {
-  if (name == "lt0.1") {
-    return 0;
-  }
-  if (name == "0.1-0.3") {
-    return 1;
-  }
-  if (name == "ge0.3") {
-    return 2;
-  }
-  return -1;
+  return region < 4 ? 0 : (region < 6 ? 1 : (region < 8 ? 2 : 3));
 }
 
 /// table class: 0 golden (with the single-time clusters of a simulation), 1 split pad / shared, 2 single pad
@@ -108,43 +159,22 @@ int classIndex(const std::string& name)
   return -1;
 }
 
-std::vector<Row> readCSV(const std::string& fileName)
+/// |t| range of the v1 / simulation slope labels
+bool slopeLabelRange(const std::string& label, double maxSlope, double& lo, double& hi)
 {
-  std::vector<Row> rows;
-  std::ifstream in(fileName);
-  if (!in) {
-    LOGP(fatal, "makeClusterBiasTable: cannot open {}", fileName);
+  if (label == "lt0.1") {
+    lo = 0.;
+    hi = 0.1;
+  } else if (label == "0.1-0.3") {
+    lo = 0.1;
+    hi = 0.3;
+  } else if (label == "ge0.3") {
+    lo = 0.3;
+    hi = maxSlope;
+  } else {
+    return false;
   }
-  std::string line;
-  std::getline(in, line); // header
-  while (std::getline(in, line)) {
-    std::stringstream ss(line);
-    std::string field;
-    std::vector<std::string> f;
-    while (std::getline(ss, field, ',')) {
-      f.push_back(field);
-    }
-    if (f.size() < 10) {
-      continue;
-    }
-    Row r;
-    r.stack = stackIndex(f[0]);
-    r.driftLo = std::stod(f[1]);
-    r.driftHi = std::stod(f[2]);
-    r.cls = classIndex(f[3]);
-    r.slope = slopeIndex(f[4]);
-    r.xLo = std::stod(f[5]);
-    r.xHi = std::stod(f[6]);
-    r.count = std::stod(f[7]);
-    r.mean = std::stod(f[8]);
-    if (r.stack < 0 || r.cls < 0 || r.slope < 0) {
-      LOGP(warning, "makeClusterBiasTable: unknown stack / class / slope in {}: {}", fileName, line);
-      continue;
-    }
-    rows.push_back(r);
-  }
-  LOGP(info, "makeClusterBiasTable: {} rows from {}", rows.size(), fileName);
-  return rows;
+  return true;
 }
 
 /// count-weighted profile accumulator over fixed bins
@@ -166,136 +196,238 @@ struct Profile {
     }
     return c;
   }
-  double mean() const
-  {
-    double s = 0.;
-    double c = 0.;
-    for (size_t i = 0; i < sum.size(); ++i) {
-      s += sum[i];
-      c += cnt[i];
-    }
-    return c > 0. ? s / c : 0.;
-  }
 };
 
-/// least-squares Fourier series (constant, cos and sin up to order k) of a periodic profile on nodes -0.5 + j / n
-std::vector<double> fourierSmooth(const std::vector<double>& v, int nHarmonics)
+/// least-squares sine series up to order k of an odd periodic profile on nodes -0.5 + j / n
+std::vector<double> sineSmooth(const std::vector<double>& v, int nHarmonics)
 {
   const int n = int(v.size());
   std::vector<double> out(n, 0.);
-  double c0 = 0.;
-  for (const double x : v) {
-    c0 += x / n;
-  }
-  for (int j = 0; j < n; ++j) {
-    out[j] = c0;
-  }
   for (int k = 1; k <= nHarmonics && 2 * k < n; ++k) {
-    double a = 0.;
     double b = 0.;
     for (int j = 0; j < n; ++j) {
-      const double phase = -0.5 + double(j) / n;
-      a += 2. / n * v[j] * std::cos(TwoPi * k * phase);
-      b += 2. / n * v[j] * std::sin(TwoPi * k * phase);
+      b += 2. / n * v[j] * std::sin(TwoPi * k * (-0.5 + double(j) / n));
     }
     for (int j = 0; j < n; ++j) {
-      const double phase = -0.5 + double(j) / n;
-      out[j] += a * std::cos(TwoPi * k * phase) + b * std::sin(TwoPi * k * phase);
+      out[j] += b * std::sin(TwoPi * k * (-0.5 + double(j) / n));
     }
   }
   return out;
 }
 
+int findBin(const std::vector<double>& edges, double x)
+{
+  const int i = int(std::upper_bound(edges.begin(), edges.end(), x) - edges.begin()) - 1;
+  return (i < 0 || i >= int(edges.size()) - 1) ? -1 : i;
+}
+
+using RecordKey = std::tuple<int, int, int, int>; // unit, drift bin, |t| bin, class
+
+/// records still empty take the nearest filled |t| bin of the same drift bin, then the nearest filled drift bin (same unit, class)
+void fillEmpty(std::map<RecordKey, std::vector<double>>& records, int nUnits, int nDrift, int nSlope)
+{
+  for (int unit = 0; unit < nUnits; ++unit) {
+    for (int cls = 0; cls < NClasses; ++cls) {
+      for (int pass = 0; pass < 2; ++pass) {
+        for (int iD = 0; iD < nDrift; ++iD) {
+          for (int iS = 0; iS < nSlope; ++iS) {
+            if (records.count({unit, iD, iS, cls})) {
+              continue;
+            }
+            for (int dist = 1; dist < std::max(nSlope, nDrift); ++dist) {
+              bool found = false;
+              for (const int sgn : {-1, 1}) {
+                const int jS = pass == 0 ? iS + sgn * dist : iS;
+                const int jD = pass == 0 ? iD : iD + sgn * dist;
+                const auto it = records.find({unit, jD, jS, cls});
+                if (it != records.end()) {
+                  records[{unit, iD, iS, cls}] = it->second;
+                  found = true;
+                  break;
+                }
+              }
+              if (found) {
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace cluster_bias_table
 
-void makeClusterBiasTable(std::string scurveCSV = "scurve_phase.csv", // data S-curve table (format above)
-                          std::string edgeCSV = "edge.csv",           // simulated edge table (format above); "" = no edge part
+void makeClusterBiasTable(std::string scurveCSV = "scurve_v2.csv.gz", // data S-curve table (v2 or v1, see above)
+                          std::string edgeCSVs = "edge.csv",          // simulated edge tables (comma separated); "" = no edge part
                           std::string outFile = "clusterBias.txt",    // the ClusterBiasCorrection.h table
                           double distHi = 4.0,                        // edge part for d_meas < distHi [pads]
                           double sMin = 3.5,                          // the edge table's own S-curve from d_meas >= sMin
                           double edgeScale = 1.,                      // scale of the edge part
-                          int nHarmonics = 0,                         // > 0: Fourier-smooth the S-curves to this order
+                          int nHarmonics = 0,                         // > 0: sine-smooth the S-curves to this order
                           double minCount = 1000.,                    // records with fewer clusters are not written (class 0 is used)
                           double maxSlope = 1.,                       // upper edge of the last |tgSlp| bin
                           double singleEdgeMax = 1.,                  // single-pad clusters: edge part for d_meas < singleEdgeMax only
-                          bool singleScurveFromData = false)          // single-pad clusters: the data's value at phase 0 instead of 0
+                          bool useTrimmedMean = false)                // v2: the |rIn| < 3 mm truncated means instead of the plain ones
 {
   using namespace cluster_bias_table;
-  constexpr int NPhase = 64;
-  constexpr double DistLo = 0.40;
-  constexpr double DistW = 0.05;
   const int nDist = int(std::round((distHi - DistLo) / DistW));
 
-  // ===| S-curve |===============================================================================================================
-  const auto srows = readCSV(scurveCSV);
+  // ===| S-curve input |=========================================================================================================
+  const auto lines = readLines(scurveCSV);
+  const auto header = splitCSV(lines[0]);
+  const bool v2 = column(header, "phase_node") >= 0;
+  const int cUnit = column(header, v2 ? "region" : "stack");
+  const int cDriftLo = column(header, "drift_lo_cm");
+  const int cDriftHi = column(header, "drift_hi_cm");
+  const int cClass = column(header, "class");
+  const int cSlopeLo = column(header, v2 ? "tOut_lo" : "abs_tgSlp");
+  const int cSlopeHi = v2 ? column(header, "tOut_hi") : cSlopeLo;
+  const int cPhase = column(header, v2 ? "phase_node" : "phase_lo");
+  const int cCount = column(header, (v2 && useTrimmedMean) ? "count_trim3mm" : "count");
+  const int cMean = column(header, (v2 && useTrimmedMean) ? "mean_trim3mm_um" : "mean_rIn_um");
+  if (std::min({cUnit, cDriftLo, cDriftHi, cClass, cSlopeLo, cSlopeHi, cPhase, cCount, cMean}) < 0) {
+    LOGP(fatal, "makeClusterBiasTable: {} is neither a v1 nor a v2 S-curve table", scurveCSV);
+  }
+  const int nUnits = v2 ? 10 : 4;
+  // binning of the output: the input's drift bins; |t| bins from the non-negative signed edges (v2) or the v1 labels
   std::set<double> driftSet;
-  std::set<double> phaseLoSet;
-  for (const auto& r : srows) {
-    driftSet.insert(r.driftLo);
-    driftSet.insert(r.driftHi);
-    phaseLoSet.insert(r.xLo);
+  std::set<double> slopeSet{0.};
+  std::set<double> phaseSet;
+  for (size_t i = 1; i < lines.size(); ++i) {
+    const auto f = splitCSV(lines[i]);
+    if (f.size() < header.size()) {
+      continue;
+    }
+    driftSet.insert(std::stod(f[cDriftLo]));
+    driftSet.insert(std::stod(f[cDriftHi]));
+    phaseSet.insert(std::stod(f[cPhase]));
+    if (v2) {
+      for (const int c : {cSlopeLo, cSlopeHi}) {
+        const double t = std::stod(f[c]);
+        if (t >= 0. && t < maxSlope) {
+          slopeSet.insert(t);
+        }
+      }
+    }
   }
   const std::vector<double> driftEdges(driftSet.begin(), driftSet.end());
-  const std::vector<double> slopeEdges{0., 0.1, 0.3, maxSlope};
+  std::vector<double> slopeEdges = v2 ? std::vector<double>(slopeSet.begin(), slopeSet.end()) : std::vector<double>{0., 0.1, 0.3};
+  slopeEdges.push_back(maxSlope);
   const int nDrift = int(driftEdges.size()) - 1;
-  const int nIn = int(phaseLoSet.size());
+  const int nSlope = int(slopeEdges.size()) - 1;
+  const int nIn = v2 ? NPhase : int(phaseSet.size());
   if (nDrift < 1 || nIn < 2) {
     LOGP(fatal, "makeClusterBiasTable: {} has no usable binning", scurveCSV);
   }
-  auto driftBin = [&](double lo) { return int(std::lower_bound(driftEdges.begin(), driftEdges.end(), lo) - driftEdges.begin()); };
-  auto phaseBin = [&](double lo) { return std::clamp(int(std::floor((lo + 0.5) * nIn + 0.5)), 0, nIn - 1); };
-  // [stack][drift][slope][class]
-  std::map<std::tuple<int, int, int, int>, Profile> sprof;
-  for (const auto& r : srows) {
-    auto& p = sprof.try_emplace({r.stack, driftBin(r.driftLo), r.slope, r.cls}, Profile(nIn)).first->second;
-    p.fill(phaseBin(r.xLo), r.count, r.mean);
+  // per (unit, drift, class, signed slope bin as its lower edge) the profile over the input phase bins
+  std::map<std::tuple<int, int, int, double, double>, Profile> sprof;
+  for (size_t i = 1; i < lines.size(); ++i) {
+    const auto f = splitCSV(lines[i]);
+    if (f.size() < header.size()) {
+      continue;
+    }
+    const int unit = v2 ? std::stoi(f[cUnit]) : stackIndex(f[cUnit]);
+    const int cls = classIndex(f[cClass]);
+    const int iD = findBin(driftEdges, 0.5 * (std::stod(f[cDriftLo]) + std::stod(f[cDriftHi])));
+    double tLo = 0.;
+    double tHi = 0.;
+    if (v2) {
+      tLo = std::stod(f[cSlopeLo]);
+      tHi = std::stod(f[cSlopeHi]);
+    } else if (!slopeLabelRange(f[cSlopeLo], maxSlope, tLo, tHi)) {
+      continue;
+    }
+    if (unit < 0 || unit >= nUnits || cls < 0 || iD < 0) {
+      continue;
+    }
+    const double phase = std::stod(f[cPhase]);
+    const int bin = v2 ? ((int(std::lround(phase * NPhase)) + NPhase / 2) % NPhase + NPhase) % NPhase
+                       : std::clamp(int(std::floor((phase + 0.5) * nIn + 0.5)), 0, nIn - 1);
+    sprof.try_emplace({unit, iD, cls, tLo, tHi}, Profile(nIn)).first->second.fill(bin, std::stod(f[cCount]), std::stod(f[cMean]));
   }
+  // anti-symmetrise each profile, fold the signed slope into |t| (count weighted), map onto the 64 nodes
+  // [unit][drift][slope][class] -> (sum of weight * odd value, sum of weight) per node
+  std::map<std::tuple<int, int, int, int>, std::pair<std::vector<double>, std::vector<double>>> sodd;
+  for (const auto& [key, p] : sprof) {
+    const auto [unit, iD, cls, tLo, tHi] = key;
+    if (cls == 2) {
+      continue; // single-pad clusters: on the pad centre, odd part 0
+    }
+    const double absLo = tLo >= 0. ? tLo : -tHi;
+    const int iS = findBin(slopeEdges, std::min(absLo, maxSlope - 1e-9) + 1e-9);
+    if (iS < 0) {
+      continue;
+    }
+    auto& acc = sodd.try_emplace({unit, iD, iS, cls}, std::make_pair(std::vector<double>(NPhase, 0.), std::vector<double>(NPhase, 0.)))
+                  .first->second;
+    std::vector<double> odd(nIn, 0.);
+    std::vector<double> w(nIn, 0.);
+    for (int j = 0; j < nIn; ++j) {
+      const int mirror = v2 ? (nIn - j) % nIn : nIn - 1 - j; // v2: node k <-> -k (k = j - 32); v1: bin <-> mirrored bin
+      odd[j] = 0.5 * (p.value(j) - p.value(mirror));
+      w[j] = p.cnt[j] + p.cnt[mirror];
+    }
+    for (int j = 0; j < NPhase; ++j) {
+      double value = 0.;
+      double weight = 0.;
+      if (v2) {
+        value = odd[j];
+        weight = w[j];
+      } else {
+        const double x = (double(j) / NPhase) * nIn - 0.5; // node phase in units of input bin centres
+        const double fl = std::floor(x);
+        const double fr = x - fl;
+        const int i0 = ((int(fl) % nIn) + nIn) % nIn;
+        const int i1 = (i0 + 1) % nIn;
+        value = (1. - fr) * odd[i0] + fr * odd[i1];
+        weight = (1. - fr) * w[i0] + fr * w[i1];
+      }
+      acc.first[j] += weight * value;
+      acc.second[j] += weight;
+    }
+  }
+
   FILE* out = std::fopen(outFile.c_str(), "w");
   if (!out) {
     LOGP(fatal, "makeClusterBiasTable: cannot write {}", outFile);
   }
-  std::fprintf(out, "# ClusterBiasCorrection table from %s (S-curve) and %s (edge part, x %.3f), inward bias [um]\n", scurveCSV.c_str(),
-               edgeCSV.empty() ? "-" : edgeCSV.c_str(), edgeScale);
-  std::fprintf(out, "version 1\ndrift %d", nDrift);
+  std::fprintf(out, "# ClusterBiasCorrection table: S-curve = odd part of %s (%s means), edge part from %s (x %.3f); inward bias [um]\n",
+               scurveCSV.c_str(), useTrimmedMean ? "truncated" : "plain", edgeCSVs.empty() ? "-" : edgeCSVs.c_str(), edgeScale);
+  std::fprintf(out, "version 1\nunit %s\ndrift %d", v2 ? "region" : "stack", nDrift);
   for (const double e : driftEdges) {
     std::fprintf(out, " %g", e);
   }
-  std::fprintf(out, "\nslope 3");
+  std::fprintf(out, "\nslope %d", nSlope);
   for (const double e : slopeEdges) {
     std::fprintf(out, " %g", e);
   }
-  std::fprintf(out, "\nphase %d\ndist %d %g %g\n", NPhase, edgeCSV.empty() ? 0 : nDist, DistLo, distHi);
-  int nS = 0;
-  for (const auto& [key, p] : sprof) {
-    const auto [stack, iD, iS, cls] = key;
-    if (p.total() < minCount) {
+  std::fprintf(out, "\nphase %d\ndist %d %g %g\n", NPhase, edgeCSVs.empty() ? 0 : nDist, DistLo, distHi);
+  std::map<RecordKey, std::vector<double>> srec;
+  for (const auto& [key, acc] : sodd) {
+    double total = 0.;
+    for (const double x : acc.second) {
+      total += x;
+    }
+    if (total < 2. * minCount) { // both signs of the phase counted
       continue;
     }
-    // the smooth distortion: the golden mean over the phase of this stack / drift / slope
-    const auto golden = sprof.find({stack, iD, iS, 0});
-    const double offset = golden != sprof.end() ? golden->second.mean() : p.mean();
     std::vector<double> nodes(NPhase, 0.);
-    if (cls == 2) {
-      // single-pad clusters sit on the pad centre: no S-curve by symmetry (or the data's value there)
-      std::fill(nodes.begin(), nodes.end(), singleScurveFromData ? p.value(phaseBin(0.)) - offset : 0.);
-    } else if (nIn == NPhase) {
-      for (int j = 0; j < NPhase; ++j) {
-        nodes[j] = p.value(j) - offset;
-      }
-    } else {
-      for (int j = 0; j < NPhase; ++j) {
-        const double x = (double(j) / NPhase) * nIn - 0.5; // node phase in units of input bin centres
-        const double fl = std::floor(x);
-        const double f = x - fl;
-        const int i0 = ((int(fl) % nIn) + nIn) % nIn;
-        const int i1 = (i0 + 1) % nIn;
-        nodes[j] = (1. - f) * p.value(i0) + f * p.value(i1) - offset;
-      }
+    for (int j = 0; j < NPhase; ++j) {
+      nodes[j] = acc.second[j] > 0. ? acc.first[j] / acc.second[j] : 0.;
     }
-    if (nHarmonics > 0 && cls != 2) {
-      nodes = fourierSmooth(nodes, nHarmonics);
+    if (nHarmonics > 0) {
+      nodes = sineSmooth(nodes, nHarmonics);
     }
-    std::fprintf(out, "S %d %d %d %d", stack, iD, iS, cls);
+    srec[key] = nodes;
+  }
+  const size_t nSMeasured = srec.size();
+  fillEmpty(srec, nUnits, nDrift, nSlope); // e.g. the innermost IROC rows at short drift: no tracks
+  int nS = 0;
+  for (const auto& [key, nodes] : srec) {
+    const auto [unit, iD, iS, cls] = key;
+    std::fprintf(out, "S %d %d %d %d", unit, iD, iS, cls);
     for (const double v : nodes) {
       std::fprintf(out, " %.1f", v);
     }
@@ -305,43 +437,63 @@ void makeClusterBiasTable(std::string scurveCSV = "scurve_phase.csv", // data S-
 
   // ===| edge part |=============================================================================================================
   int nE = 0;
-  if (!edgeCSV.empty()) {
-    const auto erows = readCSV(edgeCSV);
-    constexpr int NSelfPhase = 20;
-    std::map<std::tuple<int, int, int, int>, Profile> eprof; // [stack][drift][slope][class] in d bins
-    std::map<std::tuple<int, int, int, int>, Profile> selfS; // the same table's S-curve at d >= sMin, 20 phase bins
-    for (const auto& r : erows) {
-      const double driftCentre = 0.5 * (r.driftLo + r.driftHi);
-      const int iD = int(std::upper_bound(driftEdges.begin(), driftEdges.end(), driftCentre) - driftEdges.begin()) - 1;
-      if (iD < 0 || iD >= nDrift) {
-        continue;
+  if (!edgeCSVs.empty()) {
+    // per (stack, drift lo, drift hi, class, |t| lo, |t| hi): the d profile and the table's own S-curve at d >= sMin
+    std::map<std::tuple<int, double, double, int, double, double>, Profile> eprof;
+    std::map<std::tuple<int, double, double, int, double, double>, Profile> selfS;
+    std::stringstream list(edgeCSVs);
+    std::string name;
+    while (std::getline(list, name, ',')) {
+      const auto elines = readLines(name);
+      const auto eh = splitCSV(elines[0]);
+      const int cS = column(eh, "stack");
+      const int cDL = column(eh, "drift_lo_cm");
+      const int cDH = column(eh, "drift_hi_cm");
+      const int cC = column(eh, "class");
+      const int cT = column(eh, "abs_t");
+      const int cXL = column(eh, "d_meas_lo");
+      const int cXH = column(eh, "d_meas_hi");
+      const int cN = column(eh, "count");
+      const int cM = column(eh, "mean_dyIn_um");
+      if (std::min({cS, cDL, cDH, cC, cT, cXL, cXH, cN, cM}) < 0) {
+        LOGP(fatal, "makeClusterBiasTable: {} is not an edge table", name);
       }
-      const double d = 0.5 * (r.xLo + r.xHi);
-      const std::tuple<int, int, int, int> key{r.stack, iD, r.slope, r.cls};
-      if (d >= sMin) {
-        const double p = (d - 0.5) - std::round(d - 0.5);
-        auto& s = selfS.try_emplace(key, Profile(NSelfPhase)).first->second;
-        s.fill(std::clamp(int(std::floor((p + 0.5) * NSelfPhase)), 0, NSelfPhase - 1), r.count, r.mean);
-      }
-      if (d >= DistLo && d < distHi) {
-        auto& e = eprof.try_emplace(key, Profile(nDist)).first->second;
-        e.fill(std::clamp(int(std::floor((d - DistLo) / DistW)), 0, nDist - 1), r.count, r.mean);
+      for (size_t i = 1; i < elines.size(); ++i) {
+        const auto f = splitCSV(elines[i]);
+        if (f.size() < eh.size()) {
+          continue;
+        }
+        const int stack = stackIndex(f[cS]);
+        const int cls = classIndex(f[cC]);
+        double tLo = 0.;
+        double tHi = 0.;
+        if (stack < 0 || cls < 0 || !slopeLabelRange(f[cT], maxSlope, tLo, tHi)) {
+          continue;
+        }
+        const std::tuple<int, double, double, int, double, double> key{stack, std::stod(f[cDL]), std::stod(f[cDH]), cls, tLo, tHi};
+        const double d = 0.5 * (std::stod(f[cXL]) + std::stod(f[cXH]));
+        const double count = std::stod(f[cN]);
+        const double mean = std::stod(f[cM]);
+        if (d >= sMin) {
+          const double p = (d - 0.5) - std::round(d - 0.5);
+          selfS.try_emplace(key, Profile(NSelfPhase)).first->second.fill(std::clamp(int(std::floor((p + 0.5) * NSelfPhase)), 0, NSelfPhase - 1), count, mean);
+        }
+        if (d >= DistLo && d < distHi) {
+          eprof.try_emplace(key, Profile(nDist)).first->second.fill(std::clamp(int(std::floor((d - DistLo) / DistW)), 0, nDist - 1), count, mean);
+        }
       }
     }
-    for (auto& [key, e] : eprof) {
-      const auto [stack, iD, iS, cls] = key;
+    // [unit][drift][slope][class] -> edge values
+    std::map<RecordKey, std::vector<double>> edge;
+    for (const auto& [key, e] : eprof) {
+      const auto [stack, dLo, dHi, cls, tLo, tHi] = key;
       if (e.total() < minCount) {
         continue;
       }
-      const auto self = selfS.find(key);
       std::vector<double> v(nDist, 0.);
-      for (int i = 0; i < nDist; ++i) {
-        v[i] = e.value(i);
-      }
       if (cls == 2) {
         // single-pad clusters sit exactly on d = n + 0.5, the boundary of two d bins: both bins get their common value; only the
         // last pad (d < singleEdgeMax), no S-curve to subtract
-        std::fill(v.begin(), v.end(), 0.);
         for (int n = 0; n + 0.5 < std::min(distHi, singleEdgeMax); ++n) {
           const int b = int(std::lround((n + 0.5 - DistLo) / DistW));
           if (b >= 1 && b < nDist) {
@@ -349,17 +501,44 @@ void makeClusterBiasTable(std::string scurveCSV = "scurve_phase.csv", // data S-
             v[b - 1] = v[b] = c > 0. ? (e.sum[b - 1] + e.sum[b]) / c : 0.;
           }
         }
-      }
-      for (int i = 0; i < nDist; ++i) {
-        if (cls != 2 && self != selfS.end()) {
-          // subtract the table's own S-curve at the phase of the bin
-          const double d = DistLo + (i + 0.5) * DistW;
-          const double p = (d - 0.5) - std::round(d - 0.5);
-          v[i] -= self->second.value(std::clamp(int(std::floor((p + 0.5) * NSelfPhase)), 0, NSelfPhase - 1));
+      } else {
+        const auto self = selfS.find(key);
+        for (int i = 0; i < nDist; ++i) {
+          v[i] = e.value(i);
+          if (self != selfS.end()) {
+            // subtract the table's own S-curve at the phase of the bin
+            const double d = DistLo + (i + 0.5) * DistW;
+            const double p = (d - 0.5) - std::round(d - 0.5);
+            v[i] -= self->second.value(std::clamp(int(std::floor((p + 0.5) * NSelfPhase)), 0, NSelfPhase - 1));
+          }
         }
-        v[i] *= edgeScale;
       }
-      std::fprintf(out, "E %d %d %d %d", stack, iD, iS, cls);
+      for (auto& x : v) {
+        x *= edgeScale;
+      }
+      // every output unit of the stack, drift and |t| bin whose centre lies in the row's range
+      for (int unit = 0; unit < nUnits; ++unit) {
+        if ((v2 ? stackOfRegion(unit) : unit) != stack) {
+          continue;
+        }
+        for (int iD = 0; iD < nDrift; ++iD) {
+          const double c = 0.5 * (driftEdges[iD] + driftEdges[iD + 1]);
+          if (c < dLo || c >= dHi) {
+            continue;
+          }
+          for (int iS = 0; iS < nSlope; ++iS) {
+            const double t = 0.5 * (slopeEdges[iS] + slopeEdges[iS + 1]);
+            if (t >= tLo && t < tHi) {
+              edge[{unit, iD, iS, cls}] = v;
+            }
+          }
+        }
+      }
+    }
+    fillEmpty(edge, nUnits, nDrift, nSlope);
+    for (const auto& [key, v] : edge) {
+      const auto [unit, iD, iS, cls] = key;
+      std::fprintf(out, "E %d %d %d %d", unit, iD, iS, cls);
       for (const double x : v) {
         std::fprintf(out, " %.1f", x);
       }
@@ -368,6 +547,8 @@ void makeClusterBiasTable(std::string scurveCSV = "scurve_phase.csv", // data S-
     }
   }
   std::fclose(out);
-  LOGP(info, "makeClusterBiasTable: {} S-curve and {} edge records ({} drift x 3 slope bins, {} phase nodes, {} d bins) written to {}", nS, nE, nDrift,
-       NPhase, nDist, outFile);
+  LOGP(info,
+       "makeClusterBiasTable: {} S-curve ({} measured, the rest from the nearest bin) and {} edge records ({} x {} drift x {} slope bins, "
+       "{} phase nodes, {} d bins) written to {}",
+       nS, nSMeasured, nE, v2 ? "10 pad regions" : "4 stacks", nDrift, nSlope, NPhase, nDist, outFile);
 }

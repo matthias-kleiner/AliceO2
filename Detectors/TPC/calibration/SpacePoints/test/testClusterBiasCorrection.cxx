@@ -167,7 +167,34 @@ int main()
   checkClose(corr.dy(10, 5.f, 25.f, 0.05f, 0), 0., 0., "IROC row without geometry");
   corr.setRowGeometry(10, 0.42, 66);
   checkClose(corr.dy(10, 5.f, 25.f, 0.05f, 0), 0., 0., "IROC row without records");
-  // 7. format errors
+  // 7. per pad region: regionOfRow, and records of region 4 (rows 63-80) vs region 5 (rows 81-96)
+  {
+    using o2::tpc::cluster_bias::regionOfRow;
+    check(regionOfRow(0) == 0 && regionOfRow(16) == 0 && regionOfRow(17) == 1 && regionOfRow(62) == 3 && regionOfRow(63) == 4 &&
+            regionOfRow(81) == 5 && regionOfRow(127) == 8 && regionOfRow(140) == 9 && regionOfRow(151) == 9,
+          "regionOfRow at the region boundaries");
+    std::ofstream o("testClusterBiasCorrection.region.txt");
+    o << "version 1\nunit region\ndrift 1 0 250\nslope 1 0 1\nphase 64\ndist 0 0 0\n";
+    for (int region : {4, 5}) {
+      o << "S " << region << " 0 0 0";
+      for (int j = 0; j < 64; ++j) {
+        o << " " << (region == 4 ? 100. : 300.) * std::sin(TwoPi * (-0.5 + j / 64.));
+      }
+      o << "\n";
+    }
+    o.close();
+    ClusterBiasCorrection reg;
+    check(reg.load("testClusterBiasCorrection.region.txt", &err) && reg.byRegion && reg.nUnits() == 10, "region table: " + err);
+    reg.setRowGeometry(70, PadW, NPads);    // region from the row: 4
+    reg.setRowGeometry(85, PadW, NPads, 5); // region given
+    const double d = 20.5 + 16. / 64.;      // phase 0.25
+    checkClose(reg.dy(70, yAt(d, +1), 100.f, 0.f, 0), 100. * um, 1e-7, "region 4 record for row 70");
+    checkClose(reg.dy(85, yAt(d, -1), 100.f, 0.f, 0), -300. * um, 1e-7, "region 5 record for row 85, -y side");
+    std::ofstream("testClusterBiasCorrection.badunit.txt") << "version 1\nunit sector\ndrift 1 0 50\nslope 1 0 1\nphase 4\n";
+    check(!reg.load("testClusterBiasCorrection.badunit.txt", &err), "unknown unit rejected");
+    check(corr.load(file, &err) && !corr.byRegion, "stack table again: unit reset to stack");
+  }
+  // 8. format errors
   {
     std::ofstream("testClusterBiasCorrection.bad.txt") << "version 1\ndrift 1 0 50\nslope 1 0 1\nphase 4\ndist 0 0 0\nS 0 0 0 0 1 2 3\n";
     ClusterBiasCorrection bad;

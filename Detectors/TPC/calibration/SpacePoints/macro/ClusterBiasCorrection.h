@@ -29,14 +29,17 @@
 ///
 /// Table file (plain text, '#' starts a comment, one record per line, values in um, whitespace separated):
 ///   version 1
+///   unit    stack | region             granularity of the records' first index (optional, default stack): 4 stacks or the 10 pad
+///                                      regions (the IROC regions differ in pad width, 4.16-4.36 mm)
 ///   drift   <n> <e_0> ... <e_n>        drift-length bin edges [cm]; the table values belong to the bin centres
 ///   slope   <n> <e_0> ... <e_n>        |tgSlp| bin edges; values at the bin centres
 ///   phase   <n>                        S-curve: n phase nodes phase_j = -0.5 + j / n (j = 0 ... n-1); with n = 64 the nodes are the
 ///                                      1/64-pad grid of ClusterNative, so a snapped cluster takes the value of its own grid point
 ///   dist    <n> <dLo> <dHi>            edge part: n bins of d in [dLo, dHi) [pads]
-///   S <stack> <iDrift> <iSlope> <class> <v_0> ... <v_{nPhase-1}>   S-curve: mean inward bias [um] at the phase nodes
-///   E <stack> <iDrift> <iSlope> <class> <v_0> ... <v_{nDist-1}>    edge part: mean inward bias [um] per d bin, S-curve subtracted
-/// stack: 0 IROC, 1 OROC1, 2 OROC2, 3 OROC3. class: 0 golden (no flag of 0x19), 1 split pad / shared (0x1 or 0x10 without 0x8),
+///   S <unit> <iDrift> <iSlope> <class> <v_0> ... <v_{nPhase-1}>   S-curve: mean inward bias [um] at the phase nodes
+///   E <unit> <iDrift> <iSlope> <class> <v_0> ... <v_{nDist-1}>    edge part: mean inward bias [um] per d bin, S-curve subtracted
+/// unit: the stack (0 IROC, 1 OROC1, 2 OROC2, 3 OROC3) or the pad region (0-9). The S-curve is a cluster property and therefore odd
+/// in the phase and even in the slope (only |tgSlp| is binned); the producer keeps only the odd part of the measured profile. class: 0 golden (no flag of 0x19), 1 split pad / shared (0x1 or 0x10 without 0x8),
 /// 2 single pad (flag 0x8 AND exactly on the pad centre: a single-pad cluster sits there; 0x8 elsewhere is a single-time cluster,
 /// several pads, treated as class 0); a class without records falls back to class 0. The S-curve part is taken everywhere, the
 /// edge part only for d inside [dLo, dHi).
@@ -65,6 +68,7 @@ constexpr int FlagSplitPad = 0x1;
 constexpr int FlagSingle = 0x8;
 constexpr int FlagShared = 0x10;
 constexpr int NStacks = 4;
+constexpr int NRegions = 10;
 constexpr int NClasses = 3;
 constexpr int NRows = 152;
 
@@ -79,6 +83,17 @@ inline float driftLength(float z)
 inline int stackOfRow(int row)
 {
   return row < 63 ? 0 : (row < 97 ? 1 : (row < 127 ? 2 : 3));
+}
+
+/// pad region of a pad row (Mapper::ROWSPERREGION 17, 15, 16, 15, 18, 16, 16, 14, 13, 12)
+inline int regionOfRow(int row)
+{
+  constexpr int FirstRowNextRegion[NRegions] = {17, 32, 48, 63, 81, 97, 113, 127, 140, 152};
+  int region = 0;
+  while (region < NRegions - 1 && row >= FirstRowNextRegion[region]) {
+    ++region;
+  }
+  return region;
 }
 
 /// class of a cluster from its flags (UnbinnedResid::channel) and whether it sits exactly on a pad centre; a negative flags value
@@ -104,37 +119,45 @@ struct ClusterBiasCorrection {
   int nDist = 0;                         ///< edge-part d bins in [distLo, distHi)
   double distLo = 0.;                    ///< [pads]
   double distHi = 0.;                    ///< [pads]
-  std::vector<double> scurve;            ///< [stack][drift][slope][class][phase] in cm
-  std::vector<double> edge;              ///< [stack][drift][slope][class][d] in cm
-  std::vector<char> hasScurve;           ///< [stack][drift][slope][class]: record present
-  std::vector<char> hasEdge;             ///< [stack][drift][slope][class]: record present
+  std::vector<double> scurve;            ///< [unit][drift][slope][class][phase] in cm
+  std::vector<double> edge;              ///< [unit][drift][slope][class][d] in cm
+  std::vector<char> hasScurve;           ///< [unit][drift][slope][class]: record present
+  std::vector<char> hasEdge;             ///< [unit][drift][slope][class]: record present
   std::array<double, NRows> padWidth{};  ///< [cm] per pad row (setRowGeometry)
   std::array<double, NRows> halfPlane{}; ///< nPads / 2 per pad row: the pad plane's edge in pads from y = 0
+  std::array<int, NRows> regionByRow{};  ///< pad region per row (setRowGeometry)
+  bool byRegion = false;                 ///< records per pad region instead of per stack
   bool loaded = false;
 
-  /// pad geometry of a row (from the Mapper in the macro): pad width [cm] and number of pads
-  void setRowGeometry(int row, double width, int nPads)
+  /// pad geometry of a row (from the Mapper in the macro): pad width [cm], number of pads, pad region (< 0: from the row)
+  void setRowGeometry(int row, double width, int nPads, int region = -1)
   {
     if (row >= 0 && row < NRows) {
       padWidth[row] = width;
       halfPlane[row] = 0.5 * nPads;
+      regionByRow[row] = region >= 0 ? region : regionOfRow(row);
     }
   }
+
+  int nUnits() const { return byRegion ? NRegions : NStacks; }
+  /// the record unit (stack or pad region) of a pad row
+  int unitOfRow(int row) const { return byRegion ? regionByRow[row] : stackOfRow(row); }
 
   bool isActive() const { return loaded; }
   int nDrift() const { return int(driftEdges.size()) - 1; }
   int nSlope() const { return int(slopeEdges.size()) - 1; }
 
-  /// index of a (stack, drift bin, slope bin, class) record
-  size_t record(int stack, int iDrift, int iSlope, int cls) const
+  /// index of a (unit, drift bin, slope bin, class) record
+  size_t record(int unit, int iDrift, int iSlope, int cls) const
   {
-    return ((size_t(stack) * nDrift() + iDrift) * nSlope() + iSlope) * NClasses + cls;
+    return ((size_t(unit) * nDrift() + iDrift) * nSlope() + iSlope) * NClasses + cls;
   }
 
   /// read the table; false (and inactive) on any format error
   bool load(const std::string& fileName, std::string* error = nullptr)
   {
     loaded = false;
+    byRegion = false;
     std::ifstream in(fileName);
     if (!in) {
       return fail(error, "cannot open " + fileName);
@@ -154,6 +177,13 @@ struct ClusterBiasCorrection {
       }
       if (key == "version") {
         ss >> version;
+      } else if (key == "unit") {
+        std::string unit;
+        ss >> unit;
+        if (unit != "stack" && unit != "region") {
+          return fail(error, "unknown unit " + unit);
+        }
+        byRegion = unit == "region";
       } else if (key == "drift" || key == "slope") {
         int n = 0;
         ss >> n;
@@ -183,7 +213,7 @@ struct ClusterBiasCorrection {
     if (version != 1 || driftEdges.size() < 2 || slopeEdges.size() < 2 || nPhase < 2 || nDist < 0 || (nDist > 0 && distHi <= distLo)) {
       return fail(error, "missing or bad header (version / drift / slope / phase / dist)");
     }
-    const size_t nRec = size_t(NStacks) * nDrift() * nSlope() * NClasses;
+    const size_t nRec = size_t(nUnits()) * nDrift() * nSlope() * NClasses;
     scurve.assign(nRec * nPhase, 0.);
     edge.assign(nRec * std::max(nDist, 1), 0.);
     hasScurve.assign(nRec, 0);
@@ -193,14 +223,14 @@ struct ClusterBiasCorrection {
       if (int(v.size()) != 4 + nVal) {
         return fail(error, std::string("record ") + type + ": wrong number of values");
       }
-      const int stack = int(v[0]);
+      const int unit = int(v[0]);
       const int iDrift = int(v[1]);
       const int iSlope = int(v[2]);
       const int cls = int(v[3]);
-      if (stack < 0 || stack >= NStacks || iDrift < 0 || iDrift >= nDrift() || iSlope < 0 || iSlope >= nSlope() || cls < 0 || cls >= NClasses) {
+      if (unit < 0 || unit >= nUnits() || iDrift < 0 || iDrift >= nDrift() || iSlope < 0 || iSlope >= nSlope() || cls < 0 || cls >= NClasses) {
         return fail(error, std::string("record ") + type + ": index out of range");
       }
-      const size_t r = record(stack, iDrift, iSlope, cls);
+      const size_t r = record(unit, iDrift, iSlope, cls);
       auto& dst = type == 'S' ? scurve : edge;
       for (int i = 0; i < nVal; ++i) {
         dst[r * nVal + i] = 1.e-4 * v[4 + i]; // um -> cm
@@ -222,20 +252,20 @@ struct ClusterBiasCorrection {
     const double d = halfPlane[row] - std::abs(double(ySnapped)) / padWidth[row]; // pads from the nearest edge
     const double pad = d - 0.5;
     const double phase = pad - std::round(pad);
-    const int stack = stackOfRow(row);
+    const int unit = unitOfRow(row);
     const int cls = classOfFlags(flags, std::abs(phase) < 0.25 / 64.); // snapped: on the pad centre to the float precision of y
-    const double bias = interpolate(stack, cls, drift, std::abs(tSlope), [&](size_t r, bool& ok) { return scurveAt(r, phase, ok); }) +
-                        interpolate(stack, cls, drift, std::abs(tSlope), [&](size_t r, bool& ok) { return edgeAt(r, d, ok); });
+    const double bias = interpolate(unit, cls, drift, std::abs(tSlope), [&](size_t r, bool& ok) { return scurveAt(r, phase, ok); }) +
+                        interpolate(unit, cls, drift, std::abs(tSlope), [&](size_t r, bool& ok) { return edgeAt(r, d, ok); });
     return float(side * bias);
   }
 
   /// inward bias [cm] (S-curve + edge part) at a distance d [pads] from the nearest edge: for tests and QA
-  double inwardBias(int stack, int cls, double drift, double absSlope, double d) const
+  double inwardBias(int unit, int cls, double drift, double absSlope, double d) const
   {
     const double pad = d - 0.5;
     const double phase = pad - std::round(pad);
-    return interpolate(stack, cls, drift, absSlope, [&](size_t r, bool& ok) { return scurveAt(r, phase, ok); }) +
-           interpolate(stack, cls, drift, absSlope, [&](size_t r, bool& ok) { return edgeAt(r, d, ok); });
+    return interpolate(unit, cls, drift, absSlope, [&](size_t r, bool& ok) { return scurveAt(r, phase, ok); }) +
+           interpolate(unit, cls, drift, absSlope, [&](size_t r, bool& ok) { return edgeAt(r, d, ok); });
   }
 
  private:
@@ -272,9 +302,9 @@ struct ClusterBiasCorrection {
     f = (x - a) / (b - a);
   }
 
-  /// bilinear in (drift, |slope|) over the records of (stack, class), falling back to class 0 where a record is missing
+  /// bilinear in (drift, |slope|) over the records of (unit, class), falling back to class 0 where a record is missing
   template <typename F>
-  double interpolate(int stack, int cls, double drift, double absSlope, F&& value) const
+  double interpolate(int unit, int cls, double drift, double absSlope, F&& value) const
   {
     int iD = 0;
     int iS = 0;
@@ -294,9 +324,9 @@ struct ClusterBiasCorrection {
           continue;
         }
         bool ok = false;
-        double v = value(record(stack, iD + a, iS + b, cls), ok);
+        double v = value(record(unit, iD + a, iS + b, cls), ok);
         if (!ok && cls != 0) {
-          v = value(record(stack, iD + a, iS + b, 0), ok);
+          v = value(record(unit, iD + a, iS + b, 0), ok);
         }
         sum += wD * wS * (ok ? v : 0.);
       }

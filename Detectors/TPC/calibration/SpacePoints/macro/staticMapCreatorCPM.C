@@ -2122,10 +2122,11 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
       LOGP(fatal, "cluster-bias correction: cannot use {}: {}", clusterBiasFile, error);
     }
     for (int irow = 0; irow < NRows; ++irow) {
-      clusterBias.setRowGeometry(irow, mapper.getPadRegionInfo(Mapper::REGION[irow]).getPadWidth(), mapper.getNumberOfPadsInRowSector(irow));
+      clusterBias.setRowGeometry(irow, mapper.getPadRegionInfo(Mapper::REGION[irow]).getPadWidth(), mapper.getNumberOfPadsInRowSector(irow),
+                                 Mapper::REGION[irow]);
     }
-    LOGP(info, "cluster-bias correction from {}: {} drift x {} slope bins, {} phase nodes, {} distance bins", clusterBiasFile,
-         clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
+    LOGP(info, "cluster-bias correction from {}: per {}, {} drift x {} slope bins, {} phase nodes, {} distance bins", clusterBiasFile,
+         clusterBias.byRegion ? "pad region" : "stack", clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
   }
 
   // Obtain configuration
