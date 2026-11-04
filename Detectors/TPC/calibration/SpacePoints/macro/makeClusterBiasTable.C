@@ -452,6 +452,9 @@ void makeClusterBiasTable(std::string scurveCSV = "scurve_v2.csv.gz", // data S-
   }
   std::fprintf(out, "# ClusterBiasCorrection table: S-curve = odd part of %s (%s means), edge part from %s (x %.3f); inward bias [um]\n",
                scurveCSV.c_str(), useTrimmedMean ? "truncated" : "plain", edgeCSVs.empty() ? "-" : edgeCSVs.c_str(), edgeScale);
+  std::fprintf(out, "# makeClusterBiasTable parameters: distHi %g sMin %g edgeScale %g nHarmonics %d minCount %g maxNodeError %g maxSlope %g "
+                    "singleEdgeMax %g useTrimmedMean %d minBinCount %g\n",
+               distHi, sMin, edgeScale, nHarmonics, minCount, maxNodeError, maxSlope, singleEdgeMax, int(useTrimmedMean), minBinCount);
   std::fprintf(out, "version 1\nunit %s\ndrift %d", v2 ? "region" : "stack", nDrift);
   for (const double e : driftEdges) {
     std::fprintf(out, " %g", e);
