@@ -45,6 +45,7 @@
 #include <fstream>
 #include <sys/resource.h>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <algorithm>
@@ -876,7 +877,9 @@ void doFileProcessing(const int iThread,
                       const float maxDevdEdxOverExp,
                       const float skipEdgePads,
                       const float maxTrackTgl,
+                      const int clusterFlagMask,
                       std::vector<long int>& nEdgeClustersSkipped_thread,
+                      std::vector<long int>& nFlagClustersSkipped_thread,
                       std::vector<long int>& nTracksSkippedByBadRangeList_thread,
                       std::vector<long int>& nTFs_thread,
                       std::vector<long int>& nTFsSkippedByBadRangeList_thread,
@@ -972,6 +975,7 @@ void doFileProcessing(const int iThread,
   // Per-worker scratch: this track's position at the current row.
   std::vector<Vec3d> trackPosAtRow_worker(nTrackWorkers);
   std::vector<long int> nEdgeClustersSkipped_worker(nTrackWorkers, 0);
+  std::vector<long int> nFlagClustersSkipped_worker(nTrackWorkers, 0);
   std::vector<Long64_t> trackCounter_local_worker(nTrackWorkers, 0);
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1306,6 +1310,9 @@ void doFileProcessing(const int iThread,
       TTree* residTree = treeUnbinnedResiduals->GetTree();
       for (const char* br : {"res.tgSlp", "res.channel", "trackInfo.multStack*",
                              "trackInfo.nExtDetResid", "trackInfo.filterFlag"}) {
+        if (clusterFlagMask != 0 && std::string_view(br) == "res.channel") {
+          continue; // the TPC cluster flags (clusterFlagMask) live in res.channel
+        }
         residTree->SetBranchStatus(br, 0);
       }
     }
@@ -1654,6 +1661,12 @@ void doFileProcessing(const int iThread,
           if (isRejectedResidual(residIn)) {
             continue;
           }
+          // TPC cluster flags (ClusterNative split pad 0x1 / split time 0x2 / edge 0x4 / single 0x8, merger shared 0x10), stored by
+          // TrackInterpolation in UnbinnedResid::channel: skip the clusters with any flag of clusterFlagMask
+          if (clusterFlagMask != 0 && (residIn.channel & clusterFlagMask)) {
+            ++nFlagClustersSkipped_worker[iWorker];
+            continue;
+          }
 
           float angleSec = TMath::DegToRad() * (10.0 + 20.0 * sec);
           std::array<unsigned char, TrackResiduals::VoxDim> bvox;
@@ -1976,6 +1989,8 @@ void doFileProcessing(const int iThread,
         trackCounter_local_worker[iWorker] = 0;
         nEdgeClustersSkipped_thread[iThread] += nEdgeClustersSkipped_worker[iWorker];
         nEdgeClustersSkipped_worker[iWorker] = 0;
+        nFlagClustersSkipped_thread[iThread] += nFlagClustersSkipped_worker[iWorker];
+        nFlagClustersSkipped_worker[iWorker] = 0;
       }
     } // end of TF loop (consumer)
 
@@ -2038,8 +2053,11 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                                                                 // EXYCorr, at the voxel's mean position; see ChargeSums)
                          bool writeSlopeSums = false,           // also write the residual slope method's per-voxel sums (tree fineSums, the
                                                                 // layout of fineMapCreatorGBL.C); either option costs ~260 B per voxel
-                         float maxTrackTgl = -1.f)              // |tgl| cut of the tracks; <= 0 (default): none (see revalidateTrack). Before,
+                         float maxTrackTgl = -1.f,              // |tgl| cut of the tracks; <= 0 (default): none (see revalidateTrack). Before,
                                                                 // the tracks were cut at maxZ2XCut (= maxTrackTgl = maxZ2XCut)
+                         int clusterFlagMask = 0)               // skip the TPC cluster residuals with any of these flags (UnbinnedResid::channel):
+                                                                // 0x1 split pad, 0x2 split time, 0x4 edge, 0x8 single pad or time, 0x10 shared
+                                                                // (merger); 0 (default): keep all. "Golden" clusters: 0x19
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2251,6 +2269,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
 
   long int nEdgeClustersSkipped{0};
   std::vector<long int> nEdgeClustersSkipped_thread(nFileThreads, 0); // Does NEED to be merged
+  long int nFlagClustersSkipped{0};
+  std::vector<long int> nFlagClustersSkipped_thread(nFileThreads, 0); // Does NEED to be merged
   long int nTracksSkippedByBadRangeList{0};
   std::vector<long int> nTracksSkippedByBadRangeList_thread(nFileThreads, 0); // Does NEED to be merged
   long int nTFs{0};
@@ -2305,7 +2325,9 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              maxDevdEdxOverExp,
                              skipEdgePads,
                              maxTrackTgl,
+                             clusterFlagMask,
                              std::ref(nEdgeClustersSkipped_thread),
+                             std::ref(nFlagClustersSkipped_thread),
                              std::ref(nTracksSkippedByBadRangeList_thread),
                              std::ref(nTFs_thread),
                              std::ref(nTFsSkippedByBadRangeList_thread),
@@ -2351,6 +2373,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     lumiEntriesCTP += lumiEntriesCTP_thread[iThread];
     lumiSumCTP += lumiSumCTP_thread[iThread];
     nEdgeClustersSkipped += nEdgeClustersSkipped_thread[iThread];
+    nFlagClustersSkipped += nFlagClustersSkipped_thread[iThread];
     nTracksSkippedByBadRangeList += nTracksSkippedByBadRangeList_thread[iThread];
     nTFs += nTFs_thread[iThread];
     nTFsSkippedByBadRangeList += nTFsSkippedByBadRangeList_thread[iThread];
@@ -2419,6 +2442,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     std::ofstream(fmt::format("badCalib.{}", stem)).close();
     isBadCalib = true;
   } else {
+    LOGP(info, "clusterFlagMask 0x{:x}: skipped {} TPC cluster residuals with a flag of the mask", clusterFlagMask, nFlagClustersSkipped);
     LOGP(info, "Processed tracks: {} ({}), max requested tracks: {} ({}), skipped {} edge clusters, skipped tracks by badRangeList {} ({}), skipped TFs outside requested time window {} of {} ({:.1f}%)", nTracksProcessed_final, nTracksProcessed_final / nSlices, maxTracks, maxTracksPerSlice, nEdgeClustersSkipped, nTracksSkippedByBadRangeList, nTracksSkippedByBadRangeList / nSlices, nTFsSkippedByTimeWindow, nTFs, (nTFs > 0) ? (100.0 * nTFsSkippedByTimeWindow / nTFs) : 0.0);
     LOGP(info, "Processed time: {}ms, skipped time by badRangeList {}ms ({})", nTFs * o2::constants::lhc::LHCOrbitMUS * 1.e-3 * 32, nTFsSkippedByBadRangeList * o2::constants::lhc::LHCOrbitMUS * 1.e-3 * 32, float(nTFsSkippedByBadRangeList) / float(nTFs));
   }

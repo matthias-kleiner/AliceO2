@@ -839,6 +839,7 @@ struct Cluster {
   double tgSlp = 0.;
   bool tgSlpValid = true;
   bool excluded = false; ///< de-weighted in the fit
+  bool flagged = false;  ///< a TPC cluster flag of clusterFlagMask: de-weighted in the fit (excluded) and not summed
   double sigmaY = 0.;    ///< the cluster's own error
   double sigmaZ = 0.;
   double fineCorrection[3] = {0., 0., 0.}; ///< TPC: the fineMapInput correction subtracted from (x, y, z)
@@ -1074,6 +1075,7 @@ enum Counter { Selected,
                ResidualsExcluded,
                Outliers,
                EdgePadResiduals,
+               FlaggedResiduals,
                OutsideGrid,
                NoResidual,
                NoInnerPoints,
@@ -1090,6 +1092,7 @@ struct FitContext {
   const TrackResiduals* binning = nullptr;
   const RowGeometry* geometry = nullptr;
   float maxZ2X = 0.f;
+  int clusterFlagMask = 0; ///< TPC cluster flags (UnbinnedResid::channel) whose clusters are de-weighted in the fit and not summed
   int voxelsPerSector = 0;
   int itsInFit = 0;                                  ///< 1: the ITS clusters in the fit, 2: also the primary vertex
   bool fitSlopes = false;                            ///< the slopes of the voxel model from the fitted track instead of the reference
@@ -1273,7 +1276,10 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     if (context.fineMap) {
       context.fineMap->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z, cluster.fineCorrection);
     }
-    cluster.excluded = isExcludedFromFit(cluster.row, cluster.padY, *context.geometry);
+    // TPC cluster flags (ClusterNative split pad 0x1 / split time 0x2 / edge 0x4 / single 0x8, merger shared 0x10), stored by
+    // TrackInterpolation in UnbinnedResid::channel
+    cluster.flagged = context.clusterFlagMask != 0 && (residual.channel & context.clusterFlagMask);
+    cluster.excluded = cluster.flagged || isExcludedFromFit(cluster.row, cluster.padY, *context.geometry);
     nFitClusters += !cluster.excluded;
     clusters.push_back(cluster);
   }
@@ -1314,6 +1320,10 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   for (size_t point = 0; point < fit.active.size(); ++point) {
     const auto& cluster = clusters[fit.active[point]];
     if (fit.outlier[point] || cluster.type != Cluster::TPC) {
+      continue;
+    }
+    if (cluster.flagged) {
+      ++counters[FlaggedResiduals];
       continue;
     }
     unsigned int numData = 0;
@@ -1609,7 +1619,7 @@ struct InputFile {
   }
 
   /// externalDetectors: also what the ITS clusters and the vertex need
-  bool open(const std::string& fileName, bool externalDetectors)
+  bool open(const std::string& fileName, bool externalDetectors, bool clusterFlags = false)
   {
     close();
     file.reset(TFile::Open(fileName.c_str()));
@@ -1634,7 +1644,10 @@ struct InputFile {
     }
     std::vector<const char*> unused{"trackInfo.multStack*", "detInfo*"};
     if (!externalDetectors) {
-      unused.insert(unused.end(), {"res.channel", "trackInfo.nExtDetResid"});
+      unused.push_back("trackInfo.nExtDetResid");
+      if (!clusterFlags) {
+        unused.push_back("res.channel"); // also the TPC cluster flags (clusterFlagMask)
+      }
     }
     for (const char* branch : unused) {
       residualReader->GetTree()->SetBranchStatus(branch, 0);
@@ -1725,7 +1738,7 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     if (tf->file != openFile) {
       openFile = tf->file;
       LOGP(info, "Reading {}", files[tf->file]);
-      fileOpen = input.open(files[tf->file], context.itsInFit > 0);
+      fileOpen = input.open(files[tf->file], context.itsInFit > 0, context.clusterFlagMask != 0);
     }
     auto task = std::make_shared<TFTask>();
     task->info = tf;
@@ -1761,10 +1774,11 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
   const long nFitted = counters[Fitted];
   LOGP(info,
        "fineMapCreatorGBL{}: TFs {} (read errors {}); tracks selected {}, fitted {} (failed {}); clusters out of row order {}; "
-       "residuals {} (of de-weighted clusters {}), unbiased pull > {} {}, edge pads {}, outside the grid {}, without a residual {}; without the ITS "
-       "clusters / vertex for the fit {}",
+       "residuals {} (of de-weighted clusters {}), unbiased pull > {} {}, edge pads {}, cluster flags 0x{:x} {}, outside the grid {}, without a residual {}; "
+       "without the ITS clusters / vertex for the fit {}",
        label, nTFs, nTFsReadError, counters[Selected].load(), nFitted, counters[FitFailed].load(), counters[OutOfRowOrder].load(), counters[Residuals].load(),
-       counters[ResidualsExcluded].load(), OutlierSigma, counters[Outliers].load(), counters[EdgePadResiduals].load(), counters[OutsideGrid].load(),
+       counters[ResidualsExcluded].load(), OutlierSigma, counters[Outliers].load(), counters[EdgePadResiduals].load(), context.clusterFlagMask,
+       counters[FlaggedResiduals].load(), counters[OutsideGrid].load(),
        counters[NoResidual].load(), counters[NoInnerPoints].load());
   if (context.kinkQA) {
     LOGP(info, "fineMapCreatorGBL{}: kink QA entries {} (skipped while busy {})", label, counters[KinkQAWritten].load(), counters[KinkQASkipped].load());
@@ -1796,7 +1810,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        int itsInFit = 0,                                                             // tests: 1 the ITS clusters in the track fit, 2 also the primary vertex; 0 TPC clusters only
                        bool fitSlopes = false,                                                       // the slopes of the voxel model from the fitted track at the cluster instead of the reference
                        int kinkQAEvery = 0,                                                          // with itsInFit: the kinks before the TPC of every n-th fitted track (per thread) to <output stem>.kinkQA.root; 0 off
-                       bool addBackFineMap = false)                                                  // with fineMapInput: its correction added back to the summed residuals (an iteration: the output is the full fine map)
+                       bool addBackFineMap = false,                                                  // with fineMapInput: its correction added back to the summed residuals (an iteration: the output is the full fine map)
+                       int clusterFlagMask = 0)                                                      // TPC clusters with any of these flags (UnbinnedResid::channel: 0x1 split pad, 0x2 split time, 0x4 edge,
+                                                                                                     // 0x8 single pad or time, 0x10 shared) are de-weighted in the fit and not summed; 0: none. "Golden": 0x19
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -1924,6 +1940,7 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.binning = binning.get();
   context.geometry = &geometry;
   context.maxZ2X = maxZ2X;
+  context.clusterFlagMask = clusterFlagMask;
   context.voxelsPerSector = voxelsPerSector;
   context.itsInFit = itsInFit;
   context.fitSlopes = fitSlopes;
