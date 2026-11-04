@@ -866,6 +866,17 @@ class BoundedTFQueue
 // SCDCALIB_TF_QUEUE_DEPTH (no recompile) to tune against a real workload's spike size.
 constexpr size_t TFQueueDepthDefault = 10;
 
+/// a TPC cluster's y decoded from UnbinnedResid (track y + dy, ideal pad-plane coordinates) snapped back to the ClusterNative grid of
+/// 1/64 pad (padAtYZero: the pad coordinate of y = 0, i.e. (nPads - 1) / 2). UnbinnedResid packed y and dy into shorts by truncation
+/// towards zero (rounding since the O2 fix), which moves y + dy by up to 21 um depending on the sign of dy: binned on sub-pad scales,
+/// that splits the clusters of a grid point by the sign of dy. Exact as long as the packing error stays below half a grid step
+/// (>= 32 um), for the truncating and the rounding packing alike
+inline float snapClusterY(float y, float padWidth, float padAtYZero)
+{
+  const double pad = padAtYZero - double(y) / padWidth;
+  return float((padAtYZero - std::round(pad * 64.) / 64.) * padWidth);
+}
+
 void doFileProcessing(const int iThread,
                       const int nFileThreads,
                       const int maxTrackWorkers,
@@ -913,6 +924,13 @@ void doFileProcessing(const int iThread,
   // yMaxCentrePadByRow only depends on the pad row (152 values) -- precomputed once per file-thread
   // here, gated on skipEdgePads since that's its only use, rather than via a Mapper lookup per residual.
   std::array<float, NRows> yMaxCentrePadByRow{};
+  // for snapClusterY: the pad width and the pad coordinate of y = 0 per row
+  std::array<float, NRows> padWidthByRow{};
+  std::array<float, NRows> padAtYZeroByRow{};
+  for (int irow = 0; irow < NRows; ++irow) {
+    padWidthByRow[irow] = mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[irow]).getPadWidth();
+    padAtYZeroByRow[irow] = 0.5f * (mapper.getNumberOfPadsInRowSector(irow) - 1);
+  }
   if (skipEdgePads) {
     for (int irow = 0; irow < NRows; ++irow) {
       yMaxCentrePadByRow[irow] = mapper.getPadCentre(o2::tpc::PadPos(irow, 0)).Y() - mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[irow]).getPadWidth() / 2;
@@ -1673,6 +1691,8 @@ void doFileProcessing(const int iThread,
           // cluster position
           float xPos = param::RowX[residIn.row];
           float yPos = residIn.y * param::MaxY / 0x7fff + residIn.dy * param::MaxResid / 0x7fff;
+          // back on the 1/64-pad cluster grid (undoes the packing shift, see snapClusterY), before the edge cut and the binning
+          yPos = snapClusterY(yPos, padWidthByRow[residIn.row], padAtYZeroByRow[residIn.row]);
           float zPos = residIn.z * param::MaxZ / 0x7fff + residIn.dz * param::MaxResid / 0x7fff;
           // exclude the edge pads as they are biased!
           // get max y-position of edge pad: pad centre last pad - pad width/2

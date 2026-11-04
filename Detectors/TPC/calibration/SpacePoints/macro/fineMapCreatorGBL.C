@@ -283,6 +283,7 @@ struct RowGeometry {
   std::array<double, NRows> x{};
   std::array<double, NRows> padWidth{};
   std::array<double, NRows> padPlaneEdge{};
+  std::array<double, NRows> padAtYZero{}; ///< pad coordinate of y = 0 ((nPads - 1) / 2), pad 0 = the pad at the +y edge
   RowGeometry()
   {
     const auto& mapper = o2::tpc::Mapper::instance();
@@ -293,6 +294,7 @@ struct RowGeometry {
       padPlaneEdge[row] = std::max(std::abs(mapper.getPadCentre(o2::tpc::PadPos(row, 0)).Y()),
                                    std::abs(mapper.getPadCentre(o2::tpc::PadPos(row, nPads - 1)).Y())) +
                           0.5 * padWidth[row];
+      padAtYZero[row] = 0.5 * (nPads - 1);
     }
   }
 };
@@ -1259,6 +1261,16 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     }
     cluster.x = residual.getX();
     cluster.y = residual.y * o2::tpc::param::MaxY / 0x7fff + decodeResidual(residual.dy);
+    // the stored cluster y (track y + dy, ideal pad-plane coordinates) back on the ClusterNative grid of 1/64 pad: UnbinnedResid packed
+    // y and dy into shorts by truncation towards zero (rounding since the O2 fix), which moves y + dy by up to 21 um depending on the
+    // sign of dy; binned on sub-pad scales that splits the clusters of a grid point by the sign of dy. Exact while the packing error is
+    // below half a grid step (>= 32 um). Before any correction (a corrected position is not on the grid)
+    {
+      const double padWidth = context.geometry->padWidth[cluster.row];
+      const double padAtYZero = context.geometry->padAtYZero[cluster.row];
+      const double pad = padAtYZero - cluster.y / padWidth;
+      cluster.y = (padAtYZero - std::round(pad * 64.) / 64.) * padWidth;
+    }
     cluster.z = residual.z * o2::tpc::param::MaxZ / 0x7fff + decodeResidual(residual.dz);
     cluster.padY = cluster.y;
     // position-only cluster or saturated tgSlp: the reference's angle instead
