@@ -31,7 +31,13 @@
 /// - per cluster the unbiased residual r m^2 / e^2 (m: its error in the fit, e: GBL's residual error) with the variance sigma^2 + u,
 ///   u = v m^2 / (m^2 - v), v = m^2 - e^2 (sigma: the cluster's own error); the voxel from the best position y - r sigma^2 / (sigma^2 + u)
 ///   (cluster and prediction combined: binning by the measured position is Berkson); unbiased pull > OutlierSigma and the outermost
-///   SkipEdgePads pads of the row (the best position moved onto the pad plane by the cluster's own correction) not summed.
+///   skipEdgePads pads of the row (argument, default 1; the best position moved onto the pad plane by the cluster's own correction)
+///   not summed;
+/// - bestEdgeBiasFile: the edge part of the cluster bias as a function of the BEST position (ClusterBiasCorrection.h text table,
+///   E records only, dist = d_best = pads of the best position from the pad-plane edge; built from the fine pass's own edge tree of
+///   no-distortion MC with makeEdgeBestTable.C): per summed residual r_y += sign(y) * B(d_best, unit, drift, |t|, class) with t the
+///   voxel model's slope, applied after the outlier and edge cuts (the table is the mean bias of exactly these clusters). The cluster
+///   itself, its weight and its voxel are not changed.
 /// Voxel model ((dX, dY, dZ) = measured - true, as voxResTree): r_y = dY - t dX, r_z = dZ - c dX with t = dy/dx, c = dz/dx of the track;
 /// dX, dY from the y channel, then dZ = <r_z> + <c> dX. Errors scaled by sqrt(chi2 / ndf) if > 1.
 ///
@@ -176,7 +182,7 @@ constexpr int StackRows = 2;    ///< rows on each side of a stack boundary
 constexpr int EdgeRows = 4;     ///< the first / last rows
 constexpr double EdgePads = 2.; ///< pads from the pad plane's edge, in every row
 // residuals not summed
-constexpr double SkipEdgePads = 1.; ///< the outermost pads of the row, at the best position
+constexpr double SkipEdgePads = 1.; ///< default of skipEdgePads: the outermost pads of the row, at the best position
 // edge tree (edgeTreePads > 0)
 constexpr float EdgeTreeMaxDistTPCRef = 1.f; ///< [cm] MC truth used up to this distance of parTPCIn from the track's TPC reference
 // threading
@@ -1113,6 +1119,7 @@ enum Counter { Selected,
                EdgeTreeClusters,
                EdgeTreeTruth,
                EdgeTreeSweepFailed,
+               EdgeBiasCorrected,
                NCounters };
 
 /// what the fit threads share read-only
@@ -1136,6 +1143,8 @@ struct FitContext {
   std::mutex* edgeTreeMutex = nullptr;
   double edgeTreePads = 0.; ///< clusters within this many pads of the pad plane's edge
   int edgeTreeEvery = 1;    ///< every n-th track of a TF
+  const o2::tpc::cluster_bias::ClusterBiasCorrection* bestEdgeBias = nullptr; ///< edge part vs the best position, on the summed residual
+  double skipEdgePads = SkipEdgePads;                                         ///< residuals within this many pads of the edge not summed
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -1276,6 +1285,7 @@ struct EdgeRecord {
   double residualZ = std::numeric_limits<double>::quiet_NaN();
   double trackSigmaY = std::numeric_limits<double>::quiet_NaN(); ///< the track's error at the cluster without the cluster
   double tgSlpFit = std::numeric_limits<double>::quiet_NaN();    ///< dy/dx of the fitted track at the cluster (the voxel model's slope)
+  double edgeCorr = 0.;                                          ///< bestEdgeBias correction added to the summed residual [cm]
   int binY2X = -1;
 };
 
@@ -1298,6 +1308,7 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
   std::vector<float> z;
   std::vector<float> tgSlp;
   std::vector<float> tgSlpFit;
+  std::vector<float> edgeCorr;
   std::vector<float> residualY;
   std::vector<float> residualZ;
   std::vector<float> sigmaY;
@@ -1344,6 +1355,7 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
     z.push_back(cluster.z0);
     tgSlp.push_back(cluster.tgSlpValid ? cluster.tgSlp : std::numeric_limits<double>::quiet_NaN());
     tgSlpFit.push_back(record.tgSlpFit);
+    edgeCorr.push_back(record.edgeCorr);
     residualY.push_back(record.residualY);
     residualZ.push_back(record.residualZ);
     sigmaY.push_back(cluster.sigmaY);
@@ -1387,7 +1399,7 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
                         << "passes=" << passes << "mc=" << mc << "truthComplete=" << truthComplete << "pTrue=" << pTrue << "distTPCRef=" << distTPCRef
                         << "pidTrue=" << pidTrue << "row=" << row << "stack=" << stack << "mult=" << mult << "sector=" << sector << "flags=" << flags << "excluded=" << excluded
                         << "status=" << status << "binY2X=" << binY2X << "x=" << x << "padY0=" << padY0 << "padY=" << padY << "bestPadY=" << bestPadY
-                        << "yTrue=" << yTrue << "z=" << z << "tgSlp=" << tgSlp << "tgSlpFit=" << tgSlpFit << "residualY=" << residualY << "residualZ=" << residualZ
+                        << "yTrue=" << yTrue << "z=" << z << "tgSlp=" << tgSlp << "tgSlpFit=" << tgSlpFit << "edgeCorr=" << edgeCorr << "residualY=" << residualY << "residualZ=" << residualZ
                         << "sigmaY=" << sigmaY << "trackSigmaY=" << trackSigmaY << "dMeas=" << dMeas << "dBest=" << dBest << "dTrue=" << dTrue << "\n";
   }
   ++counters[EdgeTreeTracks];
@@ -1461,11 +1473,11 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.y = (padAtYZero - std::round(pad * 64.) / 64.) * padWidth;
     }
     cluster.z = residual.z * o2::tpc::param::MaxZ / 0x7fff + decodeResidual(residual.dz);
+    cluster.flags = residual.channel;
+    cluster.xNominal = cluster.x;
+    cluster.padY0 = cluster.y;
+    cluster.z0 = cluster.z;
     if (edgeTrack) {
-      cluster.flags = residual.channel;
-      cluster.xNominal = cluster.x;
-      cluster.padY0 = cluster.y;
-      cluster.z0 = cluster.z;
       if (sweepOK) {
         sweepOK = rotateTo(truth, cluster.alpha) && o2::base::PropagatorD::Instance()->PropagateToXBxByBz(truth, cluster.x, 0.99, 2., MatCorrType::USEMatCorrLUT);
         if (sweepOK) {
@@ -1600,7 +1612,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       mark(point, 4);
       continue;
     }
-    if (std::abs(bestPadY) > context.geometry->padPlaneEdge[cluster.row] - SkipEdgePads * context.geometry->padWidth[cluster.row]) {
+    if (std::abs(bestPadY) > context.geometry->padPlaneEdge[cluster.row] - context.skipEdgePads * context.geometry->padWidth[cluster.row]) {
       ++counters[EdgePadResiduals];
       mark(point, 5);
       continue;
@@ -1642,6 +1654,21 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       const double* correction = cluster.fineCorrection;
       contribution.residualY += correction[1] - contribution.slopeY * correction[0];
       contribution.residualZ += correction[2] - contribution.slopeZ * correction[0];
+    }
+    if (context.bestEdgeBias) {
+      // the edge part of the cluster bias at the best position (the table's conditioning variable), the voxel model's slope
+      const double width = context.geometry->padWidth[cluster.row];
+      const double side = cluster.padY0 < 0. ? -1. : 1.;
+      const double dBest = (context.geometry->padPlaneEdge[cluster.row] - side * bestPadY) / width;
+      const double padMeas = (context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY0)) / width - 0.5;
+      const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
+      const double bias = context.bestEdgeBias->inwardBias(context.bestEdgeBias->unitOfRow(cluster.row), cls, o2::tpc::cluster_bias::driftLength(cluster.z0),
+                                                           std::abs(contribution.slopeY), dBest);
+      contribution.residualY += side * bias;
+      counters[EdgeBiasCorrected] += bias != 0.;
+      if (edgeTrack) {
+        edgeRecords[fit.active[point]].edgeCorr = side * bias;
+      }
     }
     contribution.weightZ = weight[1];
     batch.push_back(contribution);
@@ -2007,7 +2034,8 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     if (tf->file != openFile) {
       openFile = tf->file;
       LOGP(info, "Reading {}", files[tf->file]);
-      fileOpen = input.open(files[tf->file], context.itsInFit > 0, context.clusterFlagMask != 0 || context.clusterBias != nullptr || context.edgeTree != nullptr,
+      fileOpen = input.open(files[tf->file], context.itsInFit > 0,
+                            context.clusterFlagMask != 0 || context.clusterBias != nullptr || context.edgeTree != nullptr || context.bestEdgeBias != nullptr,
                             context.edgeTree != nullptr);
     }
     auto task = std::make_shared<TFTask>();
@@ -2057,6 +2085,9 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     LOGP(info, "fineMapCreatorGBL{}: edge tree: {} tracks, {} clusters; MC truth swept for {} tracks (sweep failed {})", label, counters[EdgeTreeTracks].load(),
          counters[EdgeTreeClusters].load(), counters[EdgeTreeTruth].load(), counters[EdgeTreeSweepFailed].load());
   }
+  if (context.bestEdgeBias) {
+    LOGP(info, "fineMapCreatorGBL{}: best-position edge bias added to {} summed residuals", label, counters[EdgeBiasCorrected].load());
+  }
   LOGP(info, "fineMapCreatorGBL{}: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", label,
        nFitted ? double(counters[FitPasses]) / nFitted : 0., nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
   return nFitted;
@@ -2092,7 +2123,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                                                                                                      // y before the edge cut and the binning; empty: off
                        float edgeTreePads = 0.f,                                                     // > 0: the edge tree (<output stem>.edgeTree.root) with the clusters within this many pads of the
                                                                                                      // pad plane's edge (measured, best or MC true position); 0: off
-                       int edgeTreeEvery = 1)                                                        // edge tree: every n-th track of a TF
+                       int edgeTreeEvery = 1,                                                        // edge tree: every n-th track of a TF
+                       std::string bestEdgeBiasFile = "",                                            // edge part of the cluster bias vs the BEST position (E-only ClusterBiasCorrection
+                                                                                                     // table, dist = d_best), added to each summed residual; empty: off
+                       float skipEdgePads = 1.f)                                                     // residuals with the best position within this many pads of the pad-plane edge not summed (= fine_map::SkipEdgePads)
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2186,6 +2220,25 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
          clusterBias.byRegion ? "pad region" : "stack", clusterBias.nDrift(), clusterBias.nSlope(), clusterBias.nPhase, clusterBias.nDist);
   }
 
+  // the edge part of the cluster bias vs the best position, on the summed residuals (empty file name: off)
+  o2::tpc::cluster_bias::ClusterBiasCorrection bestEdgeBias;
+  if (!bestEdgeBiasFile.empty()) {
+    std::string error;
+    if (!bestEdgeBias.load(bestEdgeBiasFile, &error)) {
+      LOGP(fatal, "best-position edge bias: cannot use {}: {}", bestEdgeBiasFile, error);
+    }
+    const auto& mapper = o2::tpc::Mapper::instance();
+    for (int row = 0; row < NRows; ++row) {
+      bestEdgeBias.setRowGeometry(row, geometry.padWidth[row], mapper.getNumberOfPadsInRowSector(row), o2::tpc::Mapper::REGION[row]);
+    }
+    LOGP(info, "best-position edge bias from {}: per {}, {} drift x {} slope bins, {} d_best bins in [{}, {}) pads, added to the summed residuals",
+         bestEdgeBiasFile, bestEdgeBias.byRegion ? "pad region" : "stack", bestEdgeBias.nDrift(), bestEdgeBias.nSlope(), bestEdgeBias.nDist,
+         bestEdgeBias.distLo, bestEdgeBias.distHi);
+  }
+  if (skipEdgePads != SkipEdgePads) {
+    LOGP(info, "Residuals with the best position within {} pads of the pad-plane edge not summed (default {})", skipEdgePads, SkipEdgePads);
+  }
+
   // the TFs, their time and IDC (all CCDB access before the fit threads start)
   long nTFsOutsideWindow = 0;
   bool isMC = false;
@@ -2239,6 +2292,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.maxZ2X = maxZ2X;
   context.clusterFlagMask = clusterFlagMask;
   context.clusterBias = clusterBias.isActive() ? &clusterBias : nullptr;
+  context.bestEdgeBias = bestEdgeBias.isActive() ? &bestEdgeBias : nullptr;
+  context.skipEdgePads = skipEdgePads;
   context.voxelsPerSector = voxelsPerSector;
   context.itsInFit = itsInFit;
   context.fitSlopes = fitSlopes;
