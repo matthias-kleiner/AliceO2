@@ -76,6 +76,9 @@
 /// (d = (pad plane edge - side * y) / pad width, side = the sign of padY0; pad-0 centre at d = 0.5) of the measured, best and true position.
 /// MC (trkMC in the input, e.g. --enable-mc residuals): the true y (yTrue) at the cluster's row, from TrackDataMC::parTPCIn swept row by row
 /// (sector frame, nominal row x, material LUT, true PID) for a usable truth (parTPCIn, not fake, distTPCRef <= EdgeTreeMaxDistTPCRef).
+/// Tests of the fit near the edge on such tracks (MC, needs the edge tree; a track without a complete truth is dropped): truthClusters: every
+/// TPC cluster y = the truth + Gaussian noise of the cluster's error (no cluster bias at all); edgeRemovePads > 0: the clusters within this
+/// many pads of the edge at the true position practically out of the fit (errors x RemovedSigmaScale), their unbiased residuals still there.
 ///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
@@ -110,6 +113,7 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -182,6 +186,7 @@ constexpr double MaxSnp = 0.98;            ///< clusters beyond are dropped from
 constexpr int ScatterEvery = 5;            ///< a scatterer every n points with the x/X0 of its n steps
 constexpr int MinFitClusters = 60;         ///< clusters not de-weighted
 constexpr double ExcludedSigmaScale = 10.; ///< errors of the de-weighted clusters in the fit
+constexpr double RemovedSigmaScale = 1000.; ///< errors of the clusters of the test edgeRemovePads in the fit
 // clusters de-weighted in the fit, on the pad plane
 constexpr int StackRows = 2;    ///< rows on each side of a stack boundary
 constexpr int EdgeRows = 4;     ///< the first / last rows
@@ -872,6 +877,7 @@ struct Cluster {
   double tgSlp = 0.;
   bool tgSlpValid = true;
   bool excluded = false; ///< de-weighted in the fit
+  bool removed = false;  ///< test edgeRemovePads: practically out of the fit, the unbiased residual still there
   bool flagged = false;  ///< a TPC cluster flag of clusterFlagMask: de-weighted in the fit (excluded) and not summed
   double sigmaY = 0.;    ///< the cluster's own error
   double sigmaZ = 0.;
@@ -1010,7 +1016,7 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result,
       }
       gbl::GblPoint gblPoint(jacobian);
       if (cluster.type != Cluster::Material) {
-        const double scale = cluster.excluded ? ExcludedSigmaScale : 1.;
+        const double scale = cluster.removed ? RemovedSigmaScale : (cluster.excluded ? ExcludedSigmaScale : 1.);
         gblPoint.addMeasurement(Eigen::Vector2d(cluster.y - reference[point].getY(), cluster.z - reference[point].getZ()),
                                 Eigen::Vector2d(1. / std::pow(cluster.sigmaY * scale, 2), 1. / std::pow(cluster.sigmaZ * scale, 2)));
       }
@@ -1193,6 +1199,8 @@ struct FitContext {
   const o2::tpc::cluster_bias::ClusterBiasCorrection* bestEdgeBias = nullptr; ///< edge part vs the best position, on the summed residual
   double skipEdgePads = SkipEdgePads;                                         ///< residuals within this many pads of the edge not summed
   EdgeFitCorrection edgeFit;                                                  ///< edgeBiasInFit: the table on the clusters inside the fit
+  bool truthClusters = false;                                                 ///< test: the TPC clusters at the MC truth + noise
+  double edgeRemovePads = 0.;                                                 ///< test: clusters within this many pads of the edge (truth) out of the fit
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -1538,6 +1546,17 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
         sweepOK = rotateTo(truth, cluster.alpha) && o2::base::PropagatorD::Instance()->PropagateToXBxByBz(truth, cluster.x, 0.99, 2., MatCorrType::USEMatCorrLUT);
         if (sweepOK) {
           cluster.yTrue = truth.getY();
+          if (context.truthClusters) {
+            thread_local std::mt19937 generator{std::random_device{}()};
+            thread_local std::normal_distribution<double> gauss;
+            const double snp = truth.getSnp();
+            double sigmaY = 0.;
+            double sigmaZ = 0.;
+            clusterErrors(cluster.row, cluster.z, snp / std::sqrt(std::max(1e-6, (1. - snp) * (1. + snp))), truth.getTgl(), sigmaY, sigmaZ);
+            cluster.y = cluster.yTrue + sigmaY * gauss(generator);
+            cluster.padY0 = cluster.y;
+          }
+          cluster.removed = context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.yTrue) < context.edgeRemovePads * context.geometry->padWidth[cluster.row];
         }
       }
     }
@@ -1568,11 +1587,14 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     // TrackInterpolation in UnbinnedResid::channel
     cluster.flagged = context.clusterFlagMask != 0 && (residual.channel & context.clusterFlagMask);
     cluster.excluded = cluster.flagged || isExcludedFromFit(cluster.row, cluster.padY, *context.geometry);
-    nFitClusters += !cluster.excluded;
+    nFitClusters += !cluster.excluded && !cluster.removed;
     clusters.push_back(cluster);
   }
   if (nFitClusters < MinFitClusters || clusters.empty()) {
     return;
+  }
+  if (edgeTrack && !sweepOK && (context.truthClusters || context.edgeRemovePads > 0.)) {
+    return; // the tests need the truth at every cluster
   }
   ++counters[Selected];
   if (context.itsInFit && !addInnerPoints(task, trackRef, context.itsInFit, clusters)) {
@@ -2186,8 +2208,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        std::string bestEdgeBiasFile = "",                                            // edge part of the cluster bias vs the BEST position (E-only ClusterBiasCorrection
                                                                                                      // table, dist = d_best), added to each summed residual; empty: off
                        float skipEdgePads = 1.f,                                                     // residuals with the best position within this many pads of the pad-plane edge not summed (= fine_map::SkipEdgePads)
-                       bool edgeBiasInFit = false)                                                   // with bestEdgeBiasFile: correct the clusters inside the fit by the table at the unbiased
+                       bool edgeBiasInFit = false,                                                   // with bestEdgeBiasFile: correct the clusters inside the fit by the table at the unbiased
                                                                                                      // track position (table by d_pred) instead of the summed residuals
+                       bool truthClusters = false,                                                   // test (MC, edge tree): the TPC clusters at the swept truth + Gaussian noise of their error
+                       float edgeRemovePads = 0.f)                                                   // test (MC, edge tree): the clusters within this many pads of the edge (truth) out of the fit
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2362,6 +2386,17 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     LOGP(fatal, "edgeBiasInFit needs a bestEdgeBiasFile");
   }
   context.skipEdgePads = skipEdgePads;
+  if ((truthClusters || edgeRemovePads > 0.f) && edgeTreePads <= 0.f) {
+    LOGP(fatal, "truthClusters / edgeRemovePads need the edge tree (the MC truth is swept only for its tracks)");
+  }
+  context.truthClusters = truthClusters;
+  context.edgeRemovePads = edgeRemovePads;
+  if (truthClusters) {
+    LOGP(info, "TEST: TPC clusters of the edge-tree tracks at the MC truth + noise");
+  }
+  if (edgeRemovePads > 0.f) {
+    LOGP(info, "TEST: clusters within {} pads of the edge (MC truth) out of the fit", edgeRemovePads);
+  }
   context.voxelsPerSector = voxelsPerSector;
   context.itsInFit = itsInFit;
   context.fitSlopes = fitSlopes;
