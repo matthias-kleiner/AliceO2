@@ -78,7 +78,13 @@
 /// (sector frame, nominal row x, material LUT, true PID) for a usable truth (parTPCIn, not fake, distTPCRef <= EdgeTreeMaxDistTPCRef).
 /// Tests of the fit near the edge on such tracks (MC, needs the edge tree; a track without a complete truth is dropped): truthClusters: every
 /// TPC cluster y = the truth + Gaussian noise of the cluster's error (no cluster bias at all); edgeRemovePads > 0: the clusters within this
-/// many pads of the edge at the true position practically out of the fit (errors x RemovedSigmaScale), their unbiased residuals still there.
+/// many pads of the edge at the true position practically out of the fit (errors x RemovedSigmaScale), their unbiased residuals still there;
+/// edgeWeightByTruth: the de-weighting within EdgePads decided at the true position instead of the measured one.
+/// edgeFitPads > 0 replaces the de-weighting within EdgePads, which is decided by the cluster's own measured position: near that line clusters
+/// with an inward fluctuation keep their weight and those with an outward one lose it, a selection on the cluster's noise that pulls the fit
+/// inward, worst for tracks riding along the edge. Instead the clusters within edgeFitPads of the edge at the track WITHOUT the cluster are
+/// practically out of the fit (errors x RemovedSigmaScale), re-decided after every pass; the first pass by the measured position with a margin
+/// of one pad, which with MinFitClusters also drops the tracks riding along the edge over most of their length.
 ///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
@@ -334,16 +340,22 @@ struct RowGeometry {
   }
 };
 
-/// the clusters de-weighted in the track fit: stack boundaries (first rows of OROC1 / 2 / 3) and the first / last rows, within EdgePads of
-/// the pad plane's edge (counted in pads per row: the pad plane's edge does not follow a constant y/x)
-bool isExcludedFromFit(int row, double padY, const RowGeometry& geometry)
+/// the rows de-weighted in the track fit: stack boundaries (first rows of OROC1 / 2 / 3) and the first / last rows
+bool isExcludedRow(int row)
 {
   for (int boundary : {63, 97, 127}) {
     if (row >= boundary - StackRows && row < boundary + StackRows) {
       return true;
     }
   }
-  if (row < EdgeRows || row >= NRows - EdgeRows) {
+  return row < EdgeRows || row >= NRows - EdgeRows;
+}
+
+/// the clusters de-weighted in the track fit: the rows above and within EdgePads of the pad plane's edge (counted in pads per row: the pad
+/// plane's edge does not follow a constant y/x)
+bool isExcludedFromFit(int row, double padY, const RowGeometry& geometry)
+{
+  if (isExcludedRow(row)) {
     return true;
   }
   const double absY = std::abs(padY);
@@ -907,6 +919,7 @@ struct FitResult {
 struct EdgeFitCorrection {
   const o2::tpc::cluster_bias::ClusterBiasCorrection* table = nullptr;
   const RowGeometry* geometry = nullptr;
+  double pads = 0.; ///< edgeFitPads: clusters within this many pads of the edge at the track without the cluster out of the fit
 };
 
 bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result, const EdgeFitCorrection* edgeFit = nullptr)
@@ -1097,6 +1110,14 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result,
         const double width = geometry.padWidth[cluster.row];
         const double side = cluster.padY0 < 0. ? -1. : 1.;
         const double dPredicted = (geometry.padPlaneEdge[cluster.row] - side * predictedPadY) / width;
+        if (edgeFit->pads > 0.) {
+          const bool removed = dPredicted < edgeFit->pads;
+          newEdgeShift |= removed != cluster.removed;
+          cluster.removed = removed;
+        }
+        if (!edgeFit->table) {
+          continue;
+        }
         const double padMeas = (geometry.padPlaneEdge[cluster.row] - std::abs(cluster.padY0)) / width - 0.5;
         const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
         const double snp = reference[point].getSnp();
@@ -1201,6 +1222,7 @@ struct FitContext {
   EdgeFitCorrection edgeFit;                                                  ///< edgeBiasInFit: the table on the clusters inside the fit
   bool truthClusters = false;                                                 ///< test: the TPC clusters at the MC truth + noise
   double edgeRemovePads = 0.;                                                 ///< test: clusters within this many pads of the edge (truth) out of the fit
+  bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -1586,14 +1608,19 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     // TPC cluster flags (ClusterNative split pad 0x1 / split time 0x2 / edge 0x4 / single 0x8, merger shared 0x10), stored by
     // TrackInterpolation in UnbinnedResid::channel
     cluster.flagged = context.clusterFlagMask != 0 && (residual.channel & context.clusterFlagMask);
-    cluster.excluded = cluster.flagged || isExcludedFromFit(cluster.row, cluster.padY, *context.geometry);
+    if (context.edgeFit.pads > 0.) {
+      cluster.excluded = cluster.flagged || isExcludedRow(cluster.row);
+      cluster.removed = context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY) < (context.edgeFit.pads + 1.) * context.geometry->padWidth[cluster.row];
+    } else {
+      cluster.excluded = cluster.flagged || isExcludedFromFit(cluster.row, context.edgeWeightByTruth && std::isfinite(cluster.yTrue) ? cluster.yTrue : cluster.padY, *context.geometry);
+    }
     nFitClusters += !cluster.excluded && !cluster.removed;
     clusters.push_back(cluster);
   }
   if (nFitClusters < MinFitClusters || clusters.empty()) {
     return;
   }
-  if (edgeTrack && !sweepOK && (context.truthClusters || context.edgeRemovePads > 0.)) {
+  if (edgeTrack && !sweepOK && (context.truthClusters || context.edgeRemovePads > 0. || context.edgeWeightByTruth)) {
     return; // the tests need the truth at every cluster
   }
   ++counters[Selected];
@@ -1607,7 +1634,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   FitResult fit;
   if (!rotateTo(seed, clusters.front().alpha) ||
       !o2::base::PropagatorD::Instance()->PropagateToXBxByBz(seed, clusters.front().x, 0.999, 2., MatCorrType::USEMatCorrLUT) ||
-      !fitTrack(clusters, seed, fit, context.edgeFit.table ? &context.edgeFit : nullptr)) {
+      !fitTrack(clusters, seed, fit, context.edgeFit.table || context.edgeFit.pads > 0. ? &context.edgeFit : nullptr)) {
     ++counters[FitFailed];
     return;
   }
@@ -2211,7 +2238,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        bool edgeBiasInFit = false,                                                   // with bestEdgeBiasFile: correct the clusters inside the fit by the table at the unbiased
                                                                                                      // track position (table by d_pred) instead of the summed residuals
                        bool truthClusters = false,                                                   // test (MC, edge tree): the TPC clusters at the swept truth + Gaussian noise of their error
-                       float edgeRemovePads = 0.f)                                                   // test (MC, edge tree): the clusters within this many pads of the edge (truth) out of the fit
+                       float edgeRemovePads = 0.f,                                                   // test (MC, edge tree): the clusters within this many pads of the edge (truth) out of the fit
+                       bool edgeWeightByTruth = false,                                               // test (MC, edge tree): the de-weighting within EdgePads decided at the truth
+                       float edgeFitPads = 0.f)                                                      // > 0: instead of that de-weighting the clusters within this many pads of the edge at the track
+                                                                                                     // without the cluster out of the fit
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2386,11 +2416,20 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     LOGP(fatal, "edgeBiasInFit needs a bestEdgeBiasFile");
   }
   context.skipEdgePads = skipEdgePads;
-  if ((truthClusters || edgeRemovePads > 0.f) && edgeTreePads <= 0.f) {
-    LOGP(fatal, "truthClusters / edgeRemovePads need the edge tree (the MC truth is swept only for its tracks)");
+  if ((truthClusters || edgeRemovePads > 0.f || edgeWeightByTruth) && edgeTreePads <= 0.f) {
+    LOGP(fatal, "truthClusters / edgeRemovePads / edgeWeightByTruth need the edge tree (the MC truth is swept only for its tracks)");
   }
   context.truthClusters = truthClusters;
   context.edgeRemovePads = edgeRemovePads;
+  context.edgeWeightByTruth = edgeWeightByTruth;
+  context.edgeFit.geometry = &geometry;
+  context.edgeFit.pads = edgeFitPads;
+  if (edgeWeightByTruth) {
+    LOGP(info, "TEST: de-weighting within {} pads of the edge at the MC truth", EdgePads);
+  }
+  if (edgeFitPads > 0.f) {
+    LOGP(info, "Clusters within {} pads of the edge at the track without the cluster out of the fit (instead of the de-weighting by the measured position)", edgeFitPads);
+  }
   if (truthClusters) {
     LOGP(info, "TEST: TPC clusters of the edge-tree tracks at the MC truth + noise");
   }
