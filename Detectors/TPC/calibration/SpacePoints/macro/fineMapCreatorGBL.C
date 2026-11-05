@@ -53,6 +53,17 @@
 /// tilt OROC1 - OROC3 of 16 um, 7 um with the inflation; a scaled Gaussian core in the gap on top changes it by ~1 um).
 /// kinkQAEvery > 0 (with itsInFit): per sampled track the kink residuals of the scatterers before the TPC with their prior (Highland) and
 /// post-fit errors: unit Gaussian pulls residual / error if the modelled scattering is right (tree kinkQA in <output stem>.kinkQA.root).
+/// edgeTreePads > 0: the edge tree (tree edgeTree in <output stem>.edgeTree.root, for studies of the cluster biases at the pad plane's
+/// edge; one entry per fitted track of every edgeTreeEvery-th track of a TF with a TPC cluster within edgeTreePads pads of the edge at the
+/// measured, best or true position): the track's TF (file, entry, CTP luminosity, IDC, lumi scale), occupancy (TrackDataCompact::multStack
+/// per stack: the reconstruction's TPC occupancy map over the track's time span) and fit, and per such cluster its row, sector, nominal x,
+/// stack and occupancy of its stack (mult), measured pad-plane y before any correction (padY0, snapped), after the cluster-bias correction (padY), the best position on the pad
+/// plane (bestPadY), z, slope, flags, de-weighting, the unbiased residuals with the cluster's and the track's errors, the y/x bin and what
+/// the fine pass did with it (status: 0 summed, 1 outlier of the fit's last pass, 2 flagged, 3 no residual, 4 unbiased pull > OutlierSigma,
+/// 5 within SkipEdgePads at the best position, 6 outside the grid, 7 not in the fit's last pass) and the distances from the edge in pads
+/// (d = (pad plane edge - side * y) / pad width, side = the sign of padY0; pad-0 centre at d = 0.5) of the measured, best and true position.
+/// MC (trkMC in the input, e.g. --enable-mc residuals): the true y (yTrue) at the cluster's row, from TrackDataMC::parTPCIn swept row by row
+/// (sector frame, nominal row x, material LUT, true PID) for a usable truth (parTPCIn, not fake, distTPCRef <= EdgeTreeMaxDistTPCRef).
 ///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
@@ -83,6 +94,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -164,6 +176,8 @@ constexpr int EdgeRows = 4;     ///< the first / last rows
 constexpr double EdgePads = 2.; ///< pads from the pad plane's edge, in every row
 // residuals not summed
 constexpr double SkipEdgePads = 1.; ///< the outermost pads of the row, at the best position
+// edge tree (edgeTreePads > 0)
+constexpr float EdgeTreeMaxDistTPCRef = 1.f; ///< [cm] MC truth used up to this distance of parTPCIn from the track's TPC reference
 // threading
 constexpr size_t TFQueueDepth = 2;       ///< TFs read ahead of the fit
 constexpr size_t TracksPerChunk = 16;    ///< tracks a fit thread takes at once
@@ -616,6 +630,7 @@ struct TFTask {
   std::vector<o2::tpc::TrackDataCompact> trackRefs;
   std::vector<o2::tpc::TrackData> tracks;
   std::vector<o2::tpc::UnbinnedResid> residuals;
+  std::vector<o2::tpc::TrackDataMC> tracksMC; ///< the MC truth per track (edge tree with trkMC in the input; empty otherwise)
   size_t nextTrack = 0;
 };
 
@@ -849,6 +864,12 @@ struct Cluster {
   double sigmaY = 0.;    ///< the cluster's own error
   double sigmaZ = 0.;
   double fineCorrection[3] = {0., 0., 0.}; ///< TPC: the fineMapInput correction subtracted from (x, y, z)
+  // edge tree only
+  int flags = 0;                                           ///< TPC cluster flags (UnbinnedResid::channel)
+  double xNominal = 0.;                                    ///< the row's x
+  double padY0 = 0.;                                       ///< measured y on the pad plane (snapped), before any correction
+  double z0 = 0.;                                          ///< measured z, before any correction
+  double yTrue = std::numeric_limits<double>::quiet_NaN(); ///< MC: the true y at the row (sector frame, nominal x)
 };
 
 /// the fit of a track: active = the clusters in the final pass, reference the states at their planes, outlier the last pass's flags
@@ -1087,6 +1108,10 @@ enum Counter { Selected,
                NoInnerPoints,
                KinkQAWritten,
                KinkQASkipped,
+               EdgeTreeTracks,
+               EdgeTreeClusters,
+               EdgeTreeTruth,
+               EdgeTreeSweepFailed,
                NCounters };
 
 /// what the fit threads share read-only
@@ -1106,6 +1131,10 @@ struct FitContext {
   o2::utils::TreeStreamRedirector* kinkQA = nullptr; ///< kink QA (itsInFit): one streamer for all fit threads
   std::mutex* kinkQAMutex = nullptr;
   int kinkQAEvery = 0;
+  o2::utils::TreeStreamRedirector* edgeTree = nullptr; ///< edge tree: one streamer for all fit threads
+  std::mutex* edgeTreeMutex = nullptr;
+  double edgeTreePads = 0.; ///< clusters within this many pads of the pad plane's edge
+  int edgeTreeEvery = 1;    ///< every n-th track of a TF
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -1238,6 +1267,131 @@ bool addInnerPoints(const TFTask& task, const o2::tpc::TrackDataCompact& trackRe
   return true;
 }
 
+/// edge tree: per cluster what the fine pass did with it (the status codes of the edge tree), its best position and unbiased residuals
+struct EdgeRecord {
+  int status = 7; ///< not in the fit's last pass
+  double bestPadY = std::numeric_limits<double>::quiet_NaN();
+  double residualY = std::numeric_limits<double>::quiet_NaN();
+  double residualZ = std::numeric_limits<double>::quiet_NaN();
+  double trackSigmaY = std::numeric_limits<double>::quiet_NaN(); ///< the track's error at the cluster without the cluster
+  int binY2X = -1;
+};
+
+/// edge tree: one entry per track with its TPC clusters within edgeTreePads pads of the pad plane's edge (measured, best or true position)
+void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, const std::vector<Cluster>& clusters, const std::vector<EdgeRecord>& records,
+                   int truthState, bool sweepOK, const FitContext& context, std::array<long, NCounters>& counters)
+{
+  std::vector<int> row;
+  std::vector<int> stack;
+  std::vector<int> sector;
+  std::vector<int> flags;
+  std::vector<int> excluded;
+  std::vector<int> status;
+  std::vector<int> binY2X;
+  std::vector<float> x;
+  std::vector<float> padY0;
+  std::vector<float> padY;
+  std::vector<float> bestPadY;
+  std::vector<float> yTrue;
+  std::vector<float> z;
+  std::vector<float> tgSlp;
+  std::vector<float> residualY;
+  std::vector<float> residualZ;
+  std::vector<float> sigmaY;
+  std::vector<float> trackSigmaY;
+  std::vector<float> dMeas;
+  std::vector<float> dBest;
+  std::vector<float> dTrue;
+  std::vector<float> mult;
+  const auto& trackRef = task.trackRefs[trackIndex];
+  std::vector<float> multStack(4, 0.f);
+  for (int iStack = 0; iStack < 4; ++iStack) {
+    multStack[iStack] = trackRef.getMultStackPacked(iStack) > 0 ? trackRef.getMultStack(iStack) : 0.f;
+  }
+  const auto& geometry = *context.geometry;
+  for (size_t index = 0; index < clusters.size(); ++index) {
+    const auto& cluster = clusters[index];
+    if (cluster.type != Cluster::TPC) {
+      continue;
+    }
+    const auto& record = records[index];
+    const double width = geometry.padWidth[cluster.row];
+    const double edge = geometry.padPlaneEdge[cluster.row];
+    const double side = cluster.padY0 < 0. ? -1. : 1.;
+    const double distMeas = (edge - std::abs(cluster.padY0)) / width;
+    const double distBest = (edge - side * record.bestPadY) / width; // NaN without a best position
+    const double distTrue = (edge - side * cluster.yTrue) / width;   // NaN without the truth
+    if (!(distMeas < context.edgeTreePads) && !(distBest < context.edgeTreePads) && !(distTrue < context.edgeTreePads)) {
+      continue;
+    }
+    row.push_back(cluster.row);
+    const int clusterStack = cluster.row < 63 ? 0 : (cluster.row < 97 ? 1 : (cluster.row < 127 ? 2 : 3));
+    stack.push_back(clusterStack);
+    mult.push_back(multStack[clusterStack]);
+    sector.push_back(cluster.sector);
+    flags.push_back(cluster.flags);
+    excluded.push_back(cluster.excluded);
+    status.push_back(record.status);
+    binY2X.push_back(record.binY2X);
+    x.push_back(cluster.xNominal);
+    padY0.push_back(cluster.padY0);
+    padY.push_back(cluster.padY);
+    bestPadY.push_back(record.bestPadY);
+    yTrue.push_back(cluster.yTrue);
+    z.push_back(cluster.z0);
+    tgSlp.push_back(cluster.tgSlpValid ? cluster.tgSlp : std::numeric_limits<double>::quiet_NaN());
+    residualY.push_back(record.residualY);
+    residualZ.push_back(record.residualZ);
+    sigmaY.push_back(cluster.sigmaY);
+    trackSigmaY.push_back(record.trackSigmaY);
+    dMeas.push_back(distMeas);
+    dBest.push_back(distBest);
+    dTrue.push_back(distTrue);
+  }
+  if (row.empty()) {
+    return;
+  }
+  const auto& info = *task.info;
+  int file = info.file;
+  int entry = static_cast<int>(info.entry);
+  int track = static_cast<int>(trackIndex);
+  int source = trackRef.sourceId;
+  float ctpLumi = info.ctpLumi;
+  float idc = info.hasIDC ? 0.5f * (info.idcA + info.idcC) : -1.f;
+  float lumiScale = info.lumiScale;
+  const auto& first = fit.reference.front();
+  float qOverPt = fit.qOverPt;
+  float p = first.getP();
+  float tgl = first.getTgl();
+  int passes = fit.passes;
+  int mc = truthState;
+  int truthComplete = sweepOK;
+  float pTrue = -1.f;
+  float distTPCRef = -1.f;
+  int pidTrue = -1;
+  if (truthState > 0) {
+    const auto& truthIn = task.tracksMC[trackIndex];
+    pTrue = truthIn.parTPCIn.getP();
+    distTPCRef = truthIn.distTPCRef;
+    pidTrue = truthIn.parTPCIn.getPID().getID();
+  }
+  {
+    std::lock_guard<std::mutex> lock(*context.edgeTreeMutex);
+    (*context.edgeTree) << "edgeTree"
+                        << "file=" << file << "entry=" << entry << "track=" << track << "source=" << source << "ctpLumi=" << ctpLumi << "idc=" << idc
+                        << "lumiScale=" << lumiScale << "multStack=" << multStack << "qOverPt=" << qOverPt << "p=" << p << "tgl=" << tgl
+                        << "passes=" << passes << "mc=" << mc << "truthComplete=" << truthComplete << "pTrue=" << pTrue << "distTPCRef=" << distTPCRef
+                        << "pidTrue=" << pidTrue << "row=" << row << "stack=" << stack << "mult=" << mult << "sector=" << sector << "flags=" << flags << "excluded=" << excluded
+                        << "status=" << status << "binY2X=" << binY2X << "x=" << x << "padY0=" << padY0 << "padY=" << padY << "bestPadY=" << bestPadY
+                        << "yTrue=" << yTrue << "z=" << z << "tgSlp=" << tgSlp << "residualY=" << residualY << "residualZ=" << residualZ
+                        << "sigmaY=" << sigmaY << "trackSigmaY=" << trackSigmaY << "dMeas=" << dMeas << "dBest=" << dBest << "dTrue=" << dTrue << "\n";
+  }
+  ++counters[EdgeTreeTracks];
+  counters[EdgeTreeClusters] += row.size();
+  counters[EdgeTreeTruth] += truthState == 1;
+  counters[EdgeTreeSweepFailed] += truthState == 1 && !sweepOK;
+}
+
 /// fit one track of a TF and append the contributions of its clusters
 void processTrack(const TFTask& task, size_t trackIndex, const FitContext& context, std::array<long, NCounters>& counters,
                   std::vector<Cluster>& clusters, std::vector<Contribution>& batch)
@@ -1249,6 +1403,32 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     return;
   }
   auto decodeResidual = [](short value) { return value * o2::tpc::param::MaxResid / 0x7fff; };
+  // edge tree: a sampled track with a TPC cluster near the pad plane's edge (measured; one pad of margin for the best / true position)
+  bool edgeTrack = false;
+  if (context.edgeTree && trackIndex % context.edgeTreeEvery == 0) {
+    for (unsigned int residualIndex = trackRef.idxFirstResidual; residualIndex < trackRef.idxFirstResidual + trackRef.nResiduals && !edgeTrack; ++residualIndex) {
+      const auto& residual = task.residuals[residualIndex];
+      if (residual.row >= NRows) {
+        continue;
+      }
+      const double y = residual.y * o2::tpc::param::MaxY / 0x7fff + decodeResidual(residual.dy);
+      edgeTrack = context.geometry->padPlaneEdge[residual.row] - std::abs(y) < (context.edgeTreePads + 1.) * context.geometry->padWidth[residual.row];
+    }
+  }
+  // MC: the truth swept along the rows (edge tree only)
+  int truthState = 0; // 0 no truth, 1 swept, 2 present but not usable
+  TrackParD truth;
+  if (edgeTrack && trackIndex < task.tracksMC.size()) {
+    const auto& mc = task.tracksMC[trackIndex];
+    if (mc.hasTPCIn() && !mc.isFakeITSTPC() && mc.label.isValid() && !mc.label.isFake() && mc.distTPCRef >= 0.f && mc.distTPCRef <= EdgeTreeMaxDistTPCRef) {
+      const auto& in = mc.parTPCIn;
+      truth = TrackParD(in.getX(), in.getAlpha(), {in.getY(), in.getZ(), in.getSnp(), in.getTgl(), in.getQ2Pt()}, in.getAbsCharge(), in.getPID());
+      truthState = 1;
+    } else {
+      truthState = 2;
+    }
+  }
+  bool sweepOK = truthState == 1;
   clusters.clear();
   int nFitClusters = 0;
   for (unsigned int residualIndex = trackRef.idxFirstResidual; residualIndex < trackRef.idxFirstResidual + trackRef.nResiduals; ++residualIndex) {
@@ -1277,6 +1457,18 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.y = (padAtYZero - std::round(pad * 64.) / 64.) * padWidth;
     }
     cluster.z = residual.z * o2::tpc::param::MaxZ / 0x7fff + decodeResidual(residual.dz);
+    if (edgeTrack) {
+      cluster.flags = residual.channel;
+      cluster.xNominal = cluster.x;
+      cluster.padY0 = cluster.y;
+      cluster.z0 = cluster.z;
+      if (sweepOK) {
+        sweepOK = rotateTo(truth, cluster.alpha) && o2::base::PropagatorD::Instance()->PropagateToXBxByBz(truth, cluster.x, 0.99, 2., MatCorrType::USEMatCorrLUT);
+        if (sweepOK) {
+          cluster.yTrue = truth.getY();
+        }
+      }
+    }
     // position-only cluster or saturated tgSlp: the reference's angle instead
     cluster.tgSlpValid = !residual.isPositionOnly() && !residual.isTgSlpClamped();
     cluster.tgSlp = residual.tgSlp * o2::tpc::param::MaxTgSlp / 0x7fff;
@@ -1340,13 +1532,25 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   Eigen::VectorXd downWeights(2);
   Eigen::VectorXd corrections;
   Eigen::MatrixXd covariance;
+  // edge tree: per cluster what the fine pass did with it, its best position and unbiased residuals
+  std::vector<EdgeRecord> edgeRecords(edgeTrack ? clusters.size() : 0);
+  auto mark = [&](size_t point, int status) {
+    if (edgeTrack) {
+      edgeRecords[fit.active[point]].status = status;
+    }
+  };
   for (size_t point = 0; point < fit.active.size(); ++point) {
     const auto& cluster = clusters[fit.active[point]];
-    if (fit.outlier[point] || cluster.type != Cluster::TPC) {
+    if (cluster.type != Cluster::TPC) {
+      continue;
+    }
+    if (fit.outlier[point]) {
+      mark(point, 1);
       continue;
     }
     if (cluster.flagged) {
       ++counters[FlaggedResiduals];
+      mark(point, 2);
       continue;
     }
     unsigned int numData = 0;
@@ -1370,23 +1574,37 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     }
     if (!valid) {
       ++counters[NoResidual];
-      continue;
-    }
-    if (unbiased[0] * unbiased[0] * weight[0] > OutlierSigma * OutlierSigma || unbiased[1] * unbiased[1] * weight[1] > OutlierSigma * OutlierSigma) {
-      ++counters[Outliers];
+      mark(point, 3);
       continue;
     }
     const double bestPadY = cluster.padY + bestPosition[0] - cluster.y;
+    if (edgeTrack) {
+      auto& record = edgeRecords[fit.active[point]];
+      record.bestPadY = bestPadY;
+      record.residualY = unbiased[0];
+      record.residualZ = unbiased[1];
+      record.trackSigmaY = std::sqrt(std::max(0., 1. / weight[0] - cluster.sigmaY * cluster.sigmaY));
+    }
+    if (unbiased[0] * unbiased[0] * weight[0] > OutlierSigma * OutlierSigma || unbiased[1] * unbiased[1] * weight[1] > OutlierSigma * OutlierSigma) {
+      ++counters[Outliers];
+      mark(point, 4);
+      continue;
+    }
     if (std::abs(bestPadY) > context.geometry->padPlaneEdge[cluster.row] - SkipEdgePads * context.geometry->padWidth[cluster.row]) {
       ++counters[EdgePadResiduals];
+      mark(point, 5);
       continue;
     }
     const double y2x = bestPosition[0] / cluster.x;
     const double z2x = bestPosition[1] / cluster.x;
     const int binY2X = std::abs(z2x) > context.maxZ2X ? -1 : context.binning->getY2XBinExact(y2x, cluster.row);
     const int binZ2X = context.binning->getZ2XBinExact(cluster.sector < 18 ? z2x : -z2x);
+    if (edgeTrack) {
+      edgeRecords[fit.active[point]].binY2X = binY2X;
+    }
     if (binY2X < 0 || binY2X >= context.binning->getNY2XBins() || binZ2X < 0 || std::abs(z2x) > context.maxZ2X) {
       ++counters[OutsideGrid];
+      mark(point, 6);
       continue;
     }
     // the slopes: the reference's, or the fitted track's arriving at the cluster: with the kinks fitted (the ITS in the fit), only these
@@ -1419,6 +1637,10 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     batch.push_back(contribution);
     ++counters[Residuals];
     counters[ResidualsExcluded] += cluster.excluded;
+    mark(point, 0);
+  }
+  if (edgeTrack) {
+    writeEdgeTree(task, trackIndex, fit, clusters, edgeRecords, truthState, sweepOK, context, counters);
   }
 }
 
@@ -1630,9 +1852,11 @@ struct InputFile {
   std::unique_ptr<TTreeReaderValue<std::vector<o2::tpc::UnbinnedResid>>> residuals;
   std::unique_ptr<TTreeReaderValue<std::vector<o2::tpc::TrackDataCompact>>> trackRefs;
   std::unique_ptr<TTreeReaderValue<std::vector<o2::tpc::TrackData>>> tracks;
+  std::unique_ptr<TTreeReaderValue<std::vector<o2::tpc::TrackDataMC>>> tracksMC; ///< edge tree with trkMC in the input
 
   void close()
   {
+    tracksMC.reset();
     tracks.reset();
     trackRefs.reset();
     residuals.reset();
@@ -1641,8 +1865,8 @@ struct InputFile {
     file.reset();
   }
 
-  /// externalDetectors: also what the ITS clusters and the vertex need
-  bool open(const std::string& fileName, bool externalDetectors, bool clusterFlags = false)
+  /// externalDetectors: also what the ITS clusters and the vertex need; edgeTree: also the occupancy and the MC truth (if present)
+  bool open(const std::string& fileName, bool externalDetectors, bool clusterFlags = false, bool edgeTree = false)
   {
     close();
     file.reset(TFile::Open(fileName.c_str()));
@@ -1665,7 +1889,10 @@ struct InputFile {
       tree->SetCacheSize(256LL * 1024 * 1024);
       tree->AddBranchToCache("*", true);
     }
-    std::vector<const char*> unused{"trackInfo.multStack*", "detInfo*"};
+    std::vector<const char*> unused{"detInfo*"};
+    if (!edgeTree) {
+      unused.push_back("trackInfo.multStack*");
+    }
     if (!externalDetectors) {
       unused.push_back("trackInfo.nExtDetResid");
       if (!clusterFlags) {
@@ -1682,6 +1909,9 @@ struct InputFile {
     residuals = std::make_unique<TTreeReaderValue<std::vector<o2::tpc::UnbinnedResid>>>(*residualReader, "res");
     trackRefs = std::make_unique<TTreeReaderValue<std::vector<o2::tpc::TrackDataCompact>>>(*residualReader, "trackInfo");
     tracks = std::make_unique<TTreeReaderValue<std::vector<o2::tpc::TrackData>>>(*trackReader, "trk");
+    if (edgeTree && trackReader->GetTree()->GetBranch("trkMC")) {
+      tracksMC = std::make_unique<TTreeReaderValue<std::vector<o2::tpc::TrackDataMC>>>(*trackReader, "trkMC");
+    }
     return true;
   }
 
@@ -1703,6 +1933,12 @@ struct InputFile {
     task.tracks = **tracks;
     if (!readOK(*tracks)) {
       return false;
+    }
+    if (tracksMC) {
+      task.tracksMC = **tracksMC;
+      if (!readOK(*tracksMC) || task.tracksMC.size() != task.tracks.size()) {
+        task.tracksMC.clear(); // the edge tree then without the truth for this TF
+      }
     }
     return task.trackRefs.size() == task.tracks.size();
   }
@@ -1761,7 +1997,8 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     if (tf->file != openFile) {
       openFile = tf->file;
       LOGP(info, "Reading {}", files[tf->file]);
-      fileOpen = input.open(files[tf->file], context.itsInFit > 0, context.clusterFlagMask != 0 || context.clusterBias != nullptr);
+      fileOpen = input.open(files[tf->file], context.itsInFit > 0, context.clusterFlagMask != 0 || context.clusterBias != nullptr || context.edgeTree != nullptr,
+                            context.edgeTree != nullptr);
     }
     auto task = std::make_shared<TFTask>();
     task->info = tf;
@@ -1806,6 +2043,10 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
   if (context.kinkQA) {
     LOGP(info, "fineMapCreatorGBL{}: kink QA entries {} (skipped while busy {})", label, counters[KinkQAWritten].load(), counters[KinkQASkipped].load());
   }
+  if (context.edgeTree) {
+    LOGP(info, "fineMapCreatorGBL{}: edge tree: {} tracks, {} clusters; MC truth swept for {} tracks (sweep failed {})", label, counters[EdgeTreeTracks].load(),
+         counters[EdgeTreeClusters].load(), counters[EdgeTreeTruth].load(), counters[EdgeTreeSweepFailed].load());
+  }
   LOGP(info, "fineMapCreatorGBL{}: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", label,
        nFitted ? double(counters[FitPasses]) / nFitted : 0., nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
   return nFitted;
@@ -1836,9 +2077,12 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        bool addBackFineMap = false,                                                  // with fineMapInput: its correction added back to the summed residuals (an iteration: the output is the full fine map)
                        int clusterFlagMask = 0,                                                      // TPC clusters with any of these flags (UnbinnedResid::channel: 0x1 split pad, 0x2 split time, 0x4 edge,
                                                                                                      // 0x8 single pad or time, 0x10 shared) are de-weighted in the fit and not summed; 0: none. "Golden": 0x19
-                       std::string clusterBiasFile = "")                                             // table of the per-cluster correction of the cluster-position biases (pad-phase S-curve,
+                       std::string clusterBiasFile = "",                                             // table of the per-cluster correction of the cluster-position biases (pad-phase S-curve,
                                                                                                      // sector-edge truncation; format in ClusterBiasCorrection.h), applied to the snapped cluster
                                                                                                      // y before the edge cut and the binning; empty: off
+                       float edgeTreePads = 0.f,                                                     // > 0: the edge tree (<output stem>.edgeTree.root) with the clusters within this many pads of the
+                                                                                                     // pad plane's edge (measured, best or MC true position); 0: off
+                       int edgeTreeEvery = 1)                                                        // edge tree: every n-th track of a TF
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -1852,6 +2096,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   if (addBackFineMap && fineMapInput.empty()) {
     LOGP(fatal, "addBackFineMap needs a fineMapInput");
+  }
+  if (edgeTreePads > 0.f && edgeTreeEvery < 1) {
+    LOGP(fatal, "edgeTreeEvery {}: at least 1", edgeTreeEvery);
   }
   // a local CCDB snapshot keeps one object per path: the time-dependent TPC scalers need the server
   if (gSystem->Getenv("ALICEO2_CCDB_LOCALCACHE")) {
@@ -1997,6 +2244,20 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     context.kinkQAEvery = kinkQAEvery;
     LOGP(info, "Kink QA of every {}th fitted track per fit thread: {}", kinkQAEvery, kinkQAFile);
   }
+  // the edge tree: one streamer for the fit threads, <output stem>.edgeTree.root
+  std::unique_ptr<o2::utils::TreeStreamRedirector> edgeTree;
+  std::mutex edgeTreeMutex;
+  if (edgeTreePads > 0.f) {
+    const std::filesystem::path outputPath(fileOutput);
+    const std::string edgeTreeFile = ((outputPath.parent_path().empty() ? std::filesystem::path(".") : outputPath.parent_path()) / (outputPath.stem().string() + ".edgeTree.root")).string();
+    edgeTree = std::make_unique<o2::utils::TreeStreamRedirector>(edgeTreeFile.c_str(), "recreate");
+    context.edgeTree = edgeTree.get();
+    context.edgeTreeMutex = &edgeTreeMutex;
+    context.edgeTreePads = edgeTreePads;
+    context.edgeTreeEvery = edgeTreeEvery;
+    LOGP(info, "Edge tree: clusters within {} pads of the pad plane's edge of every {}th track of a TF{}: {}", edgeTreePads, edgeTreeEvery,
+         isMC ? ", with the MC truth" : "", edgeTreeFile);
+  }
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
   SelectedTFs selected;
   const long nFitted = runPass(fitTFs, files, context, nThreads, sums, selected, "");
@@ -2005,6 +2266,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   extraInfo.emplace_back("fineMapInput", fineMapInput.empty() ? std::string("none") : fineMapInput + (addBackFineMap ? " (added back)" : " (subtracted)"));
   if (kinkQA) {
     kinkQA->Close();
+  }
+  if (edgeTree) {
+    edgeTree->Close();
   }
   writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, extraInfo, nFitted, minEntries, writeSums, runNumber,
               orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected);
