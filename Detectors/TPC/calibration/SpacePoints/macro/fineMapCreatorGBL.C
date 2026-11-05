@@ -58,7 +58,8 @@
 /// measured, best or true position): the track's TF (file, entry, CTP luminosity, IDC, lumi scale), occupancy (TrackDataCompact::multStack
 /// per stack: the reconstruction's TPC occupancy map over the track's time span) and fit, and per such cluster its row, sector, nominal x,
 /// stack and occupancy of its stack (mult), measured pad-plane y before any correction (padY0, snapped), after the cluster-bias correction (padY), the best position on the pad
-/// plane (bestPadY), z, slope, flags, de-weighting, the unbiased residuals with the cluster's and the track's errors, the y/x bin and what
+/// plane (bestPadY), z, slope (tgSlp: the residual stream's = ITS-extrapolated reference's; tgSlpFit: the fitted track's, as the voxel
+/// model; NaN without a residual), flags, de-weighting, the unbiased residuals with the cluster's and the track's errors, the y/x bin and what
 /// the fine pass did with it (status: 0 summed, 1 outlier of the fit's last pass, 2 flagged, 3 no residual, 4 unbiased pull > OutlierSigma,
 /// 5 within SkipEdgePads at the best position, 6 outside the grid, 7 not in the fit's last pass) and the distances from the edge in pads
 /// (d = (pad plane edge - side * y) / pad width, side = the sign of padY0; pad-0 centre at d = 0.5) of the measured, best and true position.
@@ -1274,6 +1275,7 @@ struct EdgeRecord {
   double residualY = std::numeric_limits<double>::quiet_NaN();
   double residualZ = std::numeric_limits<double>::quiet_NaN();
   double trackSigmaY = std::numeric_limits<double>::quiet_NaN(); ///< the track's error at the cluster without the cluster
+  double tgSlpFit = std::numeric_limits<double>::quiet_NaN();    ///< dy/dx of the fitted track at the cluster (the voxel model's slope)
   int binY2X = -1;
 };
 
@@ -1295,6 +1297,7 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
   std::vector<float> yTrue;
   std::vector<float> z;
   std::vector<float> tgSlp;
+  std::vector<float> tgSlpFit;
   std::vector<float> residualY;
   std::vector<float> residualZ;
   std::vector<float> sigmaY;
@@ -1340,6 +1343,7 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
     yTrue.push_back(cluster.yTrue);
     z.push_back(cluster.z0);
     tgSlp.push_back(cluster.tgSlpValid ? cluster.tgSlp : std::numeric_limits<double>::quiet_NaN());
+    tgSlpFit.push_back(record.tgSlpFit);
     residualY.push_back(record.residualY);
     residualZ.push_back(record.residualZ);
     sigmaY.push_back(cluster.sigmaY);
@@ -1383,7 +1387,7 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
                         << "passes=" << passes << "mc=" << mc << "truthComplete=" << truthComplete << "pTrue=" << pTrue << "distTPCRef=" << distTPCRef
                         << "pidTrue=" << pidTrue << "row=" << row << "stack=" << stack << "mult=" << mult << "sector=" << sector << "flags=" << flags << "excluded=" << excluded
                         << "status=" << status << "binY2X=" << binY2X << "x=" << x << "padY0=" << padY0 << "padY=" << padY << "bestPadY=" << bestPadY
-                        << "yTrue=" << yTrue << "z=" << z << "tgSlp=" << tgSlp << "residualY=" << residualY << "residualZ=" << residualZ
+                        << "yTrue=" << yTrue << "z=" << z << "tgSlp=" << tgSlp << "tgSlpFit=" << tgSlpFit << "residualY=" << residualY << "residualZ=" << residualZ
                         << "sigmaY=" << sigmaY << "trackSigmaY=" << trackSigmaY << "dMeas=" << dMeas << "dBest=" << dBest << "dTrue=" << dTrue << "\n";
   }
   ++counters[EdgeTreeTracks];
@@ -1584,6 +1588,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       record.residualY = unbiased[0];
       record.residualZ = unbiased[1];
       record.trackSigmaY = std::sqrt(std::max(0., 1. / weight[0] - cluster.sigmaY * cluster.sigmaY));
+      // the slope of the voxel model (as below): the reference's, with fitSlopes the fitted track's
+      double snpFit = fit.reference[point].getSnp();
+      if (context.fitSlopes && fit.trajectory->getResults(-int(point + 1), corrections, covariance) == 0) {
+        snpFit += corrections(1);
+      }
+      record.tgSlpFit = snpFit / std::sqrt(std::max(1e-6, (1. - snpFit) * (1. + snpFit)));
     }
     if (unbiased[0] * unbiased[0] * weight[0] > OutlierSigma * OutlierSigma || unbiased[1] * unbiased[1] * weight[1] > OutlierSigma * OutlierSigma) {
       ++counters[Outliers];
