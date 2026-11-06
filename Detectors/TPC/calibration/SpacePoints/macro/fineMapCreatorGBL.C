@@ -72,7 +72,7 @@
 /// plane (bestPadY), z, slope (tgSlp: the residual stream's = ITS-extrapolated reference's; tgSlpFit: the fitted track's, as the voxel
 /// model; NaN without a residual), flags, de-weighting, the unbiased residuals with the cluster's and the track's errors, the y/x bin and what
 /// the fine pass did with it (status: 0 summed, 1 outlier of the fit's last pass, 2 flagged, 3 no residual, 4 unbiased pull > OutlierSigma,
-/// 5 within SkipEdgePads at the best position, 6 outside the grid, 7 not in the fit's last pass) and the distances from the edge in pads
+/// 5 within SkipEdgePads at the best position (edgeByPred: at the track without the cluster), 6 outside the grid, 7 not in the fit's last pass) and the distances from the edge in pads
 /// (d = (pad plane edge - side * y) / pad width, side = the sign of padY0; pad-0 centre at d = 0.5) of the measured, best and true position.
 /// MC (trkMC in the input, e.g. --enable-mc residuals): the true y (yTrue) at the cluster's row, from TrackDataMC::parTPCIn swept row by row
 /// (sector frame, nominal row x, material LUT, true PID) for a usable truth (parTPCIn, not fake, distTPCRef <= EdgeTreeMaxDistTPCRef).
@@ -85,6 +85,9 @@
 /// inward, worst for tracks riding along the edge. Instead the clusters within edgeFitPads of the edge at the track WITHOUT the cluster are
 /// practically out of the fit (errors x RemovedSigmaScale), re-decided after every pass; the first pass by the measured position with a margin
 /// of one pad, which with MinFitClusters also drops the tracks riding along the edge over most of their length.
+/// edgeByPred: the skipEdgePads cut, the y/x bin and the lookup in bestEdgeBiasFile by the track WITHOUT the cluster (d_pred) instead of the
+/// best position (d_best), so that nothing there depends on the cluster's own noise; z/x stays at the best position. The table must then be
+/// indexed by d_pred, from a fine pass with the same setting. Binning by the prediction alone is Berkson through the prediction's error.
 ///
 /// TF time and IDC: the first orbit (records tree) and the CTPLumi of every TF are read first, with the time window cut of
 /// staticMapCreatorCPM.C (firstTFTime / lastTFTime: the TFs of the coarse map of that window); the TFs are sorted in time and the TPC
@@ -1223,6 +1226,7 @@ struct FitContext {
   bool truthClusters = false;                                                 ///< test: the TPC clusters at the MC truth + noise
   double edgeRemovePads = 0.;                                                 ///< test: clusters within this many pads of the edge (truth) out of the fit
   bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
+  bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -1700,13 +1704,16 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       continue;
     }
     const double bestPadY = cluster.padY + bestPosition[0] - cluster.yUncorrected; // = - cluster.y without edgeBiasInFit
+    const double predY = cluster.y - unbiased[0];                                  // the track without the cluster
+    const double predPadY = cluster.padY + predY - cluster.yUncorrected;
+    const double edgePadY = context.edgeByPred ? predPadY : bestPadY; // the position of the edge cut and the table
     if (edgeTrack) {
       auto& record = edgeRecords[fit.active[point]];
       record.bestPadY = bestPadY;
       record.residualY = unbiased[0];
       record.residualZ = unbiased[1];
       record.trackSigmaY = std::sqrt(std::max(0., 1. / weight[0] - cluster.sigmaY * cluster.sigmaY));
-      record.predPadY = cluster.padY + (cluster.y - unbiased[0] - cluster.yUncorrected);
+      record.predPadY = predPadY;
       record.edgeShift = cluster.edgeShift;
       // the slope of the voxel model (as below): the reference's, with fitSlopes the fitted track's
       double snpFit = fit.reference[point].getSnp();
@@ -1720,12 +1727,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       mark(point, 4);
       continue;
     }
-    if (std::abs(bestPadY) > context.geometry->padPlaneEdge[cluster.row] - context.skipEdgePads * context.geometry->padWidth[cluster.row]) {
+    if (std::abs(edgePadY) > context.geometry->padPlaneEdge[cluster.row] - context.skipEdgePads * context.geometry->padWidth[cluster.row]) {
       ++counters[EdgePadResiduals];
       mark(point, 5);
       continue;
     }
-    const double y2x = bestPosition[0] / cluster.x;
+    const double y2x = (context.edgeByPred ? predY : bestPosition[0]) / cluster.x;
     const double z2x = bestPosition[1] / cluster.x;
     const int binY2X = std::abs(z2x) > context.maxZ2X ? -1 : context.binning->getY2XBinExact(y2x, cluster.row);
     const int binZ2X = context.binning->getZ2XBinExact(cluster.sector < 18 ? z2x : -z2x);
@@ -1764,14 +1771,14 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       contribution.residualZ += correction[2] - contribution.slopeZ * correction[0];
     }
     if (context.bestEdgeBias && !context.edgeFit.table) {
-      // the edge part of the cluster bias at the best position (the table's conditioning variable), the voxel model's slope
+      // the edge part of the cluster bias at the table's conditioning variable (best position; edgeByPred: the track without the cluster), the voxel model's slope
       const double width = context.geometry->padWidth[cluster.row];
       const double side = cluster.padY0 < 0. ? -1. : 1.;
-      const double dBest = (context.geometry->padPlaneEdge[cluster.row] - side * bestPadY) / width;
+      const double dEdge = (context.geometry->padPlaneEdge[cluster.row] - side * edgePadY) / width;
       const double padMeas = (context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY0)) / width - 0.5;
       const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
       const double bias = context.bestEdgeBias->inwardBias(context.bestEdgeBias->unitOfRow(cluster.row), cls, o2::tpc::cluster_bias::driftLength(cluster.z0),
-                                                           std::abs(contribution.slopeY), dBest);
+                                                           std::abs(contribution.slopeY), dEdge);
       contribution.residualY += side * bias;
       counters[EdgeBiasCorrected] += bias != 0.;
       if (edgeTrack) {
@@ -2240,8 +2247,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        bool truthClusters = false,                                                   // test (MC, edge tree): the TPC clusters at the swept truth + Gaussian noise of their error
                        float edgeRemovePads = 0.f,                                                   // test (MC, edge tree): the clusters within this many pads of the edge (truth) out of the fit
                        bool edgeWeightByTruth = false,                                               // test (MC, edge tree): the de-weighting within EdgePads decided at the truth
-                       float edgeFitPads = 0.f)                                                      // > 0: instead of that de-weighting the clusters within this many pads of the edge at the track
+                       float edgeFitPads = 0.f,                                                      // > 0: instead of that de-weighting the clusters within this many pads of the edge at the track
                                                                                                      // without the cluster out of the fit
+                       bool edgeByPred = false)                                                      // the skipEdgePads cut, the y/x bin and the bestEdgeBiasFile lookup by the track without the cluster
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2424,6 +2432,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.edgeWeightByTruth = edgeWeightByTruth;
   context.edgeFit.geometry = &geometry;
   context.edgeFit.pads = edgeFitPads;
+  context.edgeByPred = edgeByPred;
+  if (edgeByPred) {
+    LOGP(info, "Edge cut, y/x bin and edge table by the track without the cluster instead of the best position");
+  }
   if (edgeWeightByTruth) {
     LOGP(info, "TEST: de-weighting within {} pads of the edge at the MC truth", EdgePads);
   }
