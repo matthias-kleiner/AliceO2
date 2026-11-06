@@ -1286,6 +1286,7 @@ struct FitContext {
   bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
   bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
   DeadPads deadPads;                                                          ///< deadPadFile: clusters beside dead pads out
+  bool lastRowsInFit = false;                                                 ///< the last EdgeRows rows keep their weight in the fit (with edgeFitPads)
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -1672,7 +1673,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     // TrackInterpolation in UnbinnedResid::channel
     cluster.flagged = context.clusterFlagMask != 0 && (residual.channel & context.clusterFlagMask);
     if (context.edgeFit.pads > 0.) {
-      cluster.excluded = cluster.flagged || isExcludedRow(cluster.row);
+      cluster.excluded = cluster.flagged || (isExcludedRow(cluster.row) && !(context.lastRowsInFit && cluster.row >= NRows - EdgeRows));
       cluster.removed = context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY) < (context.edgeFit.pads + 1.) * context.geometry->padWidth[cluster.row] ||
                         context.deadPads.near(cluster.sector, cluster.row, cluster.padY, 1.);
     } else {
@@ -2319,7 +2320,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                                                                                                      // without the cluster out of the fit
                        bool edgeByPred = false,                                                      // the skipEdgePads cut, the y/x bin and the bestEdgeBiasFile lookup by the track without the cluster
                        std::string deadPadFile = "",                                                 // dead channel list ("sector row pad"): clusters beside a dead pad out of the fit and not summed; empty: off
-                       float deadPadMargin = 2.f)                                                    // ... within this many pads of a dead pad at the track without the cluster
+                       float deadPadMargin = 2.f,                                                    // ... within this many pads of a dead pad at the track without the cluster
+                       bool lastRowsInFit = false)                                                   // test (no-distortion MC, with edgeFitPads): the last rows are not de-weighted in the fit
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2502,6 +2504,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.edgeWeightByTruth = edgeWeightByTruth;
   context.edgeFit.geometry = &geometry;
   context.edgeFit.pads = edgeFitPads;
+  context.lastRowsInFit = lastRowsInFit;
+  if (lastRowsInFit) {
+    LOGP(info, "The last {} rows keep their weight in the fit", EdgeRows);
+  }
   if (!deadPadFile.empty()) {
     context.deadPads.load(deadPadFile, deadPadMargin, geometry);
     context.edgeFit.deadPads = &context.deadPads;
