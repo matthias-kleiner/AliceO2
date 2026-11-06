@@ -28,7 +28,7 @@
 /// correction is dy = +sign(y) * b on the +y side and -b on the -y side: it flips between the two edges.
 ///
 /// Table file (plain text, '#' starts a comment, one record per line, values in um, whitespace separated):
-///   version 1
+///   version 1 | 2                      2: with the occupancy term below
 ///   unit    stack | region             granularity of the records' first index (optional, default stack): 4 stacks or the 10 pad
 ///                                      regions (the IROC regions differ in pad width, 4.16-4.36 mm)
 ///   drift   <n> <e_0> ... <e_n>        drift-length bin edges [cm]; the table values belong to the bin centres
@@ -38,6 +38,8 @@
 ///   dist    <n> <dLo> <dHi>            edge part: n bins of d in [dLo, dHi) [pads]
 ///   S <unit> <iDrift> <iSlope> <class> <v_0> ... <v_{nPhase-1}>   S-curve: mean inward bias [um] at the phase nodes
 ///   E <unit> <iDrift> <iSlope> <class> <v_0> ... <v_{nDist-1}>    edge part: mean inward bias [um] per d bin, S-curve subtracted
+///   mult    <n> <m_0> ... <m_n-1>      occupancy nodes (TrackDataCompact::multStack of the cluster's stack), increasing
+///   M <unit> <iDrift> <class> <iMult> <v_0> ... <v_{nDist-1}>     occupancy term: what the edge part changes at node iMult [um] per d bin; added to E, no slope axis
 /// unit: the stack (0 IROC, 1 OROC1, 2 OROC2, 3 OROC3) or the pad region (0-9). The S-curve is a cluster property and therefore odd
 /// in the phase and even in the slope (only |tgSlp| is binned); the producer keeps only the odd part of the measured profile. class: 0 golden (no flag of 0x19), 1 split pad / shared (0x1 or 0x10 without 0x8),
 /// 2 single pad (flag 0x8 AND exactly on the pad centre: a single-pad cluster sits there; 0x8 elsewhere is a single-time cluster,
@@ -46,7 +48,8 @@
 ///
 /// Interpolation: periodic and linear in the phase between the nodes; linear in the drift length and in |tgSlp| between the
 /// bin centres, clamped to the first / last centre outside; linear in d between the bin centres, clamped below the first centre,
-/// zero at and beyond dHi.
+/// zero at and beyond dHi. The occupancy term: linear between the nodes, clamped outside, in drift and d as the edge part; only with
+/// a mult >= 0 given to inwardBias.
 
 #ifndef O2_TPC_SCD_CLUSTERBIASCORRECTION_H
 #define O2_TPC_SCD_CLUSTERBIASCORRECTION_H
@@ -123,6 +126,8 @@ struct ClusterBiasCorrection {
   std::vector<double> edge;              ///< [unit][drift][slope][class][d] in cm
   std::vector<char> hasScurve;           ///< [unit][drift][slope][class]: record present
   std::vector<char> hasEdge;             ///< [unit][drift][slope][class]: record present
+  std::vector<double> multNodes;         ///< occupancy term: nodes in multStack
+  std::vector<double> occupancy;         ///< [unit][drift][class][mult][d] in cm
   std::array<double, NRows> padWidth{};  ///< [cm] per pad row (setRowGeometry)
   std::array<double, NRows> halfPlane{}; ///< nPads / 2 per pad row: the pad plane's edge in pads from y = 0
   std::array<int, NRows> regionByRow{};  ///< pad region per row (setRowGeometry)
@@ -144,6 +149,7 @@ struct ClusterBiasCorrection {
   int unitOfRow(int row) const { return byRegion ? regionByRow[row] : stackOfRow(row); }
 
   bool isActive() const { return loaded; }
+  bool hasOccupancy() const { return loaded && !multNodes.empty(); }
   int nDrift() const { return int(driftEdges.size()) - 1; }
   int nSlope() const { return int(slopeEdges.size()) - 1; }
 
@@ -195,11 +201,21 @@ struct ClusterBiasCorrection {
           return fail(error, "bad " + key + " line");
         }
         (key == "drift" ? driftEdges : slopeEdges) = e;
+      } else if (key == "mult") {
+        int n = 0;
+        ss >> n;
+        multNodes.resize(n);
+        for (auto& v : multNodes) {
+          ss >> v;
+        }
+        if (!ss || n < 1 || !std::is_sorted(multNodes.begin(), multNodes.end())) {
+          return fail(error, "bad mult line");
+        }
       } else if (key == "phase") {
         ss >> nPhase;
       } else if (key == "dist") {
         ss >> nDist >> distLo >> distHi;
-      } else if (key == "S" || key == "E") {
+      } else if (key == "S" || key == "E" || key == "M") {
         std::vector<double> v;
         double x = 0.;
         while (ss >> x) {
@@ -210,7 +226,7 @@ struct ClusterBiasCorrection {
         return fail(error, "unknown record " + key);
       }
     }
-    if (version != 1 || driftEdges.size() < 2 || slopeEdges.size() < 2 || nPhase < 2 || nDist < 0 || (nDist > 0 && distHi <= distLo)) {
+    if ((version != 1 && version != 2) || driftEdges.size() < 2 || slopeEdges.size() < 2 || nPhase < 2 || nDist < 0 || (nDist > 0 && distHi <= distLo)) {
       return fail(error, "missing or bad header (version / drift / slope / phase / dist)");
     }
     const size_t nRec = size_t(nUnits()) * nDrift() * nSlope() * NClasses;
@@ -218,7 +234,24 @@ struct ClusterBiasCorrection {
     edge.assign(nRec * std::max(nDist, 1), 0.);
     hasScurve.assign(nRec, 0);
     hasEdge.assign(nRec, 0);
+    occupancy.assign(multNodes.empty() ? 0 : size_t(nUnits()) * nDrift() * NClasses * multNodes.size() * nDist, 0.);
     for (const auto& [type, v] : records) {
+      if (type == 'M') {
+        if (int(v.size()) != 4 + nDist || multNodes.empty()) {
+          return fail(error, "record M: wrong number of values or no mult line");
+        }
+        const int unit = int(v[0]);
+        const int iDrift = int(v[1]);
+        const int cls = int(v[2]);
+        const int iMult = int(v[3]);
+        if (unit < 0 || unit >= nUnits() || iDrift < 0 || iDrift >= nDrift() || cls < 0 || cls >= NClasses || iMult < 0 || iMult >= int(multNodes.size())) {
+          return fail(error, "record M: index out of range");
+        }
+        for (int i = 0; i < nDist; ++i) {
+          occupancy[occupancyRecord(unit, iDrift, cls, iMult) + i] = 1.e-4 * v[4 + i]; // um -> cm
+        }
+        continue;
+      }
       const int nVal = type == 'S' ? nPhase : nDist;
       if (int(v.size()) != 4 + nVal) {
         return fail(error, std::string("record ") + type + ": wrong number of values");
@@ -259,13 +292,14 @@ struct ClusterBiasCorrection {
     return float(side * bias);
   }
 
-  /// inward bias [cm] (S-curve + edge part) at a distance d [pads] from the nearest edge: for tests and QA
-  double inwardBias(int unit, int cls, double drift, double absSlope, double d) const
+  /// inward bias [cm] (S-curve + edge part, with mult >= 0 and a table with it the occupancy term) at a distance d [pads] from the nearest edge
+  double inwardBias(int unit, int cls, double drift, double absSlope, double d, double mult = -1.) const
   {
     const double pad = d - 0.5;
     const double phase = pad - std::round(pad);
     return interpolate(unit, cls, drift, absSlope, [&](size_t r, bool& ok) { return scurveAt(r, phase, ok); }) +
-           interpolate(unit, cls, drift, absSlope, [&](size_t r, bool& ok) { return edgeAt(r, d, ok); });
+           interpolate(unit, cls, drift, absSlope, [&](size_t r, bool& ok) { return edgeAt(r, d, ok); }) +
+           (mult >= 0. ? occupancyAt(unit, cls, drift, d, mult) : 0.);
   }
 
  private:
@@ -275,6 +309,49 @@ struct ClusterBiasCorrection {
       *error = message;
     }
     return false;
+  }
+
+  /// start of the d values of an occupancy record
+  size_t occupancyRecord(int unit, int iDrift, int cls, int iMult) const
+  {
+    return (((size_t(unit) * nDrift() + iDrift) * NClasses + cls) * multNodes.size() + iMult) * nDist;
+  }
+
+  /// occupancy term [cm]: linear in drift, mult (between the nodes, clamped outside) and d (as edgeAt)
+  double occupancyAt(int unit, int cls, double drift, double d, double mult) const
+  {
+    if (multNodes.empty() || nDist < 1 || d >= distHi) {
+      return 0.;
+    }
+    int iD = 0;
+    double fD = 0.;
+    bracket(driftEdges, drift, iD, fD);
+    const int nM = int(multNodes.size());
+    int iM = 0;
+    double fM = 0.;
+    if (nM > 1 && mult > multNodes[0]) {
+      while (iM < nM - 2 && mult >= multNodes[iM + 1]) {
+        ++iM;
+      }
+      fM = std::min(1., (mult - multNodes[iM]) / (multNodes[iM + 1] - multNodes[iM]));
+    }
+    const double w = (distHi - distLo) / nDist;
+    const double x = std::max(0., (d - distLo) / w - 0.5);
+    const int iX = std::min(int(std::floor(x)), nDist - 1);
+    const double fX = iX == nDist - 1 ? 0. : x - iX;
+    double sum = 0.;
+    for (int a = 0; a < 2; ++a) {
+      const double wD = a ? fD : 1. - fD;
+      for (int b = 0; b < 2; ++b) {
+        const double wM = b ? fM : 1. - fM;
+        if (wD == 0. || wM == 0.) {
+          continue;
+        }
+        const double* v = &occupancy[occupancyRecord(unit, iD + a, cls, iM + b)];
+        sum += wD * wM * ((1. - fX) * v[iX] + (fX > 0. ? fX * v[iX + 1] : 0.));
+      }
+    }
+    return sum;
   }
 
   /// position of x between the bin centres of edges: lower centre index and weight of the upper one, clamped at both ends
