@@ -468,12 +468,15 @@ struct FineMapInput {
     return true;
   }
 
-  /// subtracts the map from (x, y, z); the correction subtracted in applied (optional)
-  void apply(int sector, int row, double& x, double& y, double& z, double* applied = nullptr) const
+  /// subtracts the map from (x, y, z); the correction subtracted in applied (optional); lookup (x, y, z): the position the map is read at, default (x, y, z)
+  void apply(int sector, int row, double& x, double& y, double& z, double* applied = nullptr, const double* lookup = nullptr) const
   {
+    const double lookupX = lookup ? lookup[0] : x;
+    const double lookupY = lookup ? lookup[1] : y;
+    const double lookupZ = lookup ? lookup[2] : z;
     int voxels[4];
     double weights[4];
-    const int nVoxels = bilinearNodes(*binning, row, y / x, (sector < 18 ? z : -z) / x, voxels, weights);
+    const int nVoxels = bilinearNodes(*binning, row, lookupY / lookupX, (sector < 18 ? lookupZ : -lookupZ) / lookupX, voxels, weights);
     double correction[3] = {0., 0., 0.};
     for (int node = 0; node < nVoxels; ++node) {
       const size_t voxel = size_t(sector) * voxelsPerSector + voxels[node];
@@ -1285,6 +1288,7 @@ struct FitContext {
   double edgeRemovePads = 0.;                                                 ///< test: clusters within this many pads of the edge (truth) out of the fit
   bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
   bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
+  bool measuredFrameBins = false;                                             ///< voxels and fineMapInput lookup in the measured frame (before the map corrections), as stage 1 and the FT
   DeadPads deadPads;                                                          ///< deadPadFile: clusters beside dead pads out
   bool lastRowsInFit = false;                                                 ///< the last EdgeRows rows keep their weight in the fit (with edgeFitPads)
 };
@@ -1666,7 +1670,8 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.z = z;
     }
     if (context.fineMap) {
-      context.fineMap->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z, cluster.fineCorrection);
+      const double measuredPosition[3] = {cluster.xNominal, cluster.padY, cluster.z0};
+      context.fineMap->apply(cluster.sector, cluster.row, cluster.x, cluster.y, cluster.z, cluster.fineCorrection, context.measuredFrameBins ? measuredPosition : nullptr);
     }
     cluster.yUncorrected = cluster.y;
     // TPC cluster flags (ClusterNative split pad 0x1 / split time 0x2 / edge 0x4 / single 0x8, merger shared 0x10), stored by
@@ -1798,8 +1803,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       mark(point, 8);
       continue;
     }
-    const double y2x = (context.edgeByPred ? predY : bestPosition[0]) / cluster.x;
-    const double z2x = bestPosition[1] / cluster.x;
+    // the voxel: by default in the corrected frame; measuredFrameBins: on the pad plane, the correction of the cluster taken back from the position
+    const double binX = context.measuredFrameBins ? cluster.xNominal : cluster.x;
+    const double binY = context.measuredFrameBins ? edgePadY : (context.edgeByPred ? predY : bestPosition[0]);
+    const double binZ = context.measuredFrameBins ? cluster.z0 + bestPosition[1] - cluster.z : bestPosition[1];
+    const double y2x = binY / binX;
+    const double z2x = binZ / binX;
     const int binY2X = std::abs(z2x) > context.maxZ2X ? -1 : context.binning->getY2XBinExact(y2x, cluster.row);
     const int binZ2X = context.binning->getZ2XBinExact(cluster.sector < 18 ? z2x : -z2x);
     if (edgeTrack) {
@@ -1822,7 +1831,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     Contribution contribution;
     contribution.voxel = size_t(cluster.sector) * context.voxelsPerSector + context.binning->getGlbVoxBin(cluster.row, binY2X, binZ2X);
     contribution.charge = charge;
-    contribution.x = cluster.x;
+    contribution.x = binX;
     contribution.y2x = y2x;
     contribution.z2x = z2x;
     contribution.slopeY = snp / cosPhi;
@@ -2321,7 +2330,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        bool edgeByPred = false,                                                      // the skipEdgePads cut, the y/x bin and the bestEdgeBiasFile lookup by the track without the cluster
                        std::string deadPadFile = "",                                                 // dead channel list ("sector row pad"): clusters beside a dead pad out of the fit and not summed; empty: off
                        float deadPadMargin = 2.f,                                                    // ... within this many pads of a dead pad at the track without the cluster
-                       bool lastRowsInFit = false)                                                   // test (no-distortion MC, with edgeFitPads): the last rows are not de-weighted in the fit
+                       bool lastRowsInFit = false,                                                   // test (no-distortion MC, with edgeFitPads): the last rows are not de-weighted in the fit
+                       bool measuredFrameBins = false)                                               // voxels and the fineMapInput lookup in the measured frame, as stage 1 and the FT, instead of after the map corrections
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2513,6 +2523,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     context.edgeFit.deadPads = &context.deadPads;
   }
   context.edgeByPred = edgeByPred;
+  context.measuredFrameBins = measuredFrameBins;
+  if (measuredFrameBins) {
+    LOGP(info, "Voxels and the fine map lookup in the measured frame");
+  }
   if (edgeByPred) {
     LOGP(info, "Edge cut, y/x bin and edge table by the track without the cluster instead of the best position");
   }
