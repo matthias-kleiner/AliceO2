@@ -121,6 +121,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -142,6 +143,7 @@
 #include "TFile.h"
 #include "TGeoManager.h"
 #include "TGrid.h"
+#include "TH1D.h"
 #include "TNamed.h"
 #include "TROOT.h"
 #include "TSystem.h"
@@ -724,6 +726,65 @@ class TFQueue
 };
 
 /// one summed residual
+/// default QA of the cluster bias, filled before the edge cut: sums at the sector edge and at the spacer cross by the distance of the track without the cluster, in pads from the pad plane's edge or from y = 0, status 0 and 5
+/// (after the outlier cut), not beside dead pads, z/x < 1. Sign: outward at the edge, away from the centre at the cross. Four blocks, each a flat TH1D (hadd adds the chunks): per sector x half x row group x drift x distance, and
+/// per row group x class x mult group x drift x distance, each cell NStat sums. Row groups: IROC, OROC1, OROC2, OROC3 rows < 146, rows >= 146; drift in 50 cm bins; mult < 30k, 30 - 60k, 60 - 100k, >= 100k; distance in 0.25 pads from 0 to 6.
+struct EdgeQA {
+  static constexpr int NSector = 36;
+  static constexpr int NHalf = 2;
+  static constexpr int NGroup = 5;
+  static constexpr int NDrift = 5;
+  static constexpr int NClass = 3;
+  static constexpr int NMult = 4;
+  static constexpr int NDist = 24;
+  static constexpr double DistStep = 0.25;
+  enum Stat { Entries, W, WR, WR2, WT, WTR, WT2, WTable, NStat }; ///< w = the map's weight, r = c - p [um], t = slope, table = what the table adds [um]
+  static constexpr size_t SectorSize = size_t(NSector) * NHalf * NGroup * NDrift * NDist * NStat;
+  static constexpr size_t ClassSize = size_t(NGroup) * NClass * NMult * NDrift * NDist * NStat;
+  std::vector<double> edgeSector = std::vector<double>(SectorSize, 0.);
+  std::vector<double> edgeClass = std::vector<double>(ClassSize, 0.);
+  std::vector<double> centreSector = std::vector<double>(SectorSize, 0.);
+  std::vector<double> centreClass = std::vector<double>(ClassSize, 0.);
+  static size_t sectorCell(int sector, int half, int group, int drift, int dist) { return ((((size_t(sector) * NHalf + half) * NGroup + group) * NDrift + drift) * NDist + dist) * NStat; }
+  static size_t classCell(int group, int cls, int mult, int drift, int dist) { return ((((size_t(group) * NClass + cls) * NMult + mult) * NDrift + drift) * NDist + dist) * NStat; }
+  static void fill(double* cell, double w, double r, double t, double table)
+  {
+    cell[Entries] += 1.;
+    cell[W] += w;
+    cell[WR] += w * r;
+    cell[WR2] += w * r * r;
+    cell[WT] += w * t;
+    cell[WTR] += w * t * r;
+    cell[WT2] += w * t * t;
+    cell[WTable] += w * table;
+  }
+  void add(const EdgeQA& other)
+  {
+    std::transform(edgeSector.begin(), edgeSector.end(), other.edgeSector.begin(), edgeSector.begin(), std::plus<double>());
+    std::transform(edgeClass.begin(), edgeClass.end(), other.edgeClass.begin(), edgeClass.begin(), std::plus<double>());
+    std::transform(centreSector.begin(), centreSector.end(), other.centreSector.begin(), centreSector.begin(), std::plus<double>());
+    std::transform(centreClass.begin(), centreClass.end(), other.centreClass.begin(), centreClass.begin(), std::plus<double>());
+  }
+  static void write(const char* name, const char* title, const std::vector<double>& block)
+  {
+    TH1D histogram(name, title, int(block.size()), 0., double(block.size()));
+    histogram.SetDirectory(nullptr);
+    for (size_t bin = 0; bin < block.size(); ++bin) {
+      histogram.SetBinContent(int(bin) + 1, block[bin]);
+    }
+    histogram.Write();
+  }
+  void write() const
+  {
+    const char* sectorLayout = "sector, half (0 y < 0), row group, drift, distance, stat: entries, w, w r, w r^2, w t, w t r, w t^2, w table";
+    const char* classLayout = "row group, class, mult group, drift, distance, stat: entries, w, w r, w r^2, w t, w t r, w t^2, w table";
+    write("edgeQA_edgeSector", sectorLayout, edgeSector);
+    write("edgeQA_edgeClass", classLayout, edgeClass);
+    write("edgeQA_centreSector", sectorLayout, centreSector);
+    write("edgeQA_centreClass", classLayout, centreClass);
+  }
+};
+
 struct Contribution {
   size_t voxel = 0;
   int charge = 0;
@@ -1289,6 +1350,7 @@ struct FitContext {
   bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
   bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
   bool measuredFrameBins = false;                                             ///< voxels and fineMapInput lookup in the measured frame (before the map corrections), as stage 1 and the FT
+  bool edgeQA = false;                                                        ///< fill the sums of EdgeQA
   DeadPads deadPads;                                                          ///< deadPadFile: clusters beside dead pads out
   bool lastRowsInFit = false;                                                 ///< the last EdgeRows rows keep their weight in the fit (with edgeFitPads)
 };
@@ -1562,9 +1624,46 @@ void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, 
   counters[EdgeTreeSweepFailed] += truthState == 1 && !sweepOK;
 }
 
+/// one cluster into the sums of EdgeQA: padY = the pad-plane position of the edge cut, residual = unbiased c - p [cm], weight = the map's, slope = dy/dx of the reference, mult = occupancy of the cluster's stack
+void fillEdgeQA(EdgeQA& qa, const Cluster& cluster, const FitContext& context, double padY, double residual, double weight, double slope, double mult)
+{
+  const double width = context.geometry->padWidth[cluster.row];
+  const double planeEdge = context.geometry->padPlaneEdge[cluster.row];
+  const double side = cluster.padY0 < 0. ? -1. : 1.;
+  const double dEdge = (planeEdge - side * padY) / width;
+  const double dCentre = std::abs(padY) / width;
+  const double distMax = EdgeQA::NDist * EdgeQA::DistStep;
+  const bool atEdge = dEdge >= 0. && dEdge < distMax;
+  const bool atCentre = dCentre < distMax;
+  if (!atEdge && !atCentre) {
+    return;
+  }
+  const double padMeas = (planeEdge - std::abs(cluster.padY0)) / width - 0.5;
+  const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
+  const double driftLength = o2::tpc::cluster_bias::driftLength(cluster.z0);
+  double bias = 0.;
+  if (context.bestEdgeBias && !context.edgeFit.table && dEdge >= context.skipEdgePads) {
+    bias = context.bestEdgeBias->inwardBias(context.bestEdgeBias->unitOfRow(cluster.row), cls, driftLength, std::abs(slope), dEdge, context.bestEdgeBias->hasOccupancy() ? mult : -1.);
+  }
+  const int group = cluster.row < 63 ? 0 : cluster.row < 97 ? 1 : cluster.row < 127 ? 2 : cluster.row < 146 ? 3 : 4;
+  const int drift = std::max(0, std::min(EdgeQA::NDrift - 1, int(driftLength / 50.)));
+  const int multGroup = mult < 30e3 ? 0 : mult < 60e3 ? 1 : mult < 100e3 ? 2 : 3;
+  if (atEdge) {
+    const int dist = int(dEdge / EdgeQA::DistStep);
+    EdgeQA::fill(&qa.edgeSector[EdgeQA::sectorCell(cluster.sector, side < 0. ? 0 : 1, group, drift, dist)], weight, side * 1e4 * residual, side * slope, 1e4 * bias);
+    EdgeQA::fill(&qa.edgeClass[EdgeQA::classCell(group, cls, multGroup, drift, dist)], weight, side * 1e4 * residual, side * slope, 1e4 * bias);
+  }
+  if (atCentre) {
+    const double away = padY < 0. ? -1. : 1.;
+    const int dist = int(dCentre / EdgeQA::DistStep);
+    EdgeQA::fill(&qa.centreSector[EdgeQA::sectorCell(cluster.sector, padY < 0. ? 0 : 1, group, drift, dist)], weight, away * 1e4 * residual, away * slope, away * side * 1e4 * bias);
+    EdgeQA::fill(&qa.centreClass[EdgeQA::classCell(group, cls, multGroup, drift, dist)], weight, away * 1e4 * residual, away * slope, away * side * 1e4 * bias);
+  }
+}
+
 /// fit one track of a TF and append the contributions of its clusters
 void processTrack(const TFTask& task, size_t trackIndex, const FitContext& context, std::array<long, NCounters>& counters,
-                  std::vector<Cluster>& clusters, std::vector<Contribution>& batch)
+                  std::vector<Cluster>& clusters, std::vector<Contribution>& batch, EdgeQA* edgeQA)
 {
   const auto& trackRef = task.trackRefs[trackIndex];
   const auto& itsTrack = task.tracks[trackIndex].par;
@@ -1793,6 +1892,13 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       mark(point, 4);
       continue;
     }
+    if (edgeQA && std::abs(cluster.z0) < cluster.xNominal && !context.deadPads.near(cluster.sector, cluster.row, predPadY)) {
+      const auto& trackRefQA = task.trackRefs[trackIndex];
+      const int stackQA = o2::tpc::cluster_bias::stackOfRow(cluster.row);
+      const double snpQA = fit.reference[point].getSnp();
+      fillEdgeQA(*edgeQA, cluster, context, edgePadY, unbiased[0], weight[0], snpQA / std::sqrt(std::max(1e-6, (1. - snpQA) * (1. + snpQA))),
+                 trackRefQA.getMultStackPacked(stackQA) > 0 ? trackRefQA.getMultStack(stackQA) : 0.);
+    }
     if (std::abs(edgePadY) > context.geometry->padPlaneEdge[cluster.row] - context.skipEdgePads * context.geometry->padWidth[cluster.row]) {
       ++counters[EdgePadResiduals];
       mark(point, 5);
@@ -1889,7 +1995,7 @@ struct SelectedTFs {
 /// extraInfo: more user info
 void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, const std::string& y2xBinning, const std::string& z2xBinning, float maxZ2X,
                  const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<std::pair<std::string, std::string>>& extraInfo, long nTracks,
-                 double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected)
+                 double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected, const EdgeQA* edgeQA)
 {
   // CTP luminosity and IDC of the selected TFs, as staticMapCreatorCPM.C (PbPb: mean CTP luminosity x 2.414)
   double meanCTP = calculateMean(selected.ctpLumi) * (isPbPb ? 2.414 : 1.);
@@ -2058,6 +2164,10 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
     }
     sumsTree.Write();
   };
+  if (edgeQA) {
+    output.cd();
+    edgeQA->write();
+  }
   if (writeSums) {
     writeSumsTree("fineSums", "per voxel and charge the sums of the unbiased TPC-only residuals", sums);
   }
@@ -2178,7 +2288,7 @@ struct InputFile {
 /// threads take chunks of their tracks, the residuals summed per voxel and charge in batches; the TFs read are appended to selected;
 /// returns the tracks fitted
 long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::string>& files, const FitContext& context, int nThreads,
-             std::vector<std::array<ChargeSums, 2>>& sums, SelectedTFs& selected, const std::string& label)
+             std::vector<std::array<ChargeSums, 2>>& sums, SelectedTFs& selected, const std::string& label, EdgeQA* edgeQA)
 {
   std::mutex sumsMutex;
   std::array<std::atomic<long>, NCounters> counters{};
@@ -2188,6 +2298,7 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     batch.reserve(SumsBatchSize);
     std::vector<Cluster> clusters;
     std::array<long, NCounters> localCounters{};
+    std::unique_ptr<EdgeQA> localQA(edgeQA ? new EdgeQA : nullptr);
     auto flush = [&]() {
       std::lock_guard<std::mutex> lock(sumsMutex);
       for (const auto& contribution : batch) {
@@ -2200,7 +2311,7 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     size_t lastTrack = 0;
     while (queue.next(task, firstTrack, lastTrack)) {
       for (size_t track = firstTrack; track < lastTrack; ++track) {
-        processTrack(*task, track, context, localCounters, clusters, batch);
+        processTrack(*task, track, context, localCounters, clusters, batch, localQA.get());
         if (batch.size() >= SumsBatchSize) {
           flush();
         }
@@ -2212,6 +2323,10 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
       }
     }
     flush();
+    if (localQA) {
+      std::lock_guard<std::mutex> lock(sumsMutex);
+      edgeQA->add(*localQA);
+    }
   };
   std::vector<std::thread> threads;
   for (int thread = 0; thread < nThreads; ++thread) {
@@ -2228,8 +2343,8 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
       openFile = tf->file;
       LOGP(info, "Reading {}", files[tf->file]);
       fileOpen = input.open(files[tf->file], context.itsInFit > 0,
-                            context.clusterFlagMask != 0 || context.clusterBias != nullptr || context.edgeTree != nullptr || context.bestEdgeBias != nullptr,
-                            context.edgeTree != nullptr || (context.bestEdgeBias != nullptr && context.bestEdgeBias->hasOccupancy()));
+                            context.clusterFlagMask != 0 || context.clusterBias != nullptr || context.edgeTree != nullptr || context.bestEdgeBias != nullptr || context.edgeQA,
+                            context.edgeTree != nullptr || (context.bestEdgeBias != nullptr && context.bestEdgeBias->hasOccupancy()) || context.edgeQA);
     }
     auto task = std::make_shared<TFTask>();
     task->info = tf;
@@ -2331,7 +2446,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        std::string deadPadFile = "",                                                 // dead channel list ("sector row pad"): clusters beside a dead pad out of the fit and not summed; empty: off
                        float deadPadMargin = 2.f,                                                    // ... within this many pads of a dead pad at the track without the cluster
                        bool lastRowsInFit = false,                                                   // test (no-distortion MC, with edgeFitPads): the last rows are not de-weighted in the fit
-                       bool measuredFrameBins = false)                                               // voxels and the fineMapInput lookup in the measured frame, as stage 1 and the FT, instead of after the map corrections
+                       bool measuredFrameBins = false,                                               // voxels and the fineMapInput lookup in the measured frame, as stage 1 and the FT, instead of after the map corrections
+                       bool edgeQA = true)                                                           // the sums of EdgeQA (histograms edgeQA_* in the output file)
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2573,7 +2689,9 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
   SelectedTFs selected;
-  const long nFitted = runPass(fitTFs, files, context, nThreads, sums, selected, "");
+  context.edgeQA = edgeQA;
+  std::unique_ptr<EdgeQA> edgeQASums(edgeQA ? new EdgeQA : nullptr);
+  const long nFitted = runPass(fitTFs, files, context, nThreads, sums, selected, "", edgeQASums.get());
   std::vector<std::pair<std::string, std::string>> extraInfo;
   extraInfo.emplace_back("smoothing", "none");
   extraInfo.emplace_back("fineMapInput", fineMapInput.empty() ? std::string("none") : fineMapInput + (addBackFineMap ? " (added back)" : " (subtracted)"));
@@ -2584,6 +2702,6 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     edgeTree->Close();
   }
   writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, extraInfo, nFitted, minEntries, writeSums, runNumber,
-              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected);
+              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected, edgeQASums.get());
   LOGP(info, "fineMapCreatorGBL: {:.1f} s", std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime).count());
 }
