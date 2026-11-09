@@ -404,14 +404,48 @@ std::unique_ptr<o2::gpu::TPCFastSpaceChargeCorrection> TPCFastSpaceChargeCorrect
   knotsDouble[0].reserve(nY2Xbins);
   knotsDouble[1].reserve(nZ2Xbins);
 
-  // to get enouth measurements, make a spline knot at every second bin. Boundary bins are always included.
+  // y/x: a spline knot in every narrow bin (narrower than 0.75 of the widest bin: the refined bins at the sector edges and at the centre),
+  // and in each run of wide bins a knot at every mWideBinKnotStep-th bin, counted from both ends of the run, so that the knots are
+  // mirror-symmetric and do not depend on the parity of the bin count. Boundary bins are always included.
+  // For uniform binning and the default step 2 this is a knot at every second bin, as for z/x.
 
-  for (int i = 0, j = nY2Xbins - 1; i <= j; i += 2, j -= 2) {
-    knotsDouble[0].push_back(trackResiduals.getY2X(0, i));
-    if (j >= i + 1) {
-      knotsDouble[0].push_back(trackResiduals.getY2X(0, j));
+  {
+    auto addEveryNthBin = [](int first, int last, int step, std::vector<int>& bins) {
+      for (int i = first, j = last; i <= j; i += step, j -= step) {
+        bins.push_back(i);
+        if (j > i) {
+          bins.push_back(j);
+        }
+      }
+    };
+    float maxWidth = 0.f;
+    for (int i = 0; i < nY2Xbins; i++) {
+      maxWidth = std::max(maxWidth, 1.f / trackResiduals.getDY2XI(0, i));
     }
+    std::vector<int> yKnotBins;
+    int runStart = -1;
+    for (int i = 0; i <= nY2Xbins; i++) {
+      const bool wide = (i < nY2Xbins) && (1.f / trackResiduals.getDY2XI(0, i) >= 0.75f * maxWidth);
+      if (wide && runStart < 0) {
+        runStart = i;
+      }
+      if (!wide && runStart >= 0) {
+        addEveryNthBin(runStart, i - 1, mWideBinKnotStep, yKnotBins);
+        runStart = -1;
+      }
+      if (i < nY2Xbins && !wide) {
+        yKnotBins.push_back(i);
+      }
+    }
+    std::sort(yKnotBins.begin(), yKnotBins.end());
+    yKnotBins.erase(std::unique(yKnotBins.begin(), yKnotBins.end()), yKnotBins.end());
+    for (int i : yKnotBins) {
+      knotsDouble[0].push_back(trackResiduals.getY2X(0, i));
+    }
+    LOG(info) << "fast space charge correction helper: " << yKnotBins.size() << " y/x knots for " << nY2Xbins << " y/x bins (knot step " << mWideBinKnotStep << " in the runs of wide bins)";
   }
+
+  // z/x: to get enough measurements, make a spline knot at every second bin. Boundary bins are always included.
 
   for (int i = 0, j = nZ2Xbins - 1; i <= j; i += 2, j -= 2) {
     knotsDouble[1].push_back(trackResiduals.getZ2X(i));

@@ -103,7 +103,8 @@ void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
                              float meanIDC = 0.f,
                              float meanCTP = 0.f,
                              int debug = 0,
-                             int nThreads = 8)
+                             int nThreads = 8,
+                             int wideBinKnotStep = 2)
 {
 
   // Initialise TPCFastTransform object from "voxRes" tree of
@@ -120,6 +121,8 @@ void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
   */
 
   o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance()->setNthreads(nThreads);
+  // y/x knots: one in every refined (narrow) bin, every wideBinKnotStep-th bin in the runs of wide bins (2 = every second bin for uniform binning)
+  o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance()->setWideBinKnotStep(wideBinKnotStep);
 
   if (gSystem->AccessPathName(fileName)) {
     LOGP(error, "input file {} does not exist!", fileName);

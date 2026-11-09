@@ -73,6 +73,14 @@ class TPCFastSpaceChargeCorrectionHelper
   /// get the number of threads
   int getNthreads() const { return mNthreads; }
 
+  /// sets the y/x knot step in the runs of wide voxel bins for createFromTrackResiduals: a spline knot at every step-th wide bin, counted from
+  /// both ends of the run. Bins narrower than 0.75 of the widest bin (refined bins at the sector edges and the centre) always get a knot.
+  /// The default 2 gives a knot at every second bin for uniform binning.
+  void setWideBinKnotStep(int step) { mWideBinKnotStep = step > 0 ? step : 1; }
+
+  /// get the y/x knot step in the runs of wide voxel bins
+  int getWideBinKnotStep() const { return mWideBinKnotStep; }
+
   /// _______________  Main functionality  ________________________
 
   /// creates TPCFastSpaceChargeCorrection object from a continious space charge correction in local coordinates
@@ -172,6 +180,7 @@ class TPCFastSpaceChargeCorrectionHelper
   static TPCFastSpaceChargeCorrectionHelper* sInstance; ///< singleton instance
   bool mIsInitialized = 0;                              ///< initialization flag
   int mNthreads = 1;                                    ///< n of threads to use
+  int mWideBinKnotStep = 2;                             ///< y/x knot step in the runs of wide voxel bins (createFromTrackResiduals)
   TPCFastTransformGeo mGeo;                             ///< geometry parameters
 
   TPCFastSpaceChargeCorrectionMap mCorrectionMap{0, 0};

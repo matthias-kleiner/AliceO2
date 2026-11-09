@@ -45,7 +45,8 @@ using namespace o2::tpc;
 using namespace o2::gpu;
 
 void TPCFastTransformInit(const char* fileName = "debugVoxRes.root", const char* fileNameInv = "debugVoxResInv.root",
-                          const char* outFileName = "TPCFastTransform_VoxRes.root", bool useSmoothed = false, bool invertSigns = false, bool doDebug = true)
+                          const char* outFileName = "TPCFastTransform_VoxRes.root", bool useSmoothed = false, bool invertSigns = false, bool doDebug = true,
+                          int wideBinKnotStep = 2)
 {
 
   // Initialise TPCFastTransform object from "voxRes" tree of
@@ -119,6 +120,8 @@ void TPCFastTransformInit(const char* fileName = "debugVoxRes.root", const char*
   o2::tpc::TPCFastSpaceChargeCorrectionHelper* corrHelper = o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance();
 
   corrHelper->setNthreadsToMaximum();
+  // y/x knots: one in every refined (narrow) bin, every wideBinKnotStep-th bin in the runs of wide bins (2 = every second bin for uniform binning)
+  corrHelper->setWideBinKnotStep(wideBinKnotStep);
   // corrHelper->setNthreads(1);
 
   if (debugMirrorAdata2C) {
