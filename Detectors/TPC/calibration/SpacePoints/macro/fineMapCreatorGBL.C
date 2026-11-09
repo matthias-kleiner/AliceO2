@@ -785,7 +785,274 @@ struct EdgeQA {
   }
 };
 
+/// padSums: per-pad sums for a per-cluster pad table (the readout fingerprint of the pads that a voxel map cannot hold). The same clusters as the
+/// voxel sums, with the residual those get minus a fineMapInput added back: the unbiased c - p after everything the clusters were corrected
+/// with (base, fineMapInput, padTableFile, the edge table), i.e. what a pad table on top would have to take. Cells: sector x the sector's pads
+/// (row by row, pad = padAtYZero - y / width of the measured position, pad 0 at +y) x drift (0 - 83 - 167 - 250 cm) x phase (padPhaseBins bins
+/// of the measured position inside the pad, from -0.5 to 0.5 pad) x track parity, each n, w, w r, w_z, w_z r_z [um] (w, w_z = the map's weights,
+/// r, r_z the y and z residuals). One flat TH1D "padSums" (hadd adds the chunks); its title holds the layout.
+struct PadSums {
+  static constexpr int NSector = 36;
+  static constexpr int NHalf = 2;
+  enum Stat { Entries, W, WR, WZ, WZR, NStat };
+  int nPhase = 2;
+  int nDrift = 3; ///< drift bins of 250 / nDrift cm
+  std::array<int, NRows + 1> rowOffset{}; ///< first pad of each row in the sector's pad list; [NRows] = pads per sector
+  std::vector<double> data;
+  PadSums(int phaseBins, int driftBins) : nPhase(std::max(1, phaseBins)), nDrift(std::max(1, driftBins))
+  {
+    const auto& mapper = o2::tpc::Mapper::instance();
+    for (int row = 0; row < NRows; ++row) {
+      rowOffset[row + 1] = rowOffset[row] + mapper.getNumberOfPadsInRowSector(row);
+    }
+    data.assign(size_t(NSector) * rowOffset[NRows] * nDrift * nPhase * NHalf * NStat, 0.);
+  }
+  int pads(int row) const { return rowOffset[row + 1] - rowOffset[row]; }
+  int phaseBin(double phase) const { return std::max(0, std::min(nPhase - 1, int((phase + 0.5) * nPhase))); } ///< phase in [-0.5, 0.5]
+  int driftBin(double driftLength) const { return std::max(0, std::min(nDrift - 1, int(driftLength * nDrift / 250.))); }
+  long cell(int sector, int row, int pad, int drift, int phase, int half) const
+  {
+    return ((((long(sector) * rowOffset[NRows] + rowOffset[row] + pad) * nDrift + drift) * nPhase + phase) * NHalf + half) * NStat;
+  }
+  void add(long cell, double w, double r, double wz, double rz)
+  {
+    double* c = &data[cell];
+    c[Entries] += 1.;
+    c[W] += w;
+    c[WR] += w * r;
+    c[WZ] += wz;
+    c[WZR] += wz * rz;
+  }
+  void write() const
+  {
+    const std::string title = "sector, pad of the sector (row by row, pad 0 at +y), drift (" + std::to_string(nDrift) + " bins, 0-250 cm), phase (" + std::to_string(nPhase) +
+                              " bins of the measured position, -0.5 to 0.5 pad), track parity, stat: entries, w, w r, w_z, w_z r_z [um]";
+    TH1D histogram("padSums", title.c_str(), int(data.size()), 0., double(data.size()));
+    histogram.SetDirectory(nullptr);
+    for (size_t bin = 0; bin < data.size(); ++bin) {
+      histogram.SetBinContent(int(bin) + 1, data[bin]);
+    }
+    histogram.Write();
+  }
+};
+
+/// sShapeSums (with padSums): the pad-phase dependence (S-shape) from data, common to all pads, for the bulk (>= 5 pads from the pad plane's edge
+/// and >= 3 pads from y = 0 at the measured position, not row 47). Cells: row group (IROC, OROC1, OROC2, OROC3 rows < 146, rows >= 146) x class
+/// (cluster_bias::classOfFlags) x drift (12.5 cm bins) x |dy/dx of the track| (0 - 0.1 - 0.2 - 0.35 - 0.6 - ...) x frame (0: phase of the measured
+/// position, 1: of the track without the cluster) x phase (40 bins, -0.5 to 0.5 pad, pad coordinate as padSums). Stats: n, w, w r, w r0, w r^2,
+/// w r1^2 [um, um^2]: r = the summed residual (as padSums), r0 = r without what the edge table (bestEdgeBias, MC S-curve + edge part) added, i.e. the
+/// whole S-shape of the data, r1 = r without the pad table's correction (rms with / without the pad table). One flat TH1D "sShapeSums".
+struct SShapeSums {
+  static constexpr int NGroup = 5;
+  static constexpr int NClass = 3;
+  static constexpr int NDrift = 20;
+  static constexpr double DriftStep = 12.5;
+  static constexpr int NSlope = 5;
+  static constexpr int NFrame = 2;
+  static constexpr int NPhase = 40;
+  enum Stat { Entries, W, WR, WR0, WR2, WR12, NStat };
+  std::vector<double> data = std::vector<double>(size_t(NGroup) * NClass * NDrift * NSlope * NFrame * NPhase * NStat, 0.);
+  static int slopeBin(double slope)
+  {
+    const double edges[NSlope - 1] = {0.1, 0.2, 0.35, 0.6};
+    int bin = 0;
+    while (bin < NSlope - 1 && std::abs(slope) >= edges[bin]) {
+      ++bin;
+    }
+    return bin;
+  }
+  static long cell(int group, int cls, int drift, int slope, int frame, int phase)
+  {
+    return (((((long(group) * NClass + cls) * NDrift + drift) * NSlope + slope) * NFrame + frame) * NPhase + phase) * NStat;
+  }
+  void add(long cell, double w, double r, double r0, double r1)
+  {
+    double* c = &data[cell];
+    c[Entries] += 1.;
+    c[W] += w;
+    c[WR] += w * r;
+    c[WR0] += w * r0;
+    c[WR2] += w * r * r;
+    c[WR12] += w * r1 * r1;
+  }
+  void write() const
+  {
+    TH1D histogram("sShapeSums", "row group, class, drift (12.5 cm), |slope| (0-0.1-0.2-0.35-0.6-), frame (measured / predicted phase), phase (40 bins), stat: entries, w, w r, w r0 (no edge table), w r^2, w r1^2 (no pad table) [um]",
+                   int(data.size()), 0., double(data.size()));
+    histogram.SetDirectory(nullptr);
+    for (size_t bin = 0; bin < data.size(); ++bin) {
+      histogram.SetBinContent(int(bin) + 1, data[bin]);
+    }
+    histogram.Write();
+  }
+};
+
+/// padTableFile: a per-cluster pad table, applied to the measured cluster position before the fit (c' = c - T, as the cluster-bias correction).
+/// Raw float32, sector (36) x the sector's pads (row by row, pad 0 at +y as padSums) x drift (nDrift bins over 0 - 250 cm, linear between the bin
+/// centres, constant outside) x phase, in um. Version 1 (no header): 3 drift bins, 2 phases (halves of the pad, steps), y only. Version 2: a header
+/// of 4 int32 (0x50414432, nPhase, hasZ, nDrift; 0 = 3), y with nPhase bins inside the pad (linear between the bin centres inside the pad, constant
+/// towards its boundaries; no interpolation across pads), then, if hasZ, z per sector x pad x drift. The first and the last pad of each row get no correction.
+/// Version 3: header of 5 int32 (0x50414433, nPhase, hasZ, nDrift, inPadMode), as version 2 with inPadMode 0 = linear between the bin centres inside the
+/// pad, 1 = the same but not across the pad centre (the bin on the cluster's side; the per-pad structure jumps there like the S-shape), 2 = constant per bin.
+struct PadTable {
+  static constexpr int Magic = 0x50414432;
+  static constexpr int MagicV3 = 0x50414433;
+  int nDrift = 3;
+  int nPhase = 2;
+  bool hasZ = false;
+  bool interpolate = false;
+  int inPadMode = 0;
+  std::array<int, NRows + 1> rowOffset{};
+  std::vector<float> values;
+  std::vector<float> valuesZ;
+  bool load(const std::string& name)
+  {
+    const auto& mapper = o2::tpc::Mapper::instance();
+    for (int row = 0; row < NRows; ++row) {
+      rowOffset[row + 1] = rowOffset[row] + mapper.getNumberOfPadsInRowSector(row);
+    }
+    std::ifstream in(name, std::ios::binary);
+    int header[4] = {0, 0, 0, 0};
+    in.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (header[0] == Magic || header[0] == MagicV3) {
+      nPhase = header[1];
+      hasZ = header[2] != 0;
+      nDrift = header[3] > 0 ? header[3] : 3;
+      interpolate = true;
+      if (header[0] == MagicV3) {
+        in.read(reinterpret_cast<char*>(&inPadMode), sizeof(inPadMode));
+      }
+    } else {
+      in.clear();
+      in.seekg(0);
+    }
+    const size_t nCells = size_t(36) * rowOffset[NRows] * nDrift;
+    values.assign(nCells * nPhase, 0.f);
+    in.read(reinterpret_cast<char*>(values.data()), std::streamsize(values.size() * sizeof(float)));
+    bool ok = bool(in) && in.gcount() == std::streamsize(values.size() * sizeof(float));
+    if (ok && hasZ) {
+      valuesZ.assign(nCells, 0.f);
+      in.read(reinterpret_cast<char*>(valuesZ.data()), std::streamsize(valuesZ.size() * sizeof(float)));
+      ok = bool(in) && in.gcount() == std::streamsize(valuesZ.size() * sizeof(float));
+    }
+    return ok && nPhase > 0 && nDrift > 1;
+  }
+  /// drift bin and weight: value = (1 - t) v[d0] + t v[d0 + 1]
+  void driftWeights(double driftLength, int& d0, double& t) const
+  {
+    const double x = driftLength / (250. / nDrift) - 0.5; // drift bin coordinate, bin centres at integers
+    d0 = std::max(0, std::min(nDrift - 2, int(std::floor(x))));
+    t = std::max(0., std::min(1., x - d0));
+  }
+  bool inside(int row, int pad) const { return pad > 0 && pad < rowOffset[row + 1] - rowOffset[row] - 1; }
+  size_t base(int sector, int row, int pad) const { return (size_t(sector) * rowOffset[NRows] + rowOffset[row] + pad) * nDrift; }
+  /// the y correction [cm] for a cluster at pad coordinate padCoordinate (pad centres at integers) and drift length
+  double dy(int sector, int row, double padCoordinate, double driftLength) const
+  {
+    const int pad = int(std::lround(padCoordinate));
+    if (!inside(row, pad)) {
+      return 0.;
+    }
+    int d0 = 0;
+    double t = 0.;
+    driftWeights(driftLength, d0, t);
+    const size_t b = base(sector, row, pad);
+    auto inPad = [&](size_t cell) {
+      if (!interpolate) {
+        return double(values[cell * nPhase + (padCoordinate < pad ? 0 : std::min(1, nPhase - 1))]);
+      }
+      const double pos = (padCoordinate - pad + 0.5) * nPhase - 0.5; // bin coordinate inside the pad, centres at integers
+      if (nPhase == 1) {
+        return double(values[cell * nPhase]);
+      }
+      if (inPadMode == 2) {
+        return double(values[cell * nPhase + std::max(0, std::min(nPhase - 1, int(std::floor(pos + 0.5))))]);
+      }
+      const int i0 = std::max(0, std::min(nPhase - 2, int(std::floor(pos))));
+      if (inPadMode == 1 && nPhase % 2 == 0 && i0 == nPhase / 2 - 1) { // the pair straddles the pad centre: the bin on the cluster's side
+        return double(values[cell * nPhase + (pos < 0.5 * nPhase - 0.5 ? i0 : i0 + 1)]);
+      }
+      const double u = std::max(0., std::min(1., pos - i0));
+      return (1. - u) * values[cell * nPhase + i0] + u * values[cell * nPhase + i0 + 1];
+    };
+    return 1e-4 * ((1. - t) * inPad(b + d0) + t * inPad(b + d0 + 1));
+  }
+  /// the z correction [cm] (0 without a z part)
+  double dz(int sector, int row, double padCoordinate, double driftLength) const
+  {
+    const int pad = int(std::lround(padCoordinate));
+    if (!hasZ || !inside(row, pad)) {
+      return 0.;
+    }
+    int d0 = 0;
+    double t = 0.;
+    driftWeights(driftLength, d0, t);
+    const size_t b = base(sector, row, pad);
+    return 1e-4 * ((1. - t) * valuesZ[b + d0] + t * valuesZ[b + d0 + 1]);
+  }
+};
+
+/// sShapeTableFile: the common pad-phase correction (S-shape) from data, applied to the measured cluster position before the fit (c' = c - S) in the
+/// bulk only (as sShapeSums: >= 5 pads from the pad plane's edge and >= 3 pads from y = 0, not row 47). Header 8 int32 (0x53534831, nGroup 5, nClass 3,
+/// nDrift, nSlope 5, nPhase, driftStep [mm], splitCentre), then float32 group x class x drift x |slope| bin (SShapeSums::slopeBin) x phase, in um.
+/// Linear in the phase (periodic over the pad boundary; splitCentre = 1: not across the pad centre, where the S-shape jumps at short drift) and in
+/// the drift (bin centres), the |slope| bin and the class as they are.
+struct SShapeTable {
+  static constexpr int Magic = 0x53534831;
+  int nGroup = 5, nClass = 3, nDrift = 10, nSlope = 5, nPhase = 20;
+  double driftStep = 25.;
+  bool splitCentre = false;
+  std::vector<float> values;
+  bool load(const std::string& name)
+  {
+    std::ifstream in(name, std::ios::binary);
+    int header[8] = {0};
+    in.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (!in || header[0] != Magic) {
+      return false;
+    }
+    nGroup = header[1];
+    nClass = header[2];
+    nDrift = header[3];
+    nSlope = header[4];
+    nPhase = header[5];
+    driftStep = 0.1 * header[6];
+    splitCentre = header[7] != 0;
+    values.assign(size_t(nGroup) * nClass * nDrift * nSlope * nPhase, 0.f);
+    in.read(reinterpret_cast<char*>(values.data()), std::streamsize(values.size() * sizeof(float)));
+    return bool(in) && in.gcount() == std::streamsize(values.size() * sizeof(float)) && nPhase > 1 && nDrift > 1;
+  }
+  /// the correction [cm]; phase = measured position - nearest pad centre in pads [-0.5, 0.5]
+  double dy(int row, int cls, double driftLength, double slope, double phase) const
+  {
+    const int group = row < 63 ? 0 : row < 97 ? 1 : row < 127 ? 2 : row < 146 ? 3 : 4;
+    cls = std::max(0, std::min(nClass - 1, cls));
+    const int s = std::min(nSlope - 1, SShapeSums::slopeBin(slope));
+    const double xd = driftLength / driftStep - 0.5;
+    const int d0 = std::max(0, std::min(nDrift - 2, int(std::floor(xd))));
+    const double t = std::max(0., std::min(1., xd - d0));
+    const double pos = (phase + 0.5) * nPhase - 0.5;
+    const int p0 = int(std::floor(pos));
+    const double u = pos - p0;
+    int i0 = (p0 % nPhase + nPhase) % nPhase;
+    int i1 = (i0 + 1) % nPhase;
+    if (splitCentre && i0 == nPhase / 2 - 1) { // the pair straddles the pad centre: the value of the bin on the cluster's side
+      i0 = i1 = phase < 0. ? nPhase / 2 - 1 : nPhase / 2;
+    }
+    auto at = [&](int d, int i) { return double(values[(((size_t(group) * nClass + cls) * nDrift + d) * nSlope + s) * nPhase + i]); };
+    const double v0 = (1. - u) * at(d0, i0) + u * at(d0, i1);
+    const double v1 = (1. - u) * at(d0 + 1, i0) + u * at(d0 + 1, i1);
+    return 1e-4 * ((1. - t) * v0 + t * v1);
+  }
+};
+
 struct Contribution {
+  long padCell = -1;       ///< padSums cell, -1: none
+  double padResidualY = 0; ///< padSums: the residual without a fineMapInput added back [um]
+  double padResidualZ = 0; ///< padSums: the same for z [um]
+  long sShapeCell[2] = {-1, -1}; ///< sShapeSums cells (measured / predicted phase), -1: none
+  double tableAddedY = 0;  ///< sShapeSums: what the edge table added to the residual [um]
+  double padTableY = 0;    ///< sShapeSums: the pad table's correction of the cluster [um]
   size_t voxel = 0;
   int charge = 0;
   double x = 0.;
@@ -968,6 +1235,7 @@ struct Cluster {
   int flags = 0;                                           ///< TPC cluster flags (UnbinnedResid::channel)
   double xNominal = 0.;                                    ///< the row's x
   double padY0 = 0.;                                       ///< measured y on the pad plane (snapped), before any correction
+  double padTableDy = 0.;                                  ///< the pad table's correction subtracted from y (padTableFile) [cm]
   double z0 = 0.;                                          ///< measured z, before any correction
   double yUncorrected = 0.;                                ///< y as fitted without the in-fit edge correction (after the map corrections)
   double edgeShift = 0.;                                   ///< edgeBiasInFit: the edge correction currently added to y [cm]
@@ -1351,6 +1619,10 @@ struct FitContext {
   bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
   bool measuredFrameBins = false;                                             ///< voxels and fineMapInput lookup in the measured frame (before the map corrections), as stage 1 and the FT
   bool edgeQA = false;                                                        ///< fill the sums of EdgeQA
+  PadSums* padSums = nullptr;                                                 ///< the per-pad sums (filled under the sums mutex), nullptr: off
+  SShapeSums* sShapeSums = nullptr;                                           ///< the S-shape sums (with padSums, filled under the sums mutex)
+  const PadTable* padTable = nullptr;                                         ///< per-cluster pad table, nullptr: off
+  const SShapeTable* sShapeTable = nullptr;                                   ///< common data S-shape per cluster (bulk), nullptr: off
   DeadPads deadPads;                                                          ///< deadPadFile: clusters beside dead pads out
   bool lastRowsInFit = false;                                                 ///< the last EdgeRows rows keep their weight in the fit (with edgeFitPads)
 };
@@ -1758,6 +2030,26 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.y += context.clusterBias->dy(cluster.row, cluster.y, o2::tpc::cluster_bias::driftLength(cluster.z),
                                            residual.isPositionOnly() ? 0. : cluster.tgSlp, residual.channel);
     }
+    // per-cluster data S-shape (bulk) and pad table on the measured position (c' = c - S - T; z: c'_z = c_z - T_z)
+    cluster.padTableDy = 0.;
+    if (context.padTable || context.sShapeTable) {
+      const double width = context.geometry->padWidth[cluster.row];
+      const double padCoordinate = context.geometry->padAtYZero[cluster.row] - cluster.padY0 / width;
+      const double driftLength = o2::tpc::cluster_bias::driftLength(cluster.z0);
+      if (context.sShapeTable) {
+        const double planeEdge = context.geometry->padPlaneEdge[cluster.row];
+        if (cluster.row != 47 && (planeEdge - std::abs(cluster.padY0)) / width >= 5. && std::abs(cluster.padY0) / width >= 3.) {
+          const double padMeas = (planeEdge - std::abs(cluster.padY0)) / width - 0.5;
+          const int cls = o2::tpc::cluster_bias::classOfFlags(residual.channel, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
+          cluster.padTableDy += context.sShapeTable->dy(cluster.row, cls, driftLength, cluster.tgSlpValid ? cluster.tgSlp : 0., padCoordinate - std::round(padCoordinate));
+        }
+      }
+      if (context.padTable) {
+        cluster.padTableDy += context.padTable->dy(cluster.sector, cluster.row, padCoordinate, driftLength);
+        cluster.z -= context.padTable->dz(cluster.sector, cluster.row, padCoordinate, driftLength);
+      }
+      cluster.y -= cluster.padTableDy;
+    }
     cluster.padY = cluster.y;
     if (context.baseCorrection) {
       float x = cluster.x;
@@ -1964,12 +2256,50 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       const double bias = context.bestEdgeBias->inwardBias(context.bestEdgeBias->unitOfRow(cluster.row), cls, o2::tpc::cluster_bias::driftLength(cluster.z0),
                                                            std::abs(contribution.slopeY), dEdge, occupancy);
       contribution.residualY += side * bias;
+      contribution.tableAddedY = 1e4 * side * bias;
       counters[EdgeBiasCorrected] += bias != 0.;
       if (edgeTrack) {
         edgeRecords[fit.active[point]].edgeCorr = side * bias;
       }
     }
     contribution.weightZ = weight[1];
+    if (context.padSums) {
+      // the pad of the measured position (pad centres at integers), the residual as summed but without a fineMapInput added back
+      const double width = context.geometry->padWidth[cluster.row];
+      const double padCoordinate = context.geometry->padAtYZero[cluster.row] - cluster.padY0 / width;
+      const int pad = int(std::lround(padCoordinate));
+      const double driftLength = o2::tpc::cluster_bias::driftLength(cluster.z0);
+      double residual = contribution.residualY;
+      if (context.addBackFineMap) {
+        residual -= cluster.fineCorrection[1] - contribution.slopeY * cluster.fineCorrection[0];
+      }
+      contribution.padResidualY = 1e4 * residual;
+      double residualZ = contribution.residualZ;
+      if (context.addBackFineMap) {
+        residualZ -= cluster.fineCorrection[2] - contribution.slopeZ * cluster.fineCorrection[0];
+      }
+      contribution.padResidualZ = 1e4 * residualZ;
+      contribution.padTableY = 1e4 * cluster.padTableDy;
+      if (pad >= 0 && pad < context.padSums->pads(cluster.row)) {
+        const int drift = context.padSums->driftBin(driftLength);
+        contribution.padCell = context.padSums->cell(cluster.sector, cluster.row, pad, drift, context.padSums->phaseBin(padCoordinate - pad), int(trackIndex & 1));
+      }
+      // the S-shape sums: bulk only (measured position >= 5 pads from the edge, >= 3 pads from y = 0), not row 47
+      const double planeEdge = context.geometry->padPlaneEdge[cluster.row];
+      if (context.sShapeSums && cluster.row != 47 && (planeEdge - std::abs(cluster.padY0)) / width >= 5. && std::abs(cluster.padY0) / width >= 3.) {
+        const double padMeas = (planeEdge - std::abs(cluster.padY0)) / width - 0.5;
+        const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
+        const int group = cluster.row < 63 ? 0 : cluster.row < 97 ? 1 : cluster.row < 127 ? 2 : cluster.row < 146 ? 3 : 4;
+        const int driftBin = std::max(0, std::min(SShapeSums::NDrift - 1, int(driftLength / SShapeSums::DriftStep)));
+        const int slopeBin = SShapeSums::slopeBin(contribution.slopeY);
+        const double padPred = context.geometry->padAtYZero[cluster.row] - predPadY / width;
+        const double phases[2] = {padCoordinate - std::round(padCoordinate), padPred - std::round(padPred)};
+        for (int frame = 0; frame < 2; ++frame) {
+          const int phaseBin = std::max(0, std::min(SShapeSums::NPhase - 1, int((phases[frame] + 0.5) * SShapeSums::NPhase)));
+          contribution.sShapeCell[frame] = SShapeSums::cell(group, std::max(0, std::min(SShapeSums::NClass - 1, cls)), driftBin, slopeBin, frame, phaseBin);
+        }
+      }
+    }
     batch.push_back(contribution);
     ++counters[Residuals];
     counters[ResidualsExcluded] += cluster.excluded;
@@ -1995,7 +2325,8 @@ struct SelectedTFs {
 /// extraInfo: more user info
 void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, const std::string& y2xBinning, const std::string& z2xBinning, float maxZ2X,
                  const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<std::pair<std::string, std::string>>& extraInfo, long nTracks,
-                 double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected, const EdgeQA* edgeQA)
+                 double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected, const EdgeQA* edgeQA,
+                 const PadSums* padSums = nullptr, const SShapeSums* sShapeSums = nullptr)
 {
   // CTP luminosity and IDC of the selected TFs, as staticMapCreatorCPM.C (PbPb: mean CTP luminosity x 2.414)
   double meanCTP = calculateMean(selected.ctpLumi) * (isPbPb ? 2.414 : 1.);
@@ -2168,6 +2499,14 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
     output.cd();
     edgeQA->write();
   }
+  if (padSums) {
+    output.cd();
+    padSums->write();
+  }
+  if (sShapeSums) {
+    output.cd();
+    sShapeSums->write();
+  }
   if (writeSums) {
     writeSumsTree("fineSums", "per voxel and charge the sums of the unbiased TPC-only residuals", sums);
   }
@@ -2303,6 +2642,15 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
       std::lock_guard<std::mutex> lock(sumsMutex);
       for (const auto& contribution : batch) {
         sums[contribution.voxel][contribution.charge].add(contribution);
+        if (context.padSums && contribution.padCell >= 0) {
+          context.padSums->add(contribution.padCell, contribution.weightY, contribution.padResidualY, contribution.weightZ, contribution.padResidualZ);
+        }
+        for (int frame = 0; frame < 2 && context.sShapeSums; ++frame) {
+          if (contribution.sShapeCell[frame] >= 0) {
+            context.sShapeSums->add(contribution.sShapeCell[frame], contribution.weightY, contribution.padResidualY, contribution.padResidualY - contribution.tableAddedY,
+                                    contribution.padResidualY + contribution.padTableY);
+          }
+        }
       }
       batch.clear();
     };
@@ -2447,7 +2795,12 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        float deadPadMargin = 2.f,                                                    // ... within this many pads of a dead pad at the track without the cluster
                        bool lastRowsInFit = false,                                                   // test (no-distortion MC, with edgeFitPads): the last rows are not de-weighted in the fit
                        bool measuredFrameBins = false,                                               // voxels and the fineMapInput lookup in the measured frame, as stage 1 and the FT, instead of after the map corrections
-                       bool edgeQA = true)                                                           // the sums of EdgeQA (histograms edgeQA_* in the output file)
+                       bool edgeQA = true,                                                           // the sums of EdgeQA (histograms edgeQA_* in the output file)
+                       bool padSums = false,                                                         // the per-pad sums for a pad table and the S-shape sums (histograms padSums, sShapeSums, see PadSums, SShapeSums)
+                       int padPhaseBins = 2,                                                         // padSums: bins of the measured position inside the pad
+                       std::string padTableFile = "",                                                // per-cluster pad table applied to the measured position before the fit (see PadTable); empty: off
+                       std::string sShapeTableFile = "",                                             // common data S-shape applied to the measured position before the fit, bulk (see SShapeTable); empty: off
+                       int padDriftBins = 3)                                                         // padSums: drift bins over 0 - 250 cm
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2691,6 +3044,30 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   SelectedTFs selected;
   context.edgeQA = edgeQA;
   std::unique_ptr<EdgeQA> edgeQASums(edgeQA ? new EdgeQA : nullptr);
+  std::unique_ptr<PadSums> padSumsData(padSums ? new PadSums(padPhaseBins, padDriftBins) : nullptr);
+  std::unique_ptr<SShapeSums> sShapeData(padSums ? new SShapeSums : nullptr);
+  context.padSums = padSumsData.get();
+  context.sShapeSums = sShapeData.get();
+  PadTable padTable;
+  if (!padTableFile.empty()) {
+    if (!padTable.load(padTableFile)) {
+      LOGP(fatal, "pad table: cannot read {} (expected {} floats)", padTableFile, padTable.values.size());
+    }
+    context.padTable = &padTable;
+    LOGP(info, "Pad table from {} applied to the measured cluster positions ({} drift bins, {} bins inside the pad{}{})", padTableFile, padTable.nDrift, padTable.nPhase,
+         !padTable.interpolate ? ", steps" : padTable.inPadMode == 2 ? ", constant per bin inside the pad" : padTable.inPadMode == 1 ? ", linear inside the pad, not across its centre" : ", linear inside the pad",
+         padTable.hasZ ? ", with z" : "");
+  }
+  SShapeTable sShapeTable;
+  if (!sShapeTableFile.empty()) {
+    if (!sShapeTable.load(sShapeTableFile)) {
+      LOGP(fatal, "S-shape table: cannot read {}", sShapeTableFile);
+    }
+    context.sShapeTable = &sShapeTable;
+    LOGP(info, "S-shape table from {} applied in the bulk: {} groups x {} classes x {} drift bins of {} cm x {} slope bins x {} phase bins{}", sShapeTableFile,
+         sShapeTable.nGroup, sShapeTable.nClass, sShapeTable.nDrift, sShapeTable.driftStep, sShapeTable.nSlope, sShapeTable.nPhase,
+         sShapeTable.splitCentre ? ", not interpolated across the pad centre" : "");
+  }
   const long nFitted = runPass(fitTFs, files, context, nThreads, sums, selected, "", edgeQASums.get());
   std::vector<std::pair<std::string, std::string>> extraInfo;
   extraInfo.emplace_back("smoothing", "none");
@@ -2702,6 +3079,6 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     edgeTree->Close();
   }
   writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, extraInfo, nFitted, minEntries, writeSums, runNumber,
-              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected, edgeQASums.get());
+              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected, edgeQASums.get(), padSumsData.get(), sShapeData.get());
   LOGP(info, "fineMapCreatorGBL: {:.1f} s", std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime).count());
 }
