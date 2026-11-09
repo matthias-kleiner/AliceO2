@@ -14,8 +14,14 @@
 /// the voxels with data entering with their chi2 as a quadratic form at their position (bilinear between the nodes of their pad row),
 /// and second-difference penalties along the pad rows, y/x and z/x with the prior rms tauRow, tauY2X, tauZ2X (none across the stack
 /// boundaries; softFactor: tau x softFactor near the GEM frames, where the distortions are steep: the first / last rows of each stack,
-/// the rows below the spacer cross, the sector centre and the pad plane's edges in y/x, see SoftRegions) and optionally a ridge towards
-/// 0 (tau0). Nodes without data follow the penalties: a smooth continuation, linear in the
+/// the rows below the spacer cross, the sector centre and the pad plane's edges in y/x, see SoftRegions; the factor multiplies tau, so a
+/// stiffer tau also stiffens these zones unless the factor grows with it; softFactorY2X: a separate factor along y/x for the centre and
+/// edge bins, the rows keeping softFactor; softEdgeBins: the edge zone as the first N y/x bins from each edge, the same in every stack,
+/// instead of softEdgePads, which covers different bins in IROC and OROC; softTaperBins: the y/x softness falling off geometrically over
+/// N bins outside each zone instead of a step) and optionally a ridge towards 0 (tau0). Fine pass with the pad layer on top (the readout
+/// fingerprint of the pads in a per-cluster table, not in the map): tauY2X 20, softFactorY2X 300 (the centre and edge as with tauY2X 200,
+/// softFactor 30), softEdgeBins 5 (the refined edge bins of u48) keeps only structure above ~8 pads in the bulk, where the 2 - 3 pad bins
+/// otherwise alias the pad-scale structure into a bin-to-bin zigzag. Nodes without data follow the penalties: a smooth continuation, linear in the
 /// direction without data and coherent between the neighbouring columns, e.g. through the innermost IROC rows, which the large radial
 /// distortion empties (trustFraction: those rows are no data). Replaces the Gaussian smoothing + per-column pol2 extrapolation of
 /// SmoothingExtrapolate.C. Defaults tuned on a PbPb 2025 map (568210, 22 kHz) by a leave-rows-out test (hide the first measured inner
@@ -1295,6 +1301,9 @@ std::vector<char> untrustedRows(const TrackResiduals& binning, const std::vector
 /// pads of the sector centre (the radial bar of the spacer cross) or within edgePads pads of the pad plane's edge
 struct SoftRegions {
   double factor = 1.; ///< 1: off
+  double factorY2X = -1.; ///< along y/x only (the centre and edge bins): < 0 = factor
+  int edgeBins = -1;      ///< >= 0: the edge zone = the first edgeBins y/x bins from each edge (the same in every stack) instead of edgePads
+  int taperBins = 0;      ///< the y/x factor falls geometrically to 1 over this many bins outside each y/x zone (0: a hard step)
   int stackRows = 2;
   int spacerRows = 1;
   double centrePads = 2.;
@@ -1302,13 +1311,13 @@ struct SoftRegions {
 };
 
 /// per pad row: soft along the rows; per row and y/x bin: soft along y/x (see SoftRegions)
-void softMasks(const TrackResiduals& binning, const SoftRegions& soft, std::vector<char>& softRow, std::vector<std::vector<char>>& softY2X)
+void softMasks(const TrackResiduals& binning, const SoftRegions& soft, std::vector<char>& softRow, std::vector<std::vector<float>>& softY2X)
 {
   const int nBinsX = binning.getNXBins();
   const int nBinsY2X = binning.getNY2XBins();
   const auto& mapper = o2::tpc::Mapper::instance();
   softRow.assign(nBinsX, 0);
-  softY2X.assign(nBinsX, std::vector<char>(nBinsY2X, 0));
+  softY2X.assign(nBinsX, std::vector<float>(nBinsY2X, 0.f));
   for (int row = 0; row < nBinsX; ++row) {
     const int stack = stackOfRow(row);
     const int first = int(o2::tpc::Mapper::ROWOFFSETSTACK[stack]);
@@ -1320,12 +1329,26 @@ void softMasks(const TrackResiduals& binning, const SoftRegions& soft, std::vect
     const double padWidth = mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
     const double yEdge = 0.5 * mapper.getNumberOfPadsInRowSector(row) * padWidth;
     const double x = binning.getX(row);
+    std::vector<char> zone(nBinsY2X, 0);
     for (int bin = 0; bin < nBinsY2X; ++bin) {
       const double halfWidth = 0.5 / binning.getDY2XI(row, bin);
       const double low = x * (binning.getY2X(row, bin) - halfWidth);
       const double high = x * (binning.getY2X(row, bin) + halfWidth);
-      softY2X[row][bin] = (low < soft.centrePads * padWidth && high > -soft.centrePads * padWidth) ||
-                          std::max(std::abs(low), std::abs(high)) > yEdge - soft.edgePads * padWidth;
+      const bool edge = soft.edgeBins >= 0 ? std::min(bin, nBinsY2X - 1 - bin) < soft.edgeBins : std::max(std::abs(low), std::abs(high)) > yEdge - soft.edgePads * padWidth;
+      zone[bin] = (low < soft.centrePads * padWidth && high > -soft.centrePads * padWidth) || edge;
+    }
+    // weight 1 in a zone; outside, (T + 1 - j) / (T + 1) at j bins from the nearest zone bin (the factor enters as factor^weight)
+    for (int bin = 0; bin < nBinsY2X; ++bin) {
+      if (zone[bin]) {
+        softY2X[row][bin] = 1.f;
+        continue;
+      }
+      for (int j = 1; j <= soft.taperBins; ++j) {
+        if ((bin - j >= 0 && zone[bin - j]) || (bin + j < nBinsY2X && zone[bin + j])) {
+          softY2X[row][bin] = float(soft.taperBins + 1 - j) / float(soft.taperBins + 1);
+          break;
+        }
+      }
     }
   }
 }
@@ -1341,8 +1364,10 @@ std::vector<Stencil> makeStencils(const TrackResiduals& binning, const std::arra
   const int nBinsZ2X = binning.getNZ2XBins();
   const int bins[3] = {nBinsX, nBinsY2X, nBinsZ2X};
   std::vector<char> softRow;
-  std::vector<std::vector<char>> softY2X;
-  if (soft.factor != 1.) {
+  std::vector<std::vector<float>> softY2X;
+  const double factorAxis[2] = {soft.factor, soft.factorY2X > 0. ? soft.factorY2X : soft.factor};
+  const bool softOn = factorAxis[0] != 1. || factorAxis[1] != 1.;
+  if (softOn) {
     softMasks(binning, soft, softRow, softY2X);
   }
   std::vector<Stencil> stencils;
@@ -1383,13 +1408,13 @@ std::vector<Stencil> makeStencils(const TrackResiduals& binning, const std::arra
             const double volume = (1. / binning.getDXI(centre[0])) * (x / binning.getDY2XI(centre[0], centre[1])) * (x / binning.getDZ2XI(centre[2]));
             stencil.lambda = lambda * volume;
           }
-          if (soft.factor != 1. && axis < 2) {
-            bool isSoft = false;
+          if (softOn && axis < 2 && factorAxis[axis] != 1.) {
+            float weight = 0.f; // the softest of the stencil's three bins
             for (int k = 0; k < 3; ++k) {
-              isSoft |= axis == 0 ? softRow[binX + k] : softY2X[binX][binY2X + k];
+              weight = std::max(weight, axis == 0 ? float(softRow[binX + k]) : softY2X[binX][binY2X + k]);
             }
-            if (isSoft) {
-              stencil.lambda /= soft.factor * soft.factor;
+            if (weight > 0.f) {
+              stencil.lambda /= std::pow(factorAxis[axis], 2. * weight);
               ++nSoft;
             }
           }
@@ -1398,8 +1423,8 @@ std::vector<Stencil> makeStencils(const TrackResiduals& binning, const std::arra
       }
     }
   }
-  if (soft.factor != 1.) {
-    LOGP(info, "Smoothing: {} of {} penalty terms softened (tau x {})", nSoft, stencils.size(), soft.factor);
+  if (softOn) {
+    LOGP(info, "Smoothing: {} of {} penalty terms softened (tau x {} along the rows, x {} along y/x)", nSoft, stencils.size(), factorAxis[0], factorAxis[1]);
   }
   return stencils;
 }
@@ -1480,7 +1505,10 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     int softStackRows = 2,       // ... the first / last rows of each stack,
                     int softSpacerRows = 1,      // ... the rows within this of the rows below the spacer cross,
                     float softCentrePads = 2.,   // ... the y/x bins within this many pads of the sector centre (the radial spacer bar),
-                    float softEdgePads = 2.)     // ... and of the pad plane's edge
+                    float softEdgePads = 2.,     // ... and of the pad plane's edge
+                    float softFactorY2X = -1.,   // along y/x (centre and edge bins) a different factor; < 0: softFactor
+                    int softEdgeBins = -1,       // >= 0: the edge zone = the first softEdgeBins y/x bins from each edge instead of softEdgePads
+                    int softTaperBins = 0)       // y/x factor falling geometrically to 1 over this many bins outside each y/x zone (0: hard step)
 {
   using namespace voxel_smoother;
   std::unique_ptr<TFile> input(TFile::Open(inputFile.data()));
@@ -1766,7 +1794,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     "({} untrusted inner IROC voxels), minEntries {}, errors {}, robust {}{}",
     source, tauRow, tauY2X, tauZ2X, curvaturePrior ? "um / cm^2 (curvature over 1 cm^3)" : "um (second difference per bin)", tau0, trustFraction, nUntrusted, minEntries,
     useSums ? std::string("voxel solve") : (errorMode == 1 ? std::string("s / sqrt(entries)") : (errorMode == 2 ? std::string("from the fineSums voxel solve") : std::string("input"))), robust,
-    softFactor != 1.f ? fmt::format(", soft x {} (stack rows {}, spacer rows +-{}, centre / edge pads {} / {})", softFactor, softStackRows, softSpacerRows, softCentrePads, softEdgePads) : std::string());
+    softFactor != 1.f || softFactorY2X > 0.f ? fmt::format(", soft x {} (stack rows {}, spacer rows +-{}, centre / edge pads {} / {}){}", softFactor, softStackRows, softSpacerRows, softCentrePads, softEdgePads, softFactorY2X > 0.f ? fmt::format(", along y/x x {}", softFactorY2X) : std::string()) + (softEdgeBins >= 0 ? fmt::format(", edge zone {} bins", softEdgeBins) : std::string()) + (softTaperBins > 0 ? fmt::format(", taper {} bins", softTaperBins) : std::string()) : std::string());
   LOGP(info, "{}: {} of {} voxels are data; {}", inputFile, nData, nVoxels, description);
 
   // the IDC join (staticMapCreatorCPM.C leaves meanIDC / medianIDC 0)
@@ -1787,6 +1815,9 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   soft.spacerRows = softSpacerRows;
   soft.centrePads = softCentrePads;
   soft.edgePads = softEdgePads;
+  soft.factorY2X = softFactorY2X;
+  soft.edgeBins = softEdgeBins;
+  soft.taperBins = softTaperBins;
   const bool finite = smoothNodes(*binning, data, {tauRow * Micron, tauY2X * Micron, tauZ2X * Micron}, curvaturePrior, tau0 * Micron, robust, nThreads, nodes, soft);
   if (!finite) {
     return;
