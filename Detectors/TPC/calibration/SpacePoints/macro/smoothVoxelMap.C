@@ -45,7 +45,8 @@
 /// - "auto": voxResTree if the file has one, else fineSums (a file with both is the voxResTree's map: a CPM map with the slope sums,
 ///   or a two-pass fineMapCreatorGBL.C map, whose fineSums hold pass 1 only).
 /// trustFraction > 0: per column the innermost IROC rows with fewer entries than trustFraction x the column's median entries in rows
-/// 10-30 (up to the first row at or above it) are no data; -1 (default): 0.7 with the s / sqrt(entries) errors (errorMode 1: the large
+/// 10-30 (up to the first row at or above it) are no data (trustByRow: decided per sector and z/x bin from the entries summed over the row,
+/// the same rows for all y/x bins: the sector edge's slow rise of the entries with the row does not count); -1 (default): 0.7 with the s / sqrt(entries) errors (errorMode 1: the large
 /// radial distortion empties these rows and biases them, the stand-in errors do not weight them down: without the cut the map follows them
 /// by up to ~3 mm), else 0 (with real errors they hardly pull: <= 0.3 mm in the rows with clusters, the bulk unchanged).
 /// robust > 0: Tukey reweightings of the voxels by their excess chi2.
@@ -1265,8 +1266,12 @@ std::array<double, 3> estimateNoise(const TrackResiduals& binning, const std::ve
   return noise;
 }
 
-/// per voxel of the grid: 1 if it is one of the innermost IROC rows of its column below trustFraction x the column's plateau entries
-std::vector<char> untrustedRows(const TrackResiduals& binning, const std::vector<TrackResiduals::VoxRes>& results, double trustFraction, long& nUntrusted)
+/// per voxel of the grid: 1 if it is one of the innermost IROC rows of its column below trustFraction x the column's plateau entries;
+/// trustByRow: the decision per sector and z/x bin from the entries of the whole row (summed over the y/x bins), the same first trusted row
+/// for every y/x bin (the inner rows lose their clusters to the radial distortion across the row, while the entries at the sector edge rise
+/// slowly with the row for other reasons and must not count; the number of rows lost follows the interaction rate)
+std::vector<char> untrustedRows(const TrackResiduals& binning, const std::vector<TrackResiduals::VoxRes>& results, double trustFraction, long& nUntrusted,
+                                bool trustByRow = false)
 {
   const int voxelsPerSector = binning.getNVoxelsPerSector();
   std::vector<char> untrusted(results.size(), 0);
@@ -1275,6 +1280,42 @@ std::vector<char> untrustedRows(const TrackResiduals& binning, const std::vector
     return untrusted;
   }
   std::vector<double> plateau;
+  if (trustByRow) {
+    std::array<int, NIrocRows + 1> firstRowCount{};
+    const int nY2X = binning.getNY2XBins();
+    for (int sector = 0; sector < NSectors; ++sector) {
+      for (int binZ2X = 0; binZ2X < binning.getNZ2XBins(); ++binZ2X) {
+        std::array<double, NIrocRows> rowEntries{};
+        for (int row = 0; row < NIrocRows; ++row) {
+          for (int binY2X = 0; binY2X < nY2X; ++binY2X) {
+            rowEntries[row] += results[size_t(sector) * voxelsPerSector + binning.getGlbVoxBin(row, binY2X, binZ2X)].stat[TrackResiduals::VoxV];
+          }
+        }
+        plateau.assign(rowEntries.begin() + PlateauFirstRow, rowEntries.begin() + PlateauLastRow + 1);
+        std::nth_element(plateau.begin(), plateau.begin() + plateau.size() / 2, plateau.end());
+        const double threshold = trustFraction * plateau[plateau.size() / 2];
+        int firstTrusted = 0;
+        while (firstTrusted < NIrocRows && rowEntries[firstTrusted] < threshold) {
+          ++firstTrusted;
+        }
+        ++firstRowCount[firstTrusted];
+        for (int row = 0; row < firstTrusted; ++row) {
+          for (int binY2X = 0; binY2X < nY2X; ++binY2X) {
+            untrusted[size_t(sector) * voxelsPerSector + binning.getGlbVoxBin(row, binY2X, binZ2X)] = 1;
+            ++nUntrusted;
+          }
+        }
+      }
+    }
+    std::string histogram;
+    for (int row = 0; row <= NIrocRows; ++row) {
+      if (firstRowCount[row] > 0) {
+        histogram += fmt::format(" {}: {}", row, firstRowCount[row]);
+      }
+    }
+    LOGP(info, "Trust cut by row (fraction {} of the rows-{}-{} median, summed over y/x): first trusted row (sector x z/x bins):{}", trustFraction, PlateauFirstRow, PlateauLastRow, histogram);
+    return untrusted;
+  }
   for (int sector = 0; sector < NSectors; ++sector) {
     for (int binZ2X = 0; binZ2X < binning.getNZ2XBins(); ++binZ2X) {
       for (int binY2X = 0; binY2X < binning.getNY2XBins(); ++binY2X) {
@@ -1305,6 +1346,7 @@ struct SoftRegions {
   int edgeBins = -1;      ///< >= 0: the edge zone = the first edgeBins y/x bins from each edge (the same in every stack) instead of edgePads
   int taperBins = 0;      ///< the y/x factor falls geometrically to 1 over this many bins outside each y/x zone (0: a hard step)
   int stackRows = 2;
+  bool innerEdge = true; ///< false: the first rows of the IROC (the inner field cage, not a GEM frame between stacks) are not soft
   int spacerRows = 1;
   double centrePads = 2.;
   double edgePads = 2.;
@@ -1322,7 +1364,7 @@ void softMasks(const TrackResiduals& binning, const SoftRegions& soft, std::vect
     const int stack = stackOfRow(row);
     const int first = int(o2::tpc::Mapper::ROWOFFSETSTACK[stack]);
     const int last = stack < 3 ? int(o2::tpc::Mapper::ROWOFFSETSTACK[stack + 1]) - 1 : nBinsX - 1;
-    softRow[row] = row - first < soft.stackRows || last - row < soft.stackRows;
+    softRow[row] = (row - first < soft.stackRows && (stack > 0 || soft.innerEdge)) || last - row < soft.stackRows;
     for (int other = std::max(0, row - soft.spacerRows); other <= std::min(nBinsX - 1, row + soft.spacerRows); ++other) {
       softRow[row] |= o2::tpc::Mapper::isBelowSpacerCross(other, -1);
     }
@@ -1508,7 +1550,10 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
                     float softEdgePads = 2.,     // ... and of the pad plane's edge
                     float softFactorY2X = -1.,   // along y/x (centre and edge bins) a different factor; < 0: softFactor
                     int softEdgeBins = -1,       // >= 0: the edge zone = the first softEdgeBins y/x bins from each edge instead of softEdgePads
-                    int softTaperBins = 0)       // y/x factor falling geometrically to 1 over this many bins outside each y/x zone (0: hard step)
+                    int softTaperBins = 0,       // y/x factor falling geometrically to 1 over this many bins outside each y/x zone (0: hard step)
+                    bool trustByRow = false,     // trustFraction per sector and z/x bin from the whole row's entries (see untrustedRows)
+                    bool softInnerEdge = true)   // false: no softening along the rows at the inner edge of the IROC (rows 0 - softStackRows-1): the
+                                                 // rows without data there (radial distortion) follow the first rows with data instead of floating
 {
   using namespace voxel_smoother;
   std::unique_ptr<TFile> input(TFile::Open(inputFile.data()));
@@ -1711,7 +1756,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     trustFraction = !useSums && errorMode == 1 ? 0.7f : 0.f;
   }
   long nUntrusted = 0;
-  const auto untrusted = untrustedRows(*binning, results, trustFraction, nUntrusted);
+  const auto untrusted = untrustedRows(*binning, results, trustFraction, nUntrusted, trustByRow);
   std::array<double, 2> medianScale{1., 1.}; // y, z channel
   if (useSums) {
     std::array<std::vector<double>, 2> scales;
@@ -1790,11 +1835,12 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     ++nData;
   }
   const std::string description = fmt::format(
-    "penalised node fit (smoothVoxelMap.C): input {}, tau rows / y/x / z/x {} / {} / {} {}, tau0 {} um, trustFraction {} "
+    "penalised node fit (smoothVoxelMap.C): input {}, tau rows / y/x / z/x {} / {} / {} {}, tau0 {} um, trustFraction {}{} "
     "({} untrusted inner IROC voxels), minEntries {}, errors {}, robust {}{}",
-    source, tauRow, tauY2X, tauZ2X, curvaturePrior ? "um / cm^2 (curvature over 1 cm^3)" : "um (second difference per bin)", tau0, trustFraction, nUntrusted, minEntries,
+    source, tauRow, tauY2X, tauZ2X, curvaturePrior ? "um / cm^2 (curvature over 1 cm^3)" : "um (second difference per bin)", tau0, trustFraction,
+    trustByRow && trustFraction > 0.f ? " by row" : "", nUntrusted, minEntries,
     useSums ? std::string("voxel solve") : (errorMode == 1 ? std::string("s / sqrt(entries)") : (errorMode == 2 ? std::string("from the fineSums voxel solve") : std::string("input"))), robust,
-    softFactor != 1.f || softFactorY2X > 0.f ? fmt::format(", soft x {} (stack rows {}, spacer rows +-{}, centre / edge pads {} / {}){}", softFactor, softStackRows, softSpacerRows, softCentrePads, softEdgePads, softFactorY2X > 0.f ? fmt::format(", along y/x x {}", softFactorY2X) : std::string()) + (softEdgeBins >= 0 ? fmt::format(", edge zone {} bins", softEdgeBins) : std::string()) + (softTaperBins > 0 ? fmt::format(", taper {} bins", softTaperBins) : std::string()) : std::string());
+    softFactor != 1.f || softFactorY2X > 0.f ? fmt::format(", soft x {} (stack rows {}, spacer rows +-{}, centre / edge pads {} / {}){}", softFactor, softStackRows, softSpacerRows, softCentrePads, softEdgePads, softFactorY2X > 0.f ? fmt::format(", along y/x x {}", softFactorY2X) : std::string()) + (softEdgeBins >= 0 ? fmt::format(", edge zone {} bins", softEdgeBins) : std::string()) + (softTaperBins > 0 ? fmt::format(", taper {} bins", softTaperBins) : std::string()) + (softInnerEdge ? std::string() : std::string(", inner IROC edge not soft")) : std::string());
   LOGP(info, "{}: {} of {} voxels are data; {}", inputFile, nData, nVoxels, description);
 
   // the IDC join (staticMapCreatorCPM.C leaves meanIDC / medianIDC 0)
@@ -1812,6 +1858,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   SoftRegions soft;
   soft.factor = softFactor;
   soft.stackRows = softStackRows;
+  soft.innerEdge = softInnerEdge;
   soft.spacerRows = softSpacerRows;
   soft.centrePads = softCentrePads;
   soft.edgePads = softEdgePads;
