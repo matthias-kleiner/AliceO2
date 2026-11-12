@@ -46,7 +46,7 @@ using namespace o2::gpu;
 
 void TPCFastTransformInit(const char* fileName = "debugVoxRes.root", const char* fileNameInv = "debugVoxResInv.root",
                           const char* outFileName = "TPCFastTransform_VoxRes.root", bool useSmoothed = false, bool invertSigns = false, bool doDebug = true,
-                          int wideBinKnotStep = 2)
+                          const char* y2xKnots = "", const char* z2xKnots = "")
 {
 
   // Initialise TPCFastTransform object from "voxRes" tree of
@@ -120,8 +120,18 @@ void TPCFastTransformInit(const char* fileName = "debugVoxRes.root", const char*
   o2::tpc::TPCFastSpaceChargeCorrectionHelper* corrHelper = o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance();
 
   corrHelper->setNthreadsToMaximum();
-  // y/x knots: one in every refined (narrow) bin, every wideBinKnotStep-th bin in the runs of wide bins (2 = every second bin for uniform binning)
-  corrHelper->setWideBinKnotStep(wideBinKnotStep);
+  // the spline knots (setY2XKnots / setZ2XKnots, comma-separated, in the coordinate of the binning): the argument, else the user info
+  // "y2xKnots" / "z2xKnots" of the map, else the helper's default (every second voxel bin)
+  auto getKnots = [userInfo](const char* argument, const char* key) {
+    std::string knots = argument ? argument : "";
+    if (knots.empty() && userInfo->FindObject(key)) {
+      knots = userInfo->FindObject(key)->GetTitle();
+    }
+    std::cout << key << ": " << (knots.empty() ? std::string("default (every second voxel bin)") : knots) << std::endl;
+    return knots.empty() ? std::vector<double>{} : o2::RangeTokenizer::tokenize<double>(knots);
+  };
+  corrHelper->setY2XKnots(getKnots(y2xKnots, "y2xKnots"));
+  corrHelper->setZ2XKnots(getKnots(z2xKnots, "z2xKnots"));
   // corrHelper->setNthreads(1);
 
   if (debugMirrorAdata2C) {

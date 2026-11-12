@@ -104,7 +104,8 @@ void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
                              float meanCTP = 0.f,
                              int debug = 0,
                              int nThreads = 8,
-                             int wideBinKnotStep = 2)
+                             const char* y2xKnots = "",
+                             const char* z2xKnots = "")
 {
 
   // Initialise TPCFastTransform object from "voxRes" tree of
@@ -121,8 +122,6 @@ void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
   */
 
   o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance()->setNthreads(nThreads);
-  // y/x knots: one in every refined (narrow) bin, every wideBinKnotStep-th bin in the runs of wide bins (2 = every second bin for uniform binning)
-  o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance()->setWideBinKnotStep(wideBinKnotStep);
 
   if (gSystem->AccessPathName(fileName)) {
     LOGP(error, "input file {} does not exist!", fileName);
@@ -190,6 +189,19 @@ void TPCFastTransformInitCPM(const char* fileName = "debugVoxRes.root",
   trackResiduals.setZ2XBinning(z2xBins);
   trackResiduals.init();
   checkY2XEdge(userInfo, trackResiduals, fileName);
+
+  // the spline knots of the FT (TPCFastSpaceChargeCorrectionHelper::setY2XKnots / setZ2XKnots, comma-separated, in the coordinate of the
+  // binning): the argument, else the user info "y2xKnots" / "z2xKnots" of the map, else the helper's default (every second voxel bin)
+  auto getKnots = [userInfo](const char* argument, const char* key) {
+    std::string knots = argument ? argument : "";
+    if (knots.empty() && userInfo->FindObject(key)) {
+      knots = userInfo->FindObject(key)->GetTitle();
+    }
+    LOGP(info, "{}: {}", key, knots.empty() ? std::string("default (every second voxel bin)") : knots);
+    return knots.empty() ? std::vector<double>{} : o2::RangeTokenizer::tokenize<double>(knots);
+  };
+  o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance()->setY2XKnots(getKnots(y2xKnots, "y2xKnots"));
+  o2::tpc::TPCFastSpaceChargeCorrectionHelper::instance()->setZ2XKnots(getKnots(z2xKnots, "z2xKnots"));
 
   auto getFromUserInfo = [userInfo](std::string value, float& valueF) {
     if (valueF != 0) {
