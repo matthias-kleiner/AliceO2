@@ -60,8 +60,10 @@
 /// (fineSums). User info: the input voxResTree's (else the binning and nTracks of fineSums) + "smoothing"; the input's other trees
 /// (OrbitLumiInfo, MetaData) copied; the input's fineSums when read (source fineSums, errorMode 2) with one row per voxel (the rows of
 /// a voxel added per charge: e.g. the hadd of several runs' sums collapsed). joinIDC: meanIDC / medianIDC = mean / median of the TPC scalers (A + C) / 2 at the TFs of the
-/// input's OrbitLumiInfo (timeMSsel; CCDB TPC/Calib/Scaler and ScalerWeights, as SmoothingExtrapolate.C), -1: only if the input has no
-/// meanIDC > 0 (staticMapCreatorCPM.C leaves them 0), 1: always, 0: never.
+/// input's OrbitLumiInfo (the per-TF idcScalerASel / CSel the writer stored if every entry has them, else the CCDB TPC/Calib/Scaler and
+/// ScalerWeights at timeMSsel, as SmoothingExtrapolate.C), -1: only if the input has no meanIDC > 0 (fineSums inputs, staticMapCreatorCPM.C
+/// outputs before 11-2026), 1: always, 0: never. meanCTP / medianCTP from OrbitLumiInfo if the input's user info has none (fineSums inputs):
+/// every map carries both IDC and CTP.
 ///
 /// root -b -q 'smoothVoxelMap.C+("voxRes.root", "voxResSmooth.root")'
 
@@ -83,6 +85,7 @@
 
 #include "TFile.h"
 #include "TKey.h"
+#include "TLeaf.h"
 #include "TNamed.h"
 #include "TTree.h"
 
@@ -1056,8 +1059,20 @@ bool getScalerValues(o2::ccdb::BasicCCDBManager& manager, long timeMS, float& sc
   return scalerA > 0.f && scalerC > 0.f;
 }
 
-/// the IDC join: mean and median of (A + C) / 2 over the TFs of the input's OrbitLumiInfo (timeMSsel of all entries, sorted: the CCDB cache hits while
-/// consecutive TFs share a validity window); false without TFs or valid scalers
+/// mean and median of the values (sorted on return); the median as TMath::Median (SmoothingExtrapolate.C): the mean of the central two
+/// for an even number
+void meanAndMedian(std::vector<float>& values, float& mean, float& median)
+{
+  mean = std::accumulate(values.begin(), values.end(), 0.) / values.size();
+  std::sort(values.begin(), values.end());
+  const size_t middle = values.size() / 2;
+  median = values.size() % 2 ? values[middle] : 0.5f * (values[middle - 1] + values[middle]);
+}
+
+/// the IDC join: mean and median of (A + C) / 2 over the TFs of the input's OrbitLumiInfo. From the per-TF scalers the writer stored
+/// (idcScalerASel / CSel, one per timeMSsel: staticMapCreatorCPM.C and fineMapCreatorGBL.C, joined there in time order) when every entry
+/// has them, else from the CCDB at timeMSsel (all entries, sorted: the CCDB cache hits while consecutive TFs share a validity window);
+/// false without TFs or valid scalers
 bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
 {
   auto* orbitLumiTree = input.Get<TTree>("OrbitLumiInfo");
@@ -1066,26 +1081,49 @@ bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
     LOGP(warning, "IDC join: no OrbitLumiInfo with timeMSsel in the input");
     return false;
   }
+  std::vector<float>* storedA = nullptr;
+  std::vector<float>* storedC = nullptr;
+  bool storedComplete = orbitLumiTree->GetBranch("idcScalerASel") && orbitLumiTree->GetBranch("idcScalerCSel");
+  if (storedComplete) {
+    orbitLumiTree->SetBranchAddress("idcScalerASel", &storedA);
+    orbitLumiTree->SetBranchAddress("idcScalerCSel", &storedC);
+  }
   // every entry: an hadd of several inputs (e.g. the chunks of a split fine pass) has one per input
   std::vector<long> sortedTimes;
+  std::vector<float> idcs;
   for (long entry = 0; entry < orbitLumiTree->GetEntries(); ++entry) {
     orbitLumiTree->GetEntry(entry);
-    if (times) {
-      sortedTimes.insert(sortedTimes.end(), times->begin(), times->end());
+    if (!times) {
+      continue;
+    }
+    sortedTimes.insert(sortedTimes.end(), times->begin(), times->end());
+    // older staticMapCreatorCPM.C outputs: empty idcScalerASel / CSel
+    storedComplete = storedComplete && storedA && storedC && storedA->size() == times->size() && storedC->size() == times->size();
+    for (size_t index = 0; storedComplete && index < times->size(); ++index) {
+      if ((*storedA)[index] > 0.f && (*storedC)[index] > 0.f) {
+        idcs.push_back(0.5f * ((*storedA)[index] + (*storedC)[index]));
+      }
     }
   }
   orbitLumiTree->ResetBranchAddresses();
   delete times;
+  delete storedA;
+  delete storedC;
   if (sortedTimes.empty()) {
     LOGP(warning, "IDC join: no TF times in OrbitLumiInfo");
     return false;
   }
+  if (storedComplete && !idcs.empty()) {
+    meanAndMedian(idcs, meanIDC, medianIDC);
+    LOGP(info, "IDC join: {} of {} TFs with a stored scaler (no CCDB), meanIDC {}, medianIDC {}", idcs.size(), sortedTimes.size(), meanIDC, medianIDC);
+    return true;
+  }
+  idcs.clear();
   std::sort(sortedTimes.begin(), sortedTimes.end());
   auto& manager = o2::ccdb::BasicCCDBManager::instance();
   manager.setCaching(true);
   manager.setFatalWhenNull(false);
   manager.setURL("http://alice-ccdb.cern.ch");
-  std::vector<float> idcs;
   idcs.reserve(sortedTimes.size());
   for (const long timeMS : sortedTimes) {
     float scalerA = 0.f;
@@ -1098,11 +1136,42 @@ bool joinIDC(TFile& input, float& meanIDC, float& medianIDC)
     LOGP(warning, "IDC join: no valid scaler for any of the {} TFs", sortedTimes.size());
     return false;
   }
-  meanIDC = std::accumulate(idcs.begin(), idcs.end(), 0.) / idcs.size();
-  std::sort(idcs.begin(), idcs.end()); // the median as TMath::Median (SmoothingExtrapolate.C): the mean of the central two for an even number
-  const size_t middle = idcs.size() / 2;
-  medianIDC = idcs.size() % 2 ? idcs[middle] : 0.5f * (idcs[middle - 1] + idcs[middle]);
-  LOGP(info, "IDC join: {} of {} TFs with a valid scaler, meanIDC {}, medianIDC {}", idcs.size(), sortedTimes.size(), meanIDC, medianIDC);
+  meanAndMedian(idcs, meanIDC, medianIDC);
+  LOGP(info, "IDC join: {} of {} TFs with a valid scaler from the CCDB, meanIDC {}, medianIDC {}", idcs.size(), sortedTimes.size(), meanIDC, medianIDC);
+  return true;
+}
+
+/// the CTP join, for an input whose user info has no meanCTP (the fine pass's fineSums carry only the binning): over all entries of
+/// OrbitLumiInfo (an hadd of chunks has one per chunk), meanCTP = the entries' meanCTP (with the writer's PbPb factor) weighted by their
+/// number of TFs, medianCTP = the median of all ctpLumiSel (no factor, as the writers); false without OrbitLumiInfo / CTP values
+bool joinCTP(TFile& input, float& meanCTP, float& medianCTP)
+{
+  auto* orbitLumiTree = input.Get<TTree>("OrbitLumiInfo");
+  std::vector<float>* ctp = nullptr;
+  if (!orbitLumiTree || orbitLumiTree->GetEntries() == 0 || !orbitLumiTree->GetLeaf("meanCTP") || orbitLumiTree->SetBranchAddress("ctpLumiSel", &ctp) < 0) {
+    LOGP(warning, "CTP join: no OrbitLumiInfo with meanCTP and ctpLumiSel in the input");
+    return false;
+  }
+  double weightedSum = 0.;
+  std::vector<float> values;
+  for (long entry = 0; entry < orbitLumiTree->GetEntries(); ++entry) {
+    orbitLumiTree->GetEntry(entry);
+    if (!ctp || ctp->empty()) {
+      continue;
+    }
+    weightedSum += orbitLumiTree->GetLeaf("meanCTP")->GetValue() * ctp->size();
+    values.insert(values.end(), ctp->begin(), ctp->end());
+  }
+  orbitLumiTree->ResetBranchAddresses();
+  delete ctp;
+  if (values.empty() || !(weightedSum > 0.)) {
+    LOGP(warning, "CTP join: no CTP luminosity in OrbitLumiInfo");
+    return false;
+  }
+  float meanRaw = 0.f; // without the PbPb factor: only for the log
+  meanAndMedian(values, meanRaw, medianCTP);
+  meanCTP = static_cast<float>(weightedSum / values.size());
+  LOGP(info, "CTP join: {} TFs, meanCTP {} (raw mean {}), medianCTP {}", values.size(), meanCTP, meanRaw, medianCTP);
   return true;
 }
 
@@ -1843,7 +1912,7 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
     softFactor != 1.f || softFactorY2X > 0.f ? fmt::format(", soft x {} (stack rows {}, spacer rows +-{}, centre / edge pads {} / {}){}", softFactor, softStackRows, softSpacerRows, softCentrePads, softEdgePads, softFactorY2X > 0.f ? fmt::format(", along y/x x {}", softFactorY2X) : std::string()) + (softEdgeBins >= 0 ? fmt::format(", edge zone {} bins", softEdgeBins) : std::string()) + (softTaperBins > 0 ? fmt::format(", taper {} bins", softTaperBins) : std::string()) + (softInnerEdge ? std::string() : std::string(", inner IROC edge not soft")) : std::string());
   LOGP(info, "{}: {} of {} voxels are data; {}", inputFile, nData, nVoxels, description);
 
-  // the IDC join (staticMapCreatorCPM.C leaves meanIDC / medianIDC 0)
+  // the IDC join (staticMapCreatorCPM.C outputs before 11-2026 and fineSums inputs have no meanIDC > 0)
   auto* treeWithInfo = voxResTree ? voxResTree : sumsTree;
   auto* storedMeanIDC = treeWithInfo->GetUserInfo()->FindObject("meanIDC");
   const bool hasIDC = storedMeanIDC && std::atof(storedMeanIDC->GetTitle()) > 0.;
@@ -1853,6 +1922,11 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   if (!joinedIDC && !hasIDC) {
     LOGP(warning, "No meanIDC in the input and none joined: the output's meanIDC / medianIDC stay as in the input");
   }
+  // the CTP join: every map carries both IDC and CTP (the reconstruction scales with the IDC, the CTP is the fallback); a fineSums input
+  // has no meanCTP in its user info
+  float meanCTP = 0.f;
+  float medianCTP = 0.f;
+  const bool joinedCTP = !treeWithInfo->GetUserInfo()->FindObject("meanCTP") && joinCTP(*input, meanCTP, medianCTP);
 
   std::vector<double> nodes;
   SoftRegions soft;
@@ -1885,6 +1959,12 @@ void smoothVoxelMap(std::string inputFile = "voxRes.root",
   if (joinedIDC) {
     tree.GetUserInfo()->Add(new TNamed("meanIDC", std::to_string(meanIDC).data()));
     tree.GetUserInfo()->Add(new TNamed("medianIDC", std::to_string(medianIDC).data()));
+  }
+  if (joinedCTP) {
+    tree.GetUserInfo()->Add(new TNamed("meanCTP", std::to_string(meanCTP).data()));
+    if (!tree.GetUserInfo()->FindObject("medianCTP")) {
+      tree.GetUserInfo()->Add(new TNamed("medianCTP", std::to_string(medianCTP).data()));
+    }
   }
   if (!voxResTree) {
     tree.GetUserInfo()->Add(new TNamed("nTracksProcessed", info("nTracks").data()));

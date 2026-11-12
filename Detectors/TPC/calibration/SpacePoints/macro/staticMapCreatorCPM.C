@@ -27,6 +27,12 @@
 #include "DetectorsBase/MatLayerCylSet.h"
 #include "DetectorsBase/Propagator.h"
 #include "TPCBase/Mapper.h"
+#include "TPCCalibration/TPCScaler.h"
+#if __has_include("TPCBaseRecSim/CDBTypes.h")
+#include "TPCBaseRecSim/CDBTypes.h"
+#else
+#include "TPCBase/CDBTypes.h"
+#endif
 #include "ReconstructionDataFormats/TrackUtils.h"
 #include "ClusterBiasCorrection.h"
 
@@ -169,6 +175,61 @@ double calculateMedian(std::vector<T> vec)
   }
 
   return (vec[midIndex - 1] + vec[midIndex]) / 2.0;
+}
+
+/// the IDC (TPC scalers of the A and C sides) per selected TF, joined after the processing: the TF times in time order, a TPC/Calib/Scaler
+/// object fetched only when the current one does not cover the TF (each object once; as fineMapCreatorGBL.C's fillIDCs, weights and
+/// integration time as the reconstruction's TPCScalerSpec). idcA / idcC in the order of timeMS, 0 where no scaler covers the TF.
+void fillIDCsInTimeOrder(o2::ccdb::BasicCCDBManager& ccdb, const std::vector<long>& timeMS, std::vector<float>& idcA, std::vector<float>& idcC)
+{
+  idcA.assign(timeMS.size(), 0.f);
+  idcC.assign(timeMS.size(), 0.f);
+  const auto* weights = ccdb.get<o2::tpc::TPCScalerWeights>(o2::tpc::CDBTypeMap.at(o2::tpc::CDBType::CalScalerWeights));
+  std::vector<size_t> order(timeMS.size());
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(), [&](size_t first, size_t second) { return timeMS[first] < timeMS[second]; });
+  std::unique_ptr<o2::tpc::TPCScaler> scaler;
+  double retryAfterMS = 0.;
+  long nObjects = 0;
+  long nWithIDC = 0;
+  for (const size_t index : order) {
+    const double time = timeMS[index];
+    const bool inside = scaler && time >= scaler->getStartTimeStampMS() && time <= scaler->getEndTimeStampMS(o2::tpc::Side::A);
+    if (!inside && time >= retryAfterMS) {
+      auto* tree = ccdb.getForTimeStamp<TTree>(o2::tpc::CDBTypeMap.at(o2::tpc::CDBType::CalScaler), timeMS[index]);
+      auto next = std::make_unique<o2::tpc::TPCScaler>();
+      if (tree) {
+        next->setFromTree(*tree);
+      }
+      // a default object (no scaler at this time, e.g. after the end of the run) starts at 0: keep the current one, try again 10 s later
+      if (!tree || next->getStartTimeStampMS() <= 0) {
+        retryAfterMS = time + 1e4;
+      } else {
+        if (weights && weights->isValid()) {
+          next->setScalerWeights(*weights);
+          next->useWeights(true);
+          const float integrationTimeMS = std::min(std::abs(weights->mFirstTimeStampMS), 500.f);
+          if (integrationTimeMS > 0) {
+            next->setIonDriftTimeMS(integrationTimeMS);
+          }
+        }
+        scaler = std::move(next);
+        ++nObjects;
+        LOGP(info, "TPC scaler {:.0f} - {:.0f} ms (TF time {:.0f} ms), ion drift time {} ms", scaler->getStartTimeStampMS(),
+             scaler->getEndTimeStampMS(o2::tpc::Side::A), time, scaler->getIonDriftTimeMS());
+      }
+    }
+    if (scaler && time >= scaler->getStartTimeStampMS() - 1e3 && time <= scaler->getEndTimeStampMS(o2::tpc::Side::A) + 1e3) {
+      const float scalerA = scaler->getMeanScaler(time, o2::tpc::Side::A);
+      const float scalerC = scaler->getMeanScaler(time, o2::tpc::Side::C);
+      if (scalerA > 0.f && scalerC > 0.f) { // getMeanScaler: -1 without values, 0 with zero weights
+        idcA[index] = scalerA;
+        idcC[index] = scalerC;
+        ++nWithIDC;
+      }
+    }
+  }
+  LOGP(info, "IDC for {} of {} selected TFs from {} scaler objects", nWithIDC, timeMS.size(), nObjects);
 }
 
 // Lightweight double-precision 3-vector for the hot per-residual/per-voxel-flush loop, ~10x faster
@@ -2297,9 +2358,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
 
   // vector of selected values
   std::vector<uint32_t> orbitsSel;
-  // This macro does not read IDC scalers from CCDB (see the "IDC values" note above the OrbitLumiInfo
-  // tree below). These two stay empty and are written out only to keep the output format stable for
-  // readers that expect the branches; the values are filled in offline from timeMSsel.
+  // the IDC (A / C side) per selected TF, in the order of timeMSsel: joined after the processing (see the "IDC values" note above the
+  // OrbitLumiInfo tree below)
   std::vector<float> idcScalerASel;
   std::vector<float> idcScalerCSel;
   std::vector<float> ctpLumiSel;
@@ -2500,12 +2560,20 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   }
   //----------------------------------------------------------------
 
-  // IDC values: this macro deliberately does not query the TPC scalers from CCDB. Doing so per TF from
-  // inside the processing loop is slow and unreliable (uncached fetch, object reload on every jump in
-  // time), so meanIDC/medianIDC are written as 0 placeholders here. The per-TF timestamps needed to
-  // recover them are written to the OrbitLumiInfo tree below (timeMSsel), so the real values can be
-  // joined in afterwards, offline, against a properly cached CCDB client.
-  float meanIDC = 0.f; // not const: written to a TTree branch below, which needs a mutable address
+  // IDC values: never queried per TF inside the processing loop (the TFs come in file order there: a scaler object reload on every
+  // jump in time). Joined here, after the processing, with the TFs in time order, each TPC/Calib/Scaler object fetched once; per TF in
+  // idcScalerASel / CSel (OrbitLumiInfo), meanIDC / medianIDC of (A + C) / 2 over the TFs with a scaler, 0 without any (then
+  // smoothVoxelMap.C's IDC join still fills them in).
+  fillIDCsInTimeOrder(ccdbmgr, timeMSsel, idcScalerASel, idcScalerCSel);
+  std::vector<float> idcSel;
+  idcSel.reserve(timeMSsel.size());
+  for (size_t index = 0; index < timeMSsel.size(); ++index) {
+    if (idcScalerASel[index] > 0.f && idcScalerCSel[index] > 0.f) {
+      idcSel.push_back(0.5f * (idcScalerASel[index] + idcScalerCSel[index]));
+    }
+  }
+  float meanIDC = idcSel.empty() ? 0.f : static_cast<float>(calculateMean(idcSel)); // not const: written to a TTree branch below
+  float medianIDC = idcSel.empty() ? 0.f : static_cast<float>(calculateMedian(idcSel));
 
   double meanCTP = 0;
   if (lumiEntriesCTP > 0) {
@@ -2552,8 +2620,6 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   mTreeOut->SetAlias("masked", Form("(flags & %u) == %u", TrackResiduals::Masked, TrackResiduals::Masked));
   mTreeOut->Branch("voxRes", &mVoxelResultsOutPtr);
 
-  // Placeholder, filled in offline together with meanIDC -- see the note above.
-  float medianIDC = 0.f;
   float medianCTP = static_cast<float>(calculateMedian(ctpLumiSel));
   long medianTimeMS = static_cast<long>(calculateMedian(timeMSsel));
   long meanTimeMS = static_cast<long>(calculateMean(timeMSsel));
