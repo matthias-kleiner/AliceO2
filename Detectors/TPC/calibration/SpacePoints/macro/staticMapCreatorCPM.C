@@ -782,6 +782,101 @@ struct ChargeSums {
       z[sum] += other.z[sum];
     }
   }
+
+  /// both charges of a voxel; balance: each charge's sums of a channel scaled so that both carry half of the channel's total weight
+  /// (the charge-odd part of the reference bias cancels); unbalanced if a charge has no weight in a channel. The entry and position
+  /// sums are never scaled.
+  static ChargeSums combine(const std::array<ChargeSums, 2>& charges, bool balance)
+  {
+    ChargeSums total = charges[0];
+    total.add(charges[1]);
+    if (!balance) {
+      return total;
+    }
+    auto balanceChannel = [&](std::array<double, NSums> ChargeSums::*channel) {
+      const double weight0 = (charges[0].*channel)[W];
+      const double weight1 = (charges[1].*channel)[W];
+      if (!(weight0 > 0.) || !(weight1 > 0.)) {
+        return;
+      }
+      const double half = 0.5 * (weight0 + weight1);
+      for (int sum = 0; sum < NSums; ++sum) {
+        (total.*channel)[sum] = (charges[0].*channel)[sum] * half / weight0 + (charges[1].*channel)[sum] * half / weight1;
+      }
+    };
+    balanceChannel(&ChargeSums::y);
+    balanceChannel(&ChargeSums::z);
+    return total;
+  }
+};
+
+/// The IDC per TF for the IDC moments of the residual slope sums (idcTableFile): text lines "<TF time in ms> <IDC>" (e.g. from the
+/// OrbitLumiInfo of an earlier pass over the same run), looked up by the TF time: the nearest entry within maxGapMS. The macro makes
+/// no CCDB call inside its TF loop.
+struct IdcTable {
+  std::vector<long> timeMS;
+  std::vector<float> idc;
+  double reference = 0.; ///< mean of the table; the moments are of u = IDC - reference
+  long maxGapMS = 500;
+
+  bool load(const std::string& fileName)
+  {
+    std::ifstream input(fileName);
+    std::vector<std::pair<long, float>> entries;
+    long time = 0;
+    float value = 0.f;
+    while (input >> time >> value) {
+      if (value > 0.f) {
+        entries.emplace_back(time, value);
+      }
+    }
+    std::sort(entries.begin(), entries.end());
+    double sum = 0.;
+    for (const auto& entry : entries) {
+      timeMS.push_back(entry.first);
+      idc.push_back(entry.second);
+      sum += entry.second;
+    }
+    reference = entries.empty() ? 0. : sum / entries.size();
+    return !entries.empty();
+  }
+
+  bool lookup(long tfTimeMS, float& u) const
+  {
+    const auto upper = std::lower_bound(timeMS.begin(), timeMS.end(), tfTimeMS);
+    long best = -1;
+    long bestGap = maxGapMS + 1;
+    for (const auto candidate : {upper - timeMS.begin(), upper - timeMS.begin() - 1}) {
+      if (candidate >= 0 && candidate < long(timeMS.size()) && std::abs(timeMS[candidate] - tfTimeMS) < bestGap) {
+        best = candidate;
+        bestGap = std::abs(timeMS[candidate] - tfTimeMS);
+      }
+    }
+    if (best < 0) {
+      return false;
+    }
+    u = float(idc[best] - reference);
+    return true;
+  }
+};
+
+/// Per voxel and charge the IDC moments of the residual slope sums: per channel sum u S and sum u^2 S of the six sums S of
+/// ChargeSums (u = IDC of the cluster's TF - IdcTable::reference). With them the voxel model can be fitted with terms linear in the
+/// IDC (D0 + D1 u) from the IDC variation inside the map's time interval.
+struct IdcMoments {
+  std::array<double, ChargeSums::NSums> yU{};
+  std::array<double, ChargeSums::NSums> yUU{};
+  std::array<double, ChargeSums::NSums> zU{};
+  std::array<double, ChargeSums::NSums> zUU{};
+
+  static void fill(std::array<double, ChargeSums::NSums>& first, std::array<double, ChargeSums::NSums>& second, double slope, double residual, double weight, double u)
+  {
+    const double values[ChargeSums::NSums] = {weight, weight * slope, weight * slope * slope, weight * residual, weight * slope * residual, weight * residual * residual};
+    for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+      first[sum] += u * values[sum];
+      second[sum] += u * u * values[sum];
+    }
+  }
 };
 
 struct VoxelSolution {
@@ -851,6 +946,8 @@ void clusterErrors(int row, double z, double tgSlp, double tgl, double& sigmaY, 
 // avoids that; the copy itself is small next to the per-TF track-processing time.
 struct TFPackage {
   int iEntry = 0;
+  float idcU = 0.f;    // IDC of the TF - IdcTable::reference (IDC moments of the residual slope sums)
+  bool hasIDC = false; // the IDC table has an entry for this TF
   std::vector<TrackDataCompact> trackRefsVec;
   std::vector<TrackData> trackDataVec;
   std::vector<UnbinnedResid> unbinnedResidualsVec;
@@ -974,6 +1071,11 @@ void doFileProcessing(const int iThread,
                       const int nZ2XBins,
                       std::vector<VoxelData>& voxels,                    // flat [sec*152*nY2XBins*nZ2XBins + ix*nY2XBins*nZ2XBins + iy*nZ2XBins + iz] -- shared across threads, one instance per voxel
                       std::vector<std::array<ChargeSums, 2>>& slopeSums, // same index as voxels, [charge]; guarded by the voxel's mutex; empty: residual slope method off
+                      const IdcTable& idcTable,                          // IDC per TF for idcMoments
+                      std::vector<std::array<IdcMoments, 2>>& idcMoments, // as slopeSums; empty: no IDC moments
+                      std::atomic<long>& nTFsWithoutIDC,
+                      const int slopeWeightMode,   // see staticMapCreatorCPM
+                      const float slopeWeightFloor, // see staticMapCreatorCPM
                       std::vector<Long64_t>& totalBytesReadPerf_thread,
                       std::vector<size_t>& lumiEntriesCTP_thread,
                       std::vector<double>& lumiSumCTP_thread,
@@ -1644,6 +1746,12 @@ void doFileProcessing(const int iThread,
         // producer from running arbitrarily far ahead.
         auto pkg = std::make_unique<TFPackage>();
         pkg->iEntry = iEntry;
+        if (!idcMoments.empty()) {
+          pkg->hasIDC = idcTable.lookup(tfTimeInMS, pkg->idcU);
+          if (!pkg->hasIDC) {
+            ++nTFsWithoutIDC;
+          }
+        }
         pkg->trackRefsVec = **trackRefs;
         pkg->trackDataVec = **trackData;
         pkg->unbinnedResidualsVec = **unbinnedResiduals;
@@ -1697,6 +1805,21 @@ void doFileProcessing(const int iThread,
 
         auto propagator = o2::base::Propagator::Instance();
         o2::track::TrackPar trkPar = trk.par;
+        // slopeWeightMode 1: the reference WITH its covariance is propagated instead (same steps, the material LUT adds the multiple
+        // scattering) and its parameters copied into trkPar after every step, so everything below sees the same trkPar as before
+        const bool useReferenceCov = slopeWeightMode == 1 && !slopeSums.empty();
+        o2::track::TrackParCov trkCov;
+        if (useReferenceCov) {
+          trkCov = trk.par;
+        }
+        auto propagateReference = [&](float x) -> bool {
+          if (!useReferenceCov) {
+            return propagator->PropagateToXBxByBz(trkPar, x, 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT);
+          }
+          const bool ok = propagator->PropagateToXBxByBz(trkCov, x, 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT);
+          trkPar = trkCov;
+          return ok;
+        };
         int sign = trkPar.getSign();
 
         int charge = 0;
@@ -1711,7 +1834,7 @@ void doFileProcessing(const int iThread,
 
         if (maxdEdxExp > 0 || maxDevdEdxOverExp > 0) {
           // propagate to the beginning of the inner containment vessel, to use the momentum for dE/dx expected
-          if (!propagator->PropagateToXBxByBz(trkPar, 63.2, 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT)) { // USEMatCorrTGeo, USEMatCorrLUT, USEMatCorrNONE
+          if (!propagateReference(63.2)) { // USEMatCorrLUT
             return;
           }
 
@@ -1725,7 +1848,7 @@ void doFileProcessing(const int iThread,
             return;
           }
         }
-        if (!propagator->PropagateToXBxByBz(trkPar, 85., 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT)) { // USEMatCorrTGeo, USEMatCorrLUT, USEMatCorrNONE
+        if (!propagateReference(85.)) { // USEMatCorrLUT
           return;
         }
 
@@ -1809,9 +1932,13 @@ void doFileProcessing(const int iThread,
           deltaClsVoxel.SetXYZ(dxclsvoxel, dyclsvoxel, dzclsvoxel);
 
           //-----------------------------------------
-          trkPar.rotate(o2::math_utils::sector2Angle(sec));
+          if (useReferenceCov) {
+            trkCov.rotate(o2::math_utils::sector2Angle(sec));
+          } else {
+            trkPar.rotate(o2::math_utils::sector2Angle(sec));
+          }
 
-          const bool propagatedToRow = propagator->PropagateToXBxByBz(trkPar, xPos, 0.99, 2., o2::base::Propagator::MatCorrType::USEMatCorrLUT); // USEMatCorrTGeo, USEMatCorrLUT, USEMatCorrNONE
+          const bool propagatedToRow = propagateReference(xPos); // USEMatCorrLUT
           trackPosAtRow_worker[iWorker].SetXYZ(trkPar.getX(), trkPar.getY(), trkPar.getZ());
 
           float sna, csa;
@@ -1836,13 +1963,28 @@ void doFileProcessing(const int iThread,
             double sigmaY = 0.;
             double sigmaZ = 0.;
             clusterErrors(residIn.row, zPos, tgSlp, tgl, sigmaY, sigmaZ);
+            // slopeWeightMode 1 (CVF weight with a floor, alice-tpc-notes cvf_weight_bias.md): the residual dy of the slope form is the
+            // perpendicular distance / cos(phi), so the weight of the perpendicular distance c^2 / (c^2 sigma^2 + b) becomes, on dy,
+            // c^2 / (c^2 (sigma_cl^2 + covY) + b); the pivot property leaves only covY of the reference at the cluster's x
+            double weightY = 1. / (sigmaY * sigmaY);
+            double weightZ = 1. / (sigmaZ * sigmaZ);
+            if (useReferenceCov) {
+              const double cos2 = (1. - snp) * (1. + snp);
+              weightY = cos2 / (cos2 * (sigmaY * sigmaY + trkCov.getSigmaY2()) + slopeWeightFloor);
+              weightZ = 1. / (sigmaZ * sigmaZ + trkCov.getSigmaZ2() + slopeWeightFloor);
+            }
             auto& sums = slopeSums[voxelIndex][charge];
             sums.entries += 1.;
             sums.x += xPos;
             sums.y2x += yPos / xPos;
             sums.z2x += zPos / xPos;
-            ChargeSums::fill(sums.y, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, 1. / (sigmaY * sigmaY));
-            ChargeSums::fill(sums.z, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, 1. / (sigmaZ * sigmaZ));
+            ChargeSums::fill(sums.y, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, weightY);
+            ChargeSums::fill(sums.z, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, weightZ);
+            if (!idcMoments.empty() && pkg->hasIDC) {
+              auto& moments = idcMoments[voxelIndex][charge];
+              IdcMoments::fill(moments.yU, moments.yUU, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, weightY, pkg->idcU);
+              IdcMoments::fill(moments.zU, moments.zUU, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, weightZ, pkg->idcU);
+            }
           }
 
           //-----------------------------------------
@@ -2152,9 +2294,20 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                          int clusterFlagMask = 0,               // skip the TPC cluster residuals with any of these flags (UnbinnedResid::channel):
                                                                 // 0x1 split pad, 0x2 split time, 0x4 edge, 0x8 single pad or time, 0x10 shared
                                                                 // (merger); 0 (default): keep all. "Golden" clusters: 0x19
-                         std::string clusterBiasFile = "")      // table of the per-cluster correction of the cluster-position biases (pad-phase
+                         std::string clusterBiasFile = "",      // table of the per-cluster correction of the cluster-position biases (pad-phase
                                                                 // S-curve, sector-edge truncation; format in ClusterBiasCorrection.h), applied to the
                                                                 // snapped cluster y before the edge cut and the binning; empty (default): off
+                         std::string idcTableFile = "",         // with writeSlopeSums: text table "<TF time in ms> <IDC>" -> the IDC moments of the
+                                                                // residual slope sums (fineSums branches yU, yUU, zU, zUU; see IdcMoments); empty: off
+                         int slopeWeightMode = 0,               // weight of a cluster in the residual slope sums (see SlopeWeight): 0 (default)
+                                                                // 1 / sigma_cluster^2; 1 the reference's propagated covariance (ITS track with its
+                                                                // covariance, multiple scattering of the material LUT) with the floor slopeWeightFloor:
+                                                                // y: c^2 / (c^2 (sigma_cl^2 + covY) + b), c^2 = 1 - snp^2; z: 1 / (sigma_cl^2 + covZ + b)
+                         float slopeWeightFloor = 0.09f,        // slopeWeightMode 1: the floor b (cm^2); b -> 0 inverse variance, b -> inf flat in
+                                                                // the perpendicular distance (weight cos^2 phi in y)
+                         bool slopeChargeBalance = false)       // residual slope method (voxelMethod 1): the voxel solve with equal total weight of
+                                                                // the two charges per channel (cancels the charge-odd reference bias); a voxel with
+                                                                // one charge only is solved unbalanced. fineSums are written per charge regardless
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2401,7 +2554,23 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   }
   const bool useSlopeSums = voxelMethod == 1 || writeSlopeSums;
   std::vector<std::array<ChargeSums, 2>> slopeSums(useSlopeSums ? voxels.size() : 0);
+  IdcTable idcTable;
+  std::atomic<long> nTFsWithoutIDC{0};
+  if (!idcTableFile.empty() && !(useSlopeSums && idcTable.load(idcTableFile))) {
+    LOGP(fatal, "idcTableFile {}: no entries read, or the residual slope sums are off (writeSlopeSums)", idcTableFile);
+  }
+  std::vector<std::array<IdcMoments, 2>> idcMoments(idcTable.timeMS.empty() ? 0 : voxels.size());
+  if (!idcMoments.empty()) {
+    LOGP(info, "IDC moments of the residual slope sums: {} table entries from {}, reference IDC {:.5f}", idcTable.timeMS.size(), idcTableFile, idcTable.reference);
+  }
   LOGP(info, "voxResTree from the {}{}", voxelMethod == 1 ? "residual slope method" : "CPM", writeSlopeSums ? ", residual slope sums written (fineSums)" : "");
+  if (slopeWeightMode != 0 && slopeWeightMode != 1) {
+    LOGP(fatal, "slopeWeightMode {}: 0 (1 / sigma_cluster^2) or 1 (reference covariance + floor)", slopeWeightMode);
+  }
+  if (useSlopeSums) {
+    LOGP(info, "residual slope sums: weight {}{}, charge balance {}", slopeWeightMode == 1 ? "c^2 / (c^2 (sigma_cl^2 + covY) + b), b = " : "1 / sigma_cl^2",
+         slopeWeightMode == 1 ? std::to_string(slopeWeightFloor) + " cm^2" : "", slopeChargeBalance ? "on" : "off");
+  }
   LOGP(info, "Track |tgl| cut: {}", maxTrackTgl > 0.f ? std::to_string(maxTrackTgl) : std::string("none"));
 
   // The per-file input handles (TFile, TTreeReaders, TTreeReaderValues) and the I/O-rate sampling state
@@ -2460,6 +2629,11 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              nZ2XBins,
                              std::ref(voxels),
                              std::ref(slopeSums),
+                             std::cref(idcTable),
+                             std::ref(idcMoments),
+                             std::ref(nTFsWithoutIDC),
+                             slopeWeightMode,
+                             slopeWeightFloor,
                              std::ref(totalBytesReadPerf_thread),
                              std::ref(lumiEntriesCTP_thread),
                              std::ref(lumiSumCTP_thread),
@@ -2659,6 +2833,11 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     userInfo->Add(new TNamed("badCalib", "1"));
   }
   userInfo->Add(new TNamed("voxelMethod", voxelMethod == 1 ? "slope" : "CPM"));
+  if (useSlopeSums) {
+    userInfo->Add(new TNamed("slopeWeightMode", std::to_string(slopeWeightMode).data()));
+    userInfo->Add(new TNamed("slopeWeightFloor", std::to_string(slopeWeightFloor).data()));
+    userInfo->Add(new TNamed("slopeChargeBalance", slopeChargeBalance ? "1" : "0"));
+  }
 
   long nSlopeSolved = 0;
   for (int isec = 0; isec < NSectors; isec++) {
@@ -2667,8 +2846,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
         for (int ix = 0; ix < NRows; ix++) {
           if (voxelMethod == 1) {
             // residual slope method: the voxel solve of both charges' sums, at the voxel's mean position
-            ChargeSums total = slopeSums[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][0];
-            total.add(slopeSums[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][1]);
+            const ChargeSums total = ChargeSums::combine(slopeSums[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz], slopeChargeBalance);
             VoxelSolution solution;
             const bool solved = solveVoxel(total, params.minEntriesPerVoxel, solution);
             nSlopeSolved += solved;
@@ -2771,6 +2949,19 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     sumsTree.Branch("position", position, "position[2][3]/F");
     sumsTree.Branch("y", channelY, "y[2][6]/F");
     sumsTree.Branch("z", channelZ, "z[2][6]/F");
+    float momentsYU[2][ChargeSums::NSums] = {};
+    float momentsYUU[2][ChargeSums::NSums] = {};
+    float momentsZU[2][ChargeSums::NSums] = {};
+    float momentsZUU[2][ChargeSums::NSums] = {};
+    if (!idcMoments.empty()) {
+      sumsTree.Branch("yU", momentsYU, "yU[2][6]/F");
+      sumsTree.Branch("yUU", momentsYUU, "yUU[2][6]/F");
+      sumsTree.Branch("zU", momentsZU, "zU[2][6]/F");
+      sumsTree.Branch("zUU", momentsZUU, "zUU[2][6]/F");
+      sumsTree.GetUserInfo()->Add(new TNamed("idcReference", fmt::format("{:.6f}", idcTable.reference).data()));
+      sumsTree.GetUserInfo()->Add(new TNamed("idcTFsWithoutIDC", std::to_string(nTFsWithoutIDC.load()).data()));
+      LOGP(info, "IDC moments: {} TFs without an IDC table entry within {} ms (their clusters enter with u = 0)", nTFsWithoutIDC.load(), idcTable.maxGapMS);
+    }
     for (int isec = 0; isec < NSectors; isec++) {
       for (int iz = 0; iz < nZ2XBins; iz++) {
         for (int iy = 0; iy < nY2XBins; iy++) {
@@ -2788,6 +2979,13 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
               for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
                 channelY[charge][sum] = voxelSums[charge].y[sum];
                 channelZ[charge][sum] = voxelSums[charge].z[sum];
+                if (!idcMoments.empty()) {
+                  const auto& moments = idcMoments[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][charge];
+                  momentsYU[charge][sum] = moments.yU[sum];
+                  momentsYUU[charge][sum] = moments.yUU[sum];
+                  momentsZU[charge][sum] = moments.zU[sum];
+                  momentsZUU[charge][sum] = moments.zUU[sum];
+                }
               }
             }
             sumsTree.Fill();
