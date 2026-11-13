@@ -1076,6 +1076,8 @@ void doFileProcessing(const int iThread,
                       std::atomic<long>& nTFsWithoutIDC,
                       const int slopeWeightMode,   // see staticMapCreatorCPM
                       const float slopeWeightFloor, // see staticMapCreatorCPM
+                      const float slopeWeightCovScale, // see staticMapCreatorCPM
+                      const float slopeWeightQ2PtSigRef, // see staticMapCreatorCPM
                       std::vector<Long64_t>& totalBytesReadPerf_thread,
                       std::vector<size_t>& lumiEntriesCTP_thread,
                       std::vector<double>& lumiSumCTP_thread,
@@ -1970,8 +1972,15 @@ void doFileProcessing(const int iThread,
             double weightZ = 1. / (sigmaZ * sigmaZ);
             if (useReferenceCov) {
               const double cos2 = (1. - snp) * (1. + snp);
-              weightY = cos2 / (cos2 * (sigmaY * sigmaY + trkCov.getSigmaY2()) + slopeWeightFloor);
-              weightZ = 1. / (sigmaZ * sigmaZ + trkCov.getSigmaZ2() + slopeWeightFloor);
+              weightY = cos2 / (cos2 * (sigmaY * sigmaY + slopeWeightCovScale * trkCov.getSigmaY2()) + slopeWeightFloor);
+              weightZ = 1. / (sigmaZ * sigmaZ + slopeWeightCovScale * trkCov.getSigmaZ2() + slopeWeightFloor);
+              if (slopeWeightQ2PtSigRef > 0.f) {
+                // per-track penalty of the CVF (alice-tpc-notes cvfQ2PtSigRef): sigma_eff^2 = sigma^2 (1 + sigma(q/pt)^2 / ref^2), with
+                // sigma(q/pt) of the reference as it comes in (ITS track, not propagated): one factor for all clusters of the track
+                const double penalty = 1. / (1. + trk.par.getSigma1Pt2() / (double(slopeWeightQ2PtSigRef) * slopeWeightQ2PtSigRef));
+                weightY *= penalty;
+                weightZ *= penalty;
+              }
             }
             auto& sums = slopeSums[voxelIndex][charge];
             sums.entries += 1.;
@@ -2305,9 +2314,15 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                                                                 // y: c^2 / (c^2 (sigma_cl^2 + covY) + b), c^2 = 1 - snp^2; z: 1 / (sigma_cl^2 + covZ + b)
                          float slopeWeightFloor = 0.09f,        // slopeWeightMode 1: the floor b (cm^2); b -> 0 inverse variance, b -> inf flat in
                                                                 // the perpendicular distance (weight cos^2 phi in y)
-                         bool slopeChargeBalance = false)       // residual slope method (voxelMethod 1): the voxel solve with equal total weight of
+                         bool slopeChargeBalance = false,       // residual slope method (voxelMethod 1): the voxel solve with equal total weight of
                                                                 // the two charges per channel (cancels the charge-odd reference bias); a voxel with
                                                                 // one charge only is solved unbalanced. fineSums are written per charge regardless
+                         float slopeWeightCovScale = 1.f,       // slopeWeightMode 1: factor a on the reference's covariance in the weight,
+                                                                // y: c^2 / (c^2 (sigma_cl^2 + a covY) + b), z: 1 / (sigma_cl^2 + a covZ + b);
+                                                                // a > 1 weights the multiple scattering (low pt) down further than b = 0 can
+                         float slopeWeightQ2PtSigRef = 0.f)     // slopeWeightMode 1, > 0: per-track factor 1 / (1 + sigma(q/pt)^2 / ref^2) on the
+                                                                // weight, sigma(q/pt) of the incoming ITS reference (c/GeV); the CVF's
+                                                                // cvfQ2PtSigRef: smaller ref = low pt weighted down more. 0 = off
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2569,7 +2584,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   }
   if (useSlopeSums) {
     LOGP(info, "residual slope sums: weight {}{}, charge balance {}", slopeWeightMode == 1 ? "c^2 / (c^2 (sigma_cl^2 + covY) + b), b = " : "1 / sigma_cl^2",
-         slopeWeightMode == 1 ? std::to_string(slopeWeightFloor) + " cm^2" : "", slopeChargeBalance ? "on" : "off");
+         slopeWeightMode == 1 ? std::to_string(slopeWeightFloor) + " cm^2, covariance scale a = " + std::to_string(slopeWeightCovScale) + ", sigma(q/pt) reference " + std::to_string(slopeWeightQ2PtSigRef) : "", slopeChargeBalance ? "on" : "off");
   }
   LOGP(info, "Track |tgl| cut: {}", maxTrackTgl > 0.f ? std::to_string(maxTrackTgl) : std::string("none"));
 
@@ -2634,6 +2649,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              std::ref(nTFsWithoutIDC),
                              slopeWeightMode,
                              slopeWeightFloor,
+                             slopeWeightCovScale,
+                             slopeWeightQ2PtSigRef,
                              std::ref(totalBytesReadPerf_thread),
                              std::ref(lumiEntriesCTP_thread),
                              std::ref(lumiSumCTP_thread),
@@ -2836,6 +2853,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   if (useSlopeSums) {
     userInfo->Add(new TNamed("slopeWeightMode", std::to_string(slopeWeightMode).data()));
     userInfo->Add(new TNamed("slopeWeightFloor", std::to_string(slopeWeightFloor).data()));
+    userInfo->Add(new TNamed("slopeWeightCovScale", std::to_string(slopeWeightCovScale).data()));
+    userInfo->Add(new TNamed("slopeWeightQ2PtSigRef", std::to_string(slopeWeightQ2PtSigRef).data()));
     userInfo->Add(new TNamed("slopeChargeBalance", slopeChargeBalance ? "1" : "0"));
   }
 
