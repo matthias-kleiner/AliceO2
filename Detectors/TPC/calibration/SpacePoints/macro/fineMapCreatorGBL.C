@@ -127,6 +127,7 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1236,6 +1237,7 @@ struct Cluster {
   double xNominal = 0.;                                    ///< the row's x
   double padY0 = 0.;                                       ///< measured y on the pad plane (snapped), before any correction
   double padTableDy = 0.;                                  ///< the pad table's correction subtracted from y (padTableFile) [cm]
+  double injectedY = 0.;                                   ///< test injectEdge: the known edge distortion added to y [cm]
   double z0 = 0.;                                          ///< measured z, before any correction
   double yUncorrected = 0.;                                ///< y as fitted without the in-fit edge correction (after the map corrections)
   double edgeShift = 0.;                                   ///< edgeBiasInFit: the edge correction currently added to y [cm]
@@ -1618,6 +1620,9 @@ struct FitContext {
   bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
   bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
   bool measuredFrameBins = false;                                             ///< voxels and fineMapInput lookup in the measured frame (before the map corrections), as stage 1 and the FT
+  std::array<double, 4> injectEdge = {0., 0., 0., 0.};                        ///< test: known edge distortion (A [cm], lambda [pads], B [cm], u0), see injectEdgeY
+  bool injectEdgeOn = false;                                                  ///< test: injectEdge given
+  bool injectSumOnly = false;                                                 ///< test: sum the injected shift instead of the residual (the truth map)
   bool edgeQA = false;                                                        ///< fill the sums of EdgeQA
   PadSums* padSums = nullptr;                                                 ///< the per-pad sums (filled under the sums mutex), nullptr: off
   SShapeSums* sShapeSums = nullptr;                                           ///< the S-shape sums (with padSums, filled under the sums mutex)
@@ -1770,6 +1775,19 @@ struct EdgeRecord {
   double edgeShift = 0.;                                         ///< edgeBiasInFit: the correction of the cluster in the last fit pass [cm]
   int binY2X = -1;
 };
+
+/// test injectEdge: a known distortion in y near the pad plane's edge, outward-signed (side = sign of the pad-plane y), growing linearly
+/// with the drift length (half at the readout, full at the central electrode): A exp(-d / lambda) + B max(0, (|u| - u0) / (1 - u0))^2,
+/// d = distance from the edge in pads, u = y / (x tan(10 deg)); evaluated at the cluster's measured pad-plane position [cm]
+double injectEdgeY(const std::array<double, 4>& spec, const RowGeometry& geometry, int row, double padY, double x, double z)
+{
+  const double side = padY < 0. ? -1. : 1.;
+  const double d = (geometry.padPlaneEdge[row] - std::abs(padY)) / geometry.padWidth[row];
+  const double u = std::abs(padY) / (x * std::tan(10. * M_PI / 180.));
+  const double ramp = std::max(0., (u - spec[3]) / (1. - spec[3]));
+  const double drift = std::max(0., std::min(1., o2::tpc::cluster_bias::driftLength(z) / 250.));
+  return side * (0.5 + 0.5 * drift) * (spec[0] * std::exp(-std::max(0., d) / spec[1]) + spec[2] * ramp * ramp);
+}
 
 /// edge tree: one entry per track with its TPC clusters within edgeTreePads pads of the pad plane's edge (measured, best or true position)
 void writeEdgeTree(const TFTask& task, size_t trackIndex, const FitResult& fit, const std::vector<Cluster>& clusters, const std::vector<EdgeRecord>& records,
@@ -2051,6 +2069,15 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.y -= cluster.padTableDy;
     }
     cluster.padY = cluster.y;
+    // test injectEdge: the known edge distortion on top of the measured cluster (after padY, so that the edge cut, the table and the voxel stay
+    // on the pad plane as in data: at convergence the track without the cluster maps back to the undistorted position); injectSumOnly: the
+    // cluster is left as it is and the shift is summed instead of the residual (the truth of the same clusters and weights)
+    if (context.injectEdgeOn) {
+      cluster.injectedY = injectEdgeY(context.injectEdge, *context.geometry, cluster.row, cluster.padY, cluster.xNominal, cluster.z0);
+      if (!context.injectSumOnly) {
+        cluster.y += cluster.injectedY;
+      }
+    }
     if (context.baseCorrection) {
       float x = cluster.x;
       float y = cluster.y;
@@ -2299,6 +2326,10 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
           contribution.sShapeCell[frame] = SShapeSums::cell(group, std::max(0, std::min(SShapeSums::NClass - 1, cls)), driftBin, slopeBin, frame, phaseBin);
         }
       }
+    }
+    if (context.injectSumOnly) {
+      contribution.residualY = cluster.injectedY;
+      contribution.residualZ = 0.;
     }
     batch.push_back(contribution);
     ++counters[Residuals];
@@ -2800,7 +2831,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        int padPhaseBins = 2,                                                         // padSums: bins of the measured position inside the pad
                        std::string padTableFile = "",                                                // per-cluster pad table applied to the measured position before the fit (see PadTable); empty: off
                        std::string sShapeTableFile = "",                                             // common data S-shape applied to the measured position before the fit, bulk (see SShapeTable); empty: off
-                       int padDriftBins = 3)                                                         // padSums: drift bins over 0 - 250 cm
+                       int padDriftBins = 3,                                                         // padSums: drift bins over 0 - 250 cm
+                       std::string injectEdge = "",                                                  // test: "A,lambda,B,u0" (um, pads, um, |u|): known edge distortion added to the TPC
+                                                                                                     // clusters' y, see injectEdgeY; empty: off
+                       bool injectSumOnly = false)                                                   // test, with injectEdge: clusters untouched, the injected shift summed instead of the residual
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -2993,6 +3027,27 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   context.edgeByPred = edgeByPred;
   context.measuredFrameBins = measuredFrameBins;
+  if (!injectEdge.empty()) {
+    std::stringstream spec(injectEdge);
+    std::string item;
+    for (int i = 0; i < 4; ++i) {
+      if (!std::getline(spec, item, ',')) {
+        LOGP(fatal, "injectEdge \"{}\": A,lambda,B,u0", injectEdge);
+      }
+      context.injectEdge[i] = std::stod(item);
+    }
+    if (!(context.injectEdge[1] > 0.) || !(context.injectEdge[3] < 1.)) {
+      LOGP(fatal, "injectEdge \"{}\": lambda > 0 and u0 < 1", injectEdge);
+    }
+    context.injectEdge[0] *= 1e-4;
+    context.injectEdge[2] *= 1e-4;
+    context.injectEdgeOn = true;
+    context.injectSumOnly = injectSumOnly;
+    LOGP(info, "TEST injectEdge: A {} um, lambda {} pads, B {} um, u0 {}{}", 1e4 * context.injectEdge[0], context.injectEdge[1], 1e4 * context.injectEdge[2], context.injectEdge[3],
+         injectSumOnly ? ": the injected shift summed instead of the residual (truth map)" : ": added to the TPC clusters' y");
+  } else if (injectSumOnly) {
+    LOGP(fatal, "injectSumOnly needs injectEdge");
+  }
   if (measuredFrameBins) {
     LOGP(info, "Voxels and the fine map lookup in the measured frame");
   }
