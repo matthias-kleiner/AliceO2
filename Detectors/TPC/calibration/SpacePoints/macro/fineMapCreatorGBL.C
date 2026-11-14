@@ -556,6 +556,8 @@ struct TFInfo {
   float idcA = 0.f;
   float idcC = 0.f;
   float lumiScale = 0.f;
+  float refVD = 0.f; ///< the drift reference of the TF's residual file (records tree TPCVDriftRef), cm/us; 0: not read
+  float refT0 = 0.f; ///< TPCDriftTimeOffsetRef, us
 };
 
 /// the TFs of the input files with their time as staticMapCreatorCPM.C (orbit reset + firstTForbit of the records tree; in data the
@@ -585,6 +587,15 @@ std::vector<TFInfo> scanTFs(const std::vector<std::string>& files, long firstEnt
       LOGP(warning, "Skipping {}: firstTForbit has fewer entries than the residual tree ({} vs {})", files[fileIndex], firstOrbits.size(), residualTree->GetEntries());
       continue;
     }
+    // the drift reference the TPC z of this file was made with (one value per file), for FINE_DRIFT_NORM
+    float fileRefVD = 0.f;
+    float fileRefT0 = 0.f;
+    if (recordsTree->GetBranch("TPCVDriftRef") && recordsTree->GetBranch("TPCDriftTimeOffsetRef")) {
+      recordsTree->SetBranchAddress("TPCVDriftRef", &fileRefVD);
+      recordsTree->SetBranchAddress("TPCDriftTimeOffsetRef", &fileRefT0);
+      recordsTree->GetEntry(0);
+      recordsTree->ResetBranchAddresses();
+    }
     const long endEntry = entriesPerFile > 0 ? std::min<long>(firstEntry + entriesPerFile, residualTree->GetEntries()) : residualTree->GetEntries();
     TTreeReader reader(residualTree);
     TTreeReaderValue<o2::ctp::LumiInfo> lumi(reader, "CTPLumi");
@@ -611,6 +622,8 @@ std::vector<TFInfo> scanTFs(const std::vector<std::string>& files, long firstEnt
       tf.orbit = lumiInfo.orbit;
       tf.ctpLumi = lumiInfo.getLumi();
       tf.timeMS = orbitResetMS + double(firstOrbits[entry]) * o2::constants::lhc::LHCOrbitMUS * 1e-3;
+      tf.refVD = fileRefVD;
+      tf.refT0 = fileRefT0;
       tfs.push_back(tf);
     }
   }
@@ -1630,6 +1643,10 @@ struct FitContext {
   const SShapeTable* sShapeTable = nullptr;                                   ///< common data S-shape per cluster (bulk), nullptr: off
   DeadPads deadPads;                                                          ///< deadPadFile: clusters beside dead pads out
   bool lastRowsInFit = false;                                                 ///< the last EdgeRows rows keep their weight in the fit (with edgeFitPads)
+  bool driftNorm = false;                                                     ///< FINE_DRIFT_NORM: cluster z on one drift reference minus the window's vD slope
+  double driftVD0 = 0.;                                                       ///< common reference vD [cm/us]
+  double driftT00 = 0.;                                                       ///< common reference t0 [us]
+  std::array<double, 2> driftSlope = {0., 0.};                                ///< the window's vD / vD0 - 1, A and C
 };
 
 /// kink QA: the scatterers before the TPC (ITS layers, gap) of a fitted track (x, z of each: the material crossed depends on z / x, not only
@@ -2016,6 +2033,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.y = (padAtYZero - std::round(pad * 64.) / 64.) * padWidth;
     }
     cluster.z = residual.z * o2::tpc::param::MaxZ / 0x7fff + decodeResidual(residual.dz);
+    if (context.driftNorm && task.info && task.info->refVD > 0.f) {
+      const double s = cluster.sector < 18 ? 1. : -1.;
+      const double drift = 250. - std::abs(cluster.z);
+      cluster.z += s * ((1. - context.driftVD0 / task.info->refVD) * drift + context.driftVD0 * (context.driftT00 - task.info->refT0) -
+                        context.driftSlope[cluster.sector < 18 ? 0 : 1] * drift);
+    }
     cluster.flags = residual.channel;
     cluster.xNominal = cluster.x;
     cluster.padY0 = cluster.y;
@@ -3018,6 +3041,19 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.edgeFit.geometry = &geometry;
   context.edgeFit.pads = edgeFitPads;
   context.lastRowsInFit = lastRowsInFit;
+  // env FINE_DRIFT_NORM="vD0 t00 bA bC" (dcaseries vdJointFit.C outMode 1, 11-14): every cluster's z from its file's drift reference
+  // (records tree) onto the common one, z += s * ((1 - vD0 / vD_file) * L + vD0 * (t00 - t0_file) - b_side * L), L = 250 - |z|, s = +1 A,
+  // -1 C: the frame of the vD/t0-cleaned coarse maps (t0 constant for the run, the window's vD slope b removed)
+  if (const char* norm = gSystem->Getenv("FINE_DRIFT_NORM")) {
+    std::istringstream in(norm);
+    in >> context.driftVD0 >> context.driftT00 >> context.driftSlope[0] >> context.driftSlope[1];
+    context.driftNorm = !in.fail() && context.driftVD0 > 0.;
+    LOGP(info, "FINE_DRIFT_NORM {}: vD0 {} cm/us, t00 {} us, window vD slope A {} C {}", context.driftNorm ? "on" : "NOT parsed", context.driftVD0, context.driftT00,
+         context.driftSlope[0], context.driftSlope[1]);
+    if (!context.driftNorm) {
+      LOGP(fatal, "FINE_DRIFT_NORM='{}': expected 'vD0 t00 bA bC'", norm);
+    }
+  }
   if (lastRowsInFit) {
     LOGP(info, "The last {} rows keep their weight in the fit", EdgeRows);
   }
