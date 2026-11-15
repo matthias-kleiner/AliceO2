@@ -958,7 +958,7 @@ struct EdgeTable {
   static int boundaryHigh(int sec) { return sec; }
 };
 
-/// Per voxel and charge the moments of the residual slope sums in the regressors r = (u, v_L, v_R) of the sector-edge fluctuations
+/// Per voxel (both charges together) the moments of the residual slope sums in the regressors r = (u, v_L, v_R) of the sector-edge fluctuations
 /// (edgeTableFile): u = IDC of the voxel's side, v_L / v_R = edge dipole of the sector's low-y / high-y boundary (all centred). Per
 /// channel the first moments sum r_k S (k = 0..2) and the second moments sum r_k r_l S (pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)) of
 /// the six sums S of ChargeSums. With them the voxel model can be fitted with terms linear in the regressors,
@@ -1188,7 +1188,7 @@ void doFileProcessing(const int iThread,
                       std::vector<std::array<IdcMoments, 2>>& idcMoments, // as slopeSums; empty: no IDC moments
                       std::atomic<long>& nTFsWithoutIDC,
                       const EdgeTable& edgeTable,                            // regressors of the sector-edge fluctuations per second
-                      std::vector<std::array<EdgeMoments, 2>>& edgeMoments, // as slopeSums; empty: no edge moments
+                      std::vector<EdgeMoments>& edgeMoments,                // same index as voxels, both charges together; empty: no edge moments
                       std::atomic<long>& nTFsWithoutEdge,
                       const int slopeWeightMode,   // see staticMapCreatorCPM
                       const float slopeWeightFloor, // see staticMapCreatorCPM
@@ -2123,7 +2123,7 @@ void doFileProcessing(const int iThread,
               // r = (IDC of the side, edge dipole of the low-y and high-y boundary of the sector), centred; no value -> 0 (the mean)
               const auto value = [&](int column) { const float v = pkg->edge[column]; return std::isfinite(v) ? v : 0.f; };
               const std::array<float, EdgeMoments::NReg> r = {value(sec < 18 ? 0 : 1), value(2 + EdgeTable::boundaryLow(sec)), value(2 + EdgeTable::boundaryHigh(sec))};
-              auto& moments = edgeMoments[voxelIndex][charge];
+              auto& moments = edgeMoments[voxelIndex]; // both charges (the fit sums them anyway); under the voxel's mutex as slopeSums
               EdgeMoments::fill(moments.yR, moments.yRR, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, weightY, r);
               EdgeMoments::fill(moments.zR, moments.zRR, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, weightZ, r);
             }
@@ -2459,8 +2459,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                          std::string edgeTableFile = "")        // with writeSlopeSums: regressor table of the sector-edge fluctuations per second
                                                                 // (o2_macros gsi/edgedipole/makeEdgeTable.C: "<time ms> <IDC A> <IDC C> <v_0..v_35>")
                                                                 // -> moments of the residual slope sums in r = (IDC of the side, edge dipole of the
-                                                                // sector's two boundaries) (fineSums branches yR, yRR, zR, zRR; see EdgeMoments);
-                                                                // ~1.7 kB per voxel. Not together with idcTableFile. Empty (default): off
+                                                                // sector's two boundaries) (fineSums branches yR, yRR, zR, zRR, both charges summed,
+                                                                // float; see EdgeMoments); ~0.9 kB per voxel in memory, 0.4 kB written. Not together with idcTableFile. Empty (default): off
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2726,10 +2726,10 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
       LOGP(fatal, "edgeTableFile {}: no entries read, or the residual slope sums are off (writeSlopeSums)", edgeTableFile);
     }
   }
-  std::vector<std::array<EdgeMoments, 2>> edgeMoments(edgeTable.timeMS.empty() ? 0 : voxels.size());
+  std::vector<EdgeMoments> edgeMoments(edgeTable.timeMS.empty() ? 0 : voxels.size());
   if (!edgeMoments.empty()) {
     LOGP(info, "edge moments of the residual slope sums: {} seconds from {}, mean IDC A {:.4f}, C {:.4f}; {:.1f} GB for the moments", edgeTable.timeMS.size(), edgeTableFile,
-         edgeTable.mean[0], edgeTable.mean[1], edgeMoments.size() * sizeof(std::array<EdgeMoments, 2>) / 1e9);
+         edgeTable.mean[0], edgeTable.mean[1], edgeMoments.size() * sizeof(EdgeMoments) / 1e9);
   }
   LOGP(info, "voxResTree from the {}{}", voxelMethod == 1 ? "residual slope method" : "CPM", writeSlopeSums ? ", residual slope sums written (fineSums)" : "");
   if (slopeWeightMode != 0 && slopeWeightMode != 1) {
@@ -3137,16 +3137,18 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
       sumsTree.GetUserInfo()->Add(new TNamed("idcTFsWithoutIDC", std::to_string(nTFsWithoutIDC.load()).data()));
       LOGP(info, "IDC moments: {} TFs without an IDC table entry within {} ms (their clusters enter with u = 0)", nTFsWithoutIDC.load(), idcTable.maxGapMS);
     }
-    // edge moments: [charge][regressor or pair][sum], regressors (u, v_L, v_R), pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)
-    static double edgeYR[2][EdgeMoments::NReg][ChargeSums::NSums];
-    static double edgeYRR[2][EdgeMoments::NPairs][ChargeSums::NSums];
-    static double edgeZR[2][EdgeMoments::NReg][ChargeSums::NSums];
-    static double edgeZRR[2][EdgeMoments::NPairs][ChargeSums::NSums];
+    // edge moments: [regressor or pair][sum], both charges summed, written as float (accumulated in double; the regressors are centred,
+    // so float keeps the precision the fit needs; 4x smaller than per charge in double, 11-15), regressors (u, v_L, v_R), pairs (0,0)
+    // (0,1) (0,2) (1,1) (1,2) (2,2)
+    float edgeYR[EdgeMoments::NReg][ChargeSums::NSums];
+    float edgeYRR[EdgeMoments::NPairs][ChargeSums::NSums];
+    float edgeZR[EdgeMoments::NReg][ChargeSums::NSums];
+    float edgeZRR[EdgeMoments::NPairs][ChargeSums::NSums];
     if (!edgeMoments.empty()) {
-      sumsTree.Branch("yR", edgeYR, Form("yR[2][%d][%d]/D", EdgeMoments::NReg, ChargeSums::NSums));
-      sumsTree.Branch("yRR", edgeYRR, Form("yRR[2][%d][%d]/D", EdgeMoments::NPairs, ChargeSums::NSums));
-      sumsTree.Branch("zR", edgeZR, Form("zR[2][%d][%d]/D", EdgeMoments::NReg, ChargeSums::NSums));
-      sumsTree.Branch("zRR", edgeZRR, Form("zRR[2][%d][%d]/D", EdgeMoments::NPairs, ChargeSums::NSums));
+      sumsTree.Branch("yR", edgeYR, Form("yR[%d][%d]/F", EdgeMoments::NReg, ChargeSums::NSums));
+      sumsTree.Branch("yRR", edgeYRR, Form("yRR[%d][%d]/F", EdgeMoments::NPairs, ChargeSums::NSums));
+      sumsTree.Branch("zR", edgeZR, Form("zR[%d][%d]/F", EdgeMoments::NReg, ChargeSums::NSums));
+      sumsTree.Branch("zRR", edgeZRR, Form("zRR[%d][%d]/F", EdgeMoments::NPairs, ChargeSums::NSums));
       sumsTree.GetUserInfo()->Add(new TNamed("edgeRegressors", "u = IDC of the side - mean; v_L, v_R = edge dipole (um) of the sector's boundary s-1|s, s|s+1 - mean; pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)"));
       sumsTree.GetUserInfo()->Add(new TNamed("edgeTable", edgeTableFile.data()));
       std::string means;
@@ -3181,16 +3183,18 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                   momentsZU[charge][sum] = moments.zU[sum];
                   momentsZUU[charge][sum] = moments.zUU[sum];
                 }
-                if (!edgeMoments.empty()) {
-                  const auto& moments = edgeMoments[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][charge];
-                  for (int k = 0; k < EdgeMoments::NReg; ++k) {
-                    edgeYR[charge][k][sum] = moments.yR[k][sum];
-                    edgeZR[charge][k][sum] = moments.zR[k][sum];
-                  }
-                  for (int pair = 0; pair < EdgeMoments::NPairs; ++pair) {
-                    edgeYRR[charge][pair][sum] = moments.yRR[pair][sum];
-                    edgeZRR[charge][pair][sum] = moments.zRR[pair][sum];
-                  }
+              }
+            }
+            if (!edgeMoments.empty()) {
+              const auto& moments = edgeMoments[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz];
+              for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+                for (int k = 0; k < EdgeMoments::NReg; ++k) {
+                  edgeYR[k][sum] = float(moments.yR[k][sum]);
+                  edgeZR[k][sum] = float(moments.zR[k][sum]);
+                }
+                for (int pair = 0; pair < EdgeMoments::NPairs; ++pair) {
+                  edgeYRR[pair][sum] = float(moments.yRR[pair][sum]);
+                  edgeZRR[pair][sum] = float(moments.zRR[pair][sum]);
                 }
               }
             }
