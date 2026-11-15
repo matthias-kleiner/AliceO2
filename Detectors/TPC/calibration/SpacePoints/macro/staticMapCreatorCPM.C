@@ -879,6 +879,117 @@ struct IdcMoments {
   }
 };
 
+/// The regressors of the sector-edge fluctuations per second (edgeTableFile, from o2_macros gsi/edgedipole/makeEdgeTable.C): text lines
+/// "<time ms> <IDC A> <IDC C> <v_0> ... <v_35>" (v_b = the smoothed edge dipole Dc of boundary b = sector s | s + 1 on the same side,
+/// b = 0..17 A, 18..35 C, in um; "nan" = no value). Every column is centred on its mean over the table; looked up by the TF time
+/// (nearest entry within maxGapMS); a missing value enters as 0 (= the mean). No CCDB call inside the TF loop.
+struct EdgeTable {
+  static constexpr int NBoundaries = 36;
+  static constexpr int NColumns = 2 + NBoundaries; ///< IDC A, IDC C, v_0 .. v_35
+  std::vector<long> timeMS;
+  std::vector<std::array<float, NColumns>> values; ///< centred; NaN = no value
+  std::array<double, NColumns> mean{};
+  long maxGapMS = 500;
+
+  bool load(const std::string& fileName)
+  {
+    std::ifstream input(fileName);
+    std::string line;
+    std::array<double, NColumns> sum{};
+    std::array<long, NColumns> count{};
+    while (std::getline(input, line)) {
+      if (line.empty() || line[0] == '#') {
+        continue;
+      }
+      std::istringstream fields(line);
+      long time = 0;
+      std::array<float, NColumns> row{};
+      std::string token;
+      if (!(fields >> time)) {
+        continue;
+      }
+      int column = 0;
+      for (; column < NColumns && fields >> token; ++column) {
+        row[column] = (token == "nan" || token == "-nan") ? NAN : std::stof(token);
+        if (std::isfinite(row[column])) {
+          sum[column] += row[column];
+          ++count[column];
+        }
+      }
+      if (column != NColumns) {
+        LOGP(fatal, "edgeTableFile {}: {} columns after the time instead of {} in line '{}'", fileName, column, NColumns, line);
+      }
+      timeMS.push_back(time);
+      values.push_back(row);
+    }
+    for (int column = 0; column < NColumns; ++column) {
+      mean[column] = count[column] ? sum[column] / count[column] : 0.;
+    }
+    for (auto& row : values) {
+      for (int column = 0; column < NColumns; ++column) {
+        row[column] -= mean[column];
+      }
+    }
+    for (size_t i = 1; i < timeMS.size(); ++i) {
+      if (timeMS[i] < timeMS[i - 1]) {
+        LOGP(fatal, "edgeTableFile {}: times not sorted (line {})", fileName, i + 1);
+      }
+    }
+    return !timeMS.empty();
+  }
+
+  /// the centred row nearest to tfTimeMS within maxGapMS, nullptr if none
+  const std::array<float, NColumns>* lookup(long tfTimeMS) const
+  {
+    const auto upper = std::lower_bound(timeMS.begin(), timeMS.end(), tfTimeMS);
+    long best = -1;
+    long bestGap = maxGapMS + 1;
+    for (const auto candidate : {upper - timeMS.begin(), upper - timeMS.begin() - 1}) {
+      if (candidate >= 0 && candidate < long(timeMS.size()) && std::abs(timeMS[candidate] - tfTimeMS) < bestGap) {
+        best = candidate;
+        bestGap = std::abs(timeMS[candidate] - tfTimeMS);
+      }
+    }
+    return best < 0 ? nullptr : &values[best];
+  }
+
+  /// boundaries of sector sec (0..35): low-y side s - 1 | s, high-y side s | s + 1 (same side of the TPC)
+  static int boundaryLow(int sec) { return (sec / 18) * 18 + (sec % 18 + 17) % 18; }
+  static int boundaryHigh(int sec) { return sec; }
+};
+
+/// Per voxel and charge the moments of the residual slope sums in the regressors r = (u, v_L, v_R) of the sector-edge fluctuations
+/// (edgeTableFile): u = IDC of the voxel's side, v_L / v_R = edge dipole of the sector's low-y / high-y boundary (all centred). Per
+/// channel the first moments sum r_k S (k = 0..2) and the second moments sum r_k r_l S (pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)) of
+/// the six sums S of ChargeSums. With them the voxel model can be fitted with terms linear in the regressors,
+/// D(r) = D0 + D1 u + E_L v_L + E_R v_R, in all three coordinates (o2_macros gsi/binning/cbc2/idcDerivative.C).
+struct EdgeMoments {
+  static constexpr int NReg = 3;
+  static constexpr int NPairs = NReg * (NReg + 1) / 2;
+  std::array<std::array<double, ChargeSums::NSums>, NReg> yR{};
+  std::array<std::array<double, ChargeSums::NSums>, NPairs> yRR{};
+  std::array<std::array<double, ChargeSums::NSums>, NReg> zR{};
+  std::array<std::array<double, ChargeSums::NSums>, NPairs> zRR{};
+
+  static void fill(std::array<std::array<double, ChargeSums::NSums>, NReg>& first, std::array<std::array<double, ChargeSums::NSums>, NPairs>& second,
+                   double slope, double residual, double weight, const std::array<float, NReg>& r)
+  {
+    const double values[ChargeSums::NSums] = {weight, weight * slope, weight * slope * slope, weight * residual, weight * slope * residual, weight * residual * residual};
+    int pair = 0;
+    for (int k = 0; k < NReg; ++k) {
+      for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+        first[k][sum] += r[k] * values[sum];
+      }
+      for (int l = k; l < NReg; ++l, ++pair) {
+        const double rr = double(r[k]) * r[l];
+        for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+          second[pair][sum] += rr * values[sum];
+        }
+      }
+    }
+  }
+};
+
 struct VoxelSolution {
   std::array<double, 3> value{}; ///< dX, dY, dZ
   std::array<double, 3> error{}; ///< scaled by sqrt(chi2Scale)
@@ -948,6 +1059,8 @@ struct TFPackage {
   int iEntry = 0;
   float idcU = 0.f;    // IDC of the TF - IdcTable::reference (IDC moments of the residual slope sums)
   bool hasIDC = false; // the IDC table has an entry for this TF
+  std::array<float, EdgeTable::NColumns> edge{}; // centred edge-table row of this TF (IDC A, IDC C, v_0..v_35); NaN = no value
+  bool hasEdge = false;                          // the edge table has an entry for this TF
   std::vector<TrackDataCompact> trackRefsVec;
   std::vector<TrackData> trackDataVec;
   std::vector<UnbinnedResid> unbinnedResidualsVec;
@@ -1074,6 +1187,9 @@ void doFileProcessing(const int iThread,
                       const IdcTable& idcTable,                          // IDC per TF for idcMoments
                       std::vector<std::array<IdcMoments, 2>>& idcMoments, // as slopeSums; empty: no IDC moments
                       std::atomic<long>& nTFsWithoutIDC,
+                      const EdgeTable& edgeTable,                            // regressors of the sector-edge fluctuations per second
+                      std::vector<std::array<EdgeMoments, 2>>& edgeMoments, // as slopeSums; empty: no edge moments
+                      std::atomic<long>& nTFsWithoutEdge,
                       const int slopeWeightMode,   // see staticMapCreatorCPM
                       const float slopeWeightFloor, // see staticMapCreatorCPM
                       const float slopeWeightCovScale, // see staticMapCreatorCPM
@@ -1754,6 +1870,15 @@ void doFileProcessing(const int iThread,
             ++nTFsWithoutIDC;
           }
         }
+        if (!edgeMoments.empty()) {
+          const auto* row = edgeTable.lookup(tfTimeInMS);
+          pkg->hasEdge = row != nullptr;
+          if (row) {
+            pkg->edge = *row;
+          } else {
+            ++nTFsWithoutEdge;
+          }
+        }
         pkg->trackRefsVec = **trackRefs;
         pkg->trackDataVec = **trackData;
         pkg->unbinnedResidualsVec = **unbinnedResiduals;
@@ -1993,6 +2118,14 @@ void doFileProcessing(const int iThread,
               auto& moments = idcMoments[voxelIndex][charge];
               IdcMoments::fill(moments.yU, moments.yUU, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, weightY, pkg->idcU);
               IdcMoments::fill(moments.zU, moments.zUU, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, weightZ, pkg->idcU);
+            }
+            if (!edgeMoments.empty() && pkg->hasEdge) {
+              // r = (IDC of the side, edge dipole of the low-y and high-y boundary of the sector), centred; no value -> 0 (the mean)
+              const auto value = [&](int column) { const float v = pkg->edge[column]; return std::isfinite(v) ? v : 0.f; };
+              const std::array<float, EdgeMoments::NReg> r = {value(sec < 18 ? 0 : 1), value(2 + EdgeTable::boundaryLow(sec)), value(2 + EdgeTable::boundaryHigh(sec))};
+              auto& moments = edgeMoments[voxelIndex][charge];
+              EdgeMoments::fill(moments.yR, moments.yRR, tgSlp, residIn.dy * param::MaxResid / 0x7fff + clusterBiasDy, weightY, r);
+              EdgeMoments::fill(moments.zR, moments.zRR, tgl * std::sqrt(1. + tgSlp * tgSlp), residIn.dz * param::MaxResid / 0x7fff, weightZ, r);
             }
           }
 
@@ -2320,9 +2453,14 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                          float slopeWeightCovScale = 1.f,       // slopeWeightMode 1: factor a on the reference's covariance in the weight,
                                                                 // y: c^2 / (c^2 (sigma_cl^2 + a covY) + b), z: 1 / (sigma_cl^2 + a covZ + b);
                                                                 // a > 1 weights the multiple scattering (low pt) down further than b = 0 can
-                         float slopeWeightQ2PtSigRef = 0.f)     // slopeWeightMode 1, > 0: per-track factor 1 / (1 + sigma(q/pt)^2 / ref^2) on the
+                         float slopeWeightQ2PtSigRef = 0.f,     // slopeWeightMode 1, > 0: per-track factor 1 / (1 + sigma(q/pt)^2 / ref^2) on the
                                                                 // weight, sigma(q/pt) of the incoming ITS reference (c/GeV); the CVF's
                                                                 // cvfQ2PtSigRef: smaller ref = low pt weighted down more. 0 = off
+                         std::string edgeTableFile = "")        // with writeSlopeSums: regressor table of the sector-edge fluctuations per second
+                                                                // (o2_macros gsi/edgedipole/makeEdgeTable.C: "<time ms> <IDC A> <IDC C> <v_0..v_35>")
+                                                                // -> moments of the residual slope sums in r = (IDC of the side, edge dipole of the
+                                                                // sector's two boundaries) (fineSums branches yR, yRR, zR, zRR; see EdgeMoments);
+                                                                // ~1.7 kB per voxel. Not together with idcTableFile. Empty (default): off
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2578,6 +2716,21 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   if (!idcMoments.empty()) {
     LOGP(info, "IDC moments of the residual slope sums: {} table entries from {}, reference IDC {:.5f}", idcTable.timeMS.size(), idcTableFile, idcTable.reference);
   }
+  EdgeTable edgeTable;
+  std::atomic<long> nTFsWithoutEdge{0};
+  if (!edgeTableFile.empty()) {
+    if (!idcTableFile.empty()) {
+      LOGP(fatal, "edgeTableFile and idcTableFile together: the edge table carries the IDC of each side, use it alone");
+    }
+    if (!(useSlopeSums && edgeTable.load(edgeTableFile))) {
+      LOGP(fatal, "edgeTableFile {}: no entries read, or the residual slope sums are off (writeSlopeSums)", edgeTableFile);
+    }
+  }
+  std::vector<std::array<EdgeMoments, 2>> edgeMoments(edgeTable.timeMS.empty() ? 0 : voxels.size());
+  if (!edgeMoments.empty()) {
+    LOGP(info, "edge moments of the residual slope sums: {} seconds from {}, mean IDC A {:.4f}, C {:.4f}; {:.1f} GB for the moments", edgeTable.timeMS.size(), edgeTableFile,
+         edgeTable.mean[0], edgeTable.mean[1], edgeMoments.size() * sizeof(std::array<EdgeMoments, 2>) / 1e9);
+  }
   LOGP(info, "voxResTree from the {}{}", voxelMethod == 1 ? "residual slope method" : "CPM", writeSlopeSums ? ", residual slope sums written (fineSums)" : "");
   if (slopeWeightMode != 0 && slopeWeightMode != 1) {
     LOGP(fatal, "slopeWeightMode {}: 0 (1 / sigma_cluster^2) or 1 (reference covariance + floor)", slopeWeightMode);
@@ -2647,6 +2800,9 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              std::cref(idcTable),
                              std::ref(idcMoments),
                              std::ref(nTFsWithoutIDC),
+                             std::cref(edgeTable),
+                             std::ref(edgeMoments),
+                             std::ref(nTFsWithoutEdge),
                              slopeWeightMode,
                              slopeWeightFloor,
                              slopeWeightCovScale,
@@ -2981,6 +3137,26 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
       sumsTree.GetUserInfo()->Add(new TNamed("idcTFsWithoutIDC", std::to_string(nTFsWithoutIDC.load()).data()));
       LOGP(info, "IDC moments: {} TFs without an IDC table entry within {} ms (their clusters enter with u = 0)", nTFsWithoutIDC.load(), idcTable.maxGapMS);
     }
+    // edge moments: [charge][regressor or pair][sum], regressors (u, v_L, v_R), pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)
+    static double edgeYR[2][EdgeMoments::NReg][ChargeSums::NSums];
+    static double edgeYRR[2][EdgeMoments::NPairs][ChargeSums::NSums];
+    static double edgeZR[2][EdgeMoments::NReg][ChargeSums::NSums];
+    static double edgeZRR[2][EdgeMoments::NPairs][ChargeSums::NSums];
+    if (!edgeMoments.empty()) {
+      sumsTree.Branch("yR", edgeYR, Form("yR[2][%d][%d]/D", EdgeMoments::NReg, ChargeSums::NSums));
+      sumsTree.Branch("yRR", edgeYRR, Form("yRR[2][%d][%d]/D", EdgeMoments::NPairs, ChargeSums::NSums));
+      sumsTree.Branch("zR", edgeZR, Form("zR[2][%d][%d]/D", EdgeMoments::NReg, ChargeSums::NSums));
+      sumsTree.Branch("zRR", edgeZRR, Form("zRR[2][%d][%d]/D", EdgeMoments::NPairs, ChargeSums::NSums));
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeRegressors", "u = IDC of the side - mean; v_L, v_R = edge dipole (um) of the sector's boundary s-1|s, s|s+1 - mean; pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)"));
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeTable", edgeTableFile.data()));
+      std::string means;
+      for (int column = 0; column < EdgeTable::NColumns; ++column) {
+        means += fmt::format("{}{:.4f}", column ? " " : "", edgeTable.mean[column]);
+      }
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeTableMeans", means.data())); // IDC A, IDC C, v_0..v_35
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeTFsWithoutEntry", std::to_string(nTFsWithoutEdge.load()).data()));
+      LOGP(info, "edge moments: {} TFs without an edge table entry within {} ms (their clusters enter with r = 0)", nTFsWithoutEdge.load(), edgeTable.maxGapMS);
+    }
     for (int isec = 0; isec < NSectors; isec++) {
       for (int iz = 0; iz < nZ2XBins; iz++) {
         for (int iy = 0; iy < nY2XBins; iy++) {
@@ -3004,6 +3180,17 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                   momentsYUU[charge][sum] = moments.yUU[sum];
                   momentsZU[charge][sum] = moments.zU[sum];
                   momentsZUU[charge][sum] = moments.zUU[sum];
+                }
+                if (!edgeMoments.empty()) {
+                  const auto& moments = edgeMoments[((isec * NRows + ix) * nY2XBins + iy) * nZ2XBins + iz][charge];
+                  for (int k = 0; k < EdgeMoments::NReg; ++k) {
+                    edgeYR[charge][k][sum] = moments.yR[k][sum];
+                    edgeZR[charge][k][sum] = moments.zR[k][sum];
+                  }
+                  for (int pair = 0; pair < EdgeMoments::NPairs; ++pair) {
+                    edgeYRR[charge][pair][sum] = moments.yRR[pair][sum];
+                    edgeZRR[charge][pair][sum] = moments.zRR[pair][sum];
+                  }
                 }
               }
             }
