@@ -958,6 +958,93 @@ struct EdgeTable {
   static int boundaryHigh(int sec) { return sec; }
 };
 
+/// One vetoed (sector, phi range) of a TF, see SectorVeto.
+struct SectorVetoRange {
+  int sector = 0;
+  bool wholeSector = true;
+  float phiLo = 0.f, phiHi = 0.f; ///< deg, global phi
+};
+
+/// Time veto of TPC cluster residuals per sector and phi range (vetoSectorFile): text lines
+/// "<sector> <first ms> <last ms> [<phiLo> <phiHi>]" (# comments; sector 0..17 A, 18..35 C; phi in deg, global, may lie outside
+/// [-180, 180]; without a phi range the whole sector). A TF whose time lies in [first, last] drops the residuals of the clusters of that
+/// sector inside the phi range. Made by buildVeto.py (o2_macros gsi/edgedipole/TASK_SPIKES_1116) from the ITS TimeDeadMap: short dropouts of
+/// outer-barrel ITS staves change which ITS-TPC tracks reach the TPC at that phi and bias the residuals there for the 5-10 s of the
+/// dropout (run 568041: up to 0.7 mm in the sector-edge dipole; reach = stave arc +- 6 deg, both TPC sides).
+struct SectorVeto {
+  struct Entry {
+    long first = 0, last = 0;
+    SectorVetoRange range;
+  };
+  std::vector<Entry> entries; ///< sorted by first
+  long maxLengthMS = 0;
+
+  bool load(const std::string& fileName)
+  {
+    std::ifstream input(fileName);
+    if (!input) {
+      LOGP(fatal, "vetoSectorFile {}: cannot open", fileName);
+    }
+    std::string line;
+    while (std::getline(input, line)) {
+      line = line.substr(0, line.find('#'));
+      std::istringstream fields(line);
+      Entry entry;
+      if (!(fields >> entry.range.sector >> entry.first >> entry.last)) {
+        continue;
+      }
+      if (entry.range.sector < 0 || entry.range.sector >= 36 || entry.last < entry.first) {
+        LOGP(fatal, "vetoSectorFile {}: bad line '{}'", fileName, line);
+      }
+      float lo = 0.f, hi = 0.f;
+      if (fields >> lo >> hi) {
+        entry.range.wholeSector = false;
+        entry.range.phiLo = lo;
+        entry.range.phiHi = hi;
+      }
+      maxLengthMS = std::max(maxLengthMS, entry.last - entry.first);
+      entries.push_back(entry);
+    }
+    std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) { return a.first < b.first; });
+    return !entries.empty();
+  }
+
+  /// the ranges vetoed at tfTimeMS (appended to out)
+  void collect(long tfTimeMS, std::vector<SectorVetoRange>& out) const
+  {
+    // entries with first <= tfTimeMS, of which only those starting within maxLengthMS can still be active
+    auto it = std::upper_bound(entries.begin(), entries.end(), tfTimeMS, [](long t, const Entry& e) { return t < e.first; });
+    while (it != entries.begin()) {
+      --it;
+      if (it->first < tfTimeMS - maxLengthMS) {
+        break;
+      }
+      if (tfTimeMS <= it->last) {
+        out.push_back(it->range);
+      }
+    }
+  }
+
+  /// is the cluster at local (x, y) of sector sec inside one of the ranges?
+  static bool isVetoed(const std::vector<SectorVetoRange>& ranges, int sec, float x, float y)
+  {
+    for (const auto& range : ranges) {
+      if (range.sector != sec) {
+        continue;
+      }
+      if (range.wholeSector) {
+        return true;
+      }
+      const float phi = 10.f + 20.f * (sec % 18) + std::atan2(y, x) * TMath::RadToDeg();
+      auto wrap = [](float a) { return a - 360.f * std::floor((a + 180.f) / 360.f); }; // to [-180, 180)
+      if (wrap(phi - range.phiLo) >= 0.f && wrap(phi - range.phiHi) <= 0.f) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
 /// Per voxel (both charges together) the moments of the residual slope sums in the regressors r = (u, v_L, v_R) of the sector-edge fluctuations
 /// (edgeTableFile): u = IDC of the voxel's side, v_L / v_R = edge dipole of the sector's low-y / high-y boundary (all centred). Per
 /// channel the first moments sum r_k S (k = 0..2) and the second moments sum r_k r_l S (pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)) of
@@ -1061,6 +1148,7 @@ struct TFPackage {
   bool hasIDC = false; // the IDC table has an entry for this TF
   std::array<float, EdgeTable::NColumns> edge{}; // centred edge-table row of this TF (IDC A, IDC C, v_0..v_35); NaN = no value
   bool hasEdge = false;                          // the edge table has an entry for this TF
+  std::vector<SectorVetoRange> veto;             // sector / phi ranges vetoed in this TF (vetoSectorFile); empty: none
   std::vector<TrackDataCompact> trackRefsVec;
   std::vector<TrackData> trackDataVec;
   std::vector<UnbinnedResid> unbinnedResidualsVec;
@@ -1164,6 +1252,7 @@ void doFileProcessing(const int iThread,
                       const o2::tpc::cluster_bias::ClusterBiasCorrection& clusterBias,
                       std::vector<long int>& nEdgeClustersSkipped_thread,
                       std::vector<long int>& nFlagClustersSkipped_thread,
+                      std::vector<long int>& nVetoClustersSkipped_thread,
                       std::vector<long int>& nTracksSkippedByBadRangeList_thread,
                       std::vector<long int>& nTFs_thread,
                       std::vector<long int>& nTFsSkippedByBadRangeList_thread,
@@ -1190,6 +1279,8 @@ void doFileProcessing(const int iThread,
                       const EdgeTable& edgeTable,                            // regressors of the sector-edge fluctuations per second
                       std::vector<EdgeMoments>& edgeMoments,                // same index as voxels, both charges together; empty: no edge moments
                       std::atomic<long>& nTFsWithoutEdge,
+                      const SectorVeto& sectorVeto, // time veto per sector and phi range; empty: off
+                      std::atomic<long>& nTFsWithVeto,
                       const int slopeWeightMode,   // see staticMapCreatorCPM
                       const float slopeWeightFloor, // see staticMapCreatorCPM
                       const float slopeWeightCovScale, // see staticMapCreatorCPM
@@ -1277,6 +1368,7 @@ void doFileProcessing(const int iThread,
   std::vector<Vec3d> trackPosAtRow_worker(nTrackWorkers);
   std::vector<long int> nEdgeClustersSkipped_worker(nTrackWorkers, 0);
   std::vector<long int> nFlagClustersSkipped_worker(nTrackWorkers, 0);
+  std::vector<long int> nVetoClustersSkipped_worker(nTrackWorkers, 0);
   std::vector<Long64_t> trackCounter_local_worker(nTrackWorkers, 0);
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1879,6 +1971,12 @@ void doFileProcessing(const int iThread,
             ++nTFsWithoutEdge;
           }
         }
+        if (!sectorVeto.entries.empty()) {
+          sectorVeto.collect(tfTimeInMS, pkg->veto);
+          if (!pkg->veto.empty()) {
+            ++nTFsWithVeto;
+          }
+        }
         pkg->trackRefsVec = **trackRefs;
         pkg->trackDataVec = **trackData;
         pkg->unbinnedResidualsVec = **unbinnedResiduals;
@@ -2017,6 +2115,11 @@ void doFileProcessing(const int iThread,
             const float tgSlpCluster = residIn.isPositionOnly() ? 0.f : residIn.tgSlp * param::MaxTgSlp / 0x7fff;
             clusterBiasDy = clusterBias.dy(residIn.row, yPos, o2::tpc::cluster_bias::driftLength(zPos), tgSlpCluster, residIn.channel);
             yPos += clusterBiasDy;
+          }
+          // time veto of this sector / phi range in this TF (vetoSectorFile: short ITS stave dropouts), before anything is filled
+          if (!pkg->veto.empty() && SectorVeto::isVetoed(pkg->veto, sec, xPos, yPos)) {
+            ++nVetoClustersSkipped_worker[iWorker];
+            continue;
           }
           // exclude the edge pads as they are biased!
           // get max y-position of edge pad: pad centre last pad - pad width/2
@@ -2369,6 +2472,8 @@ void doFileProcessing(const int iThread,
         nEdgeClustersSkipped_worker[iWorker] = 0;
         nFlagClustersSkipped_thread[iThread] += nFlagClustersSkipped_worker[iWorker];
         nFlagClustersSkipped_worker[iWorker] = 0;
+        nVetoClustersSkipped_thread[iThread] += nVetoClustersSkipped_worker[iWorker];
+        nVetoClustersSkipped_worker[iWorker] = 0;
       }
     } // end of TF loop (consumer)
 
@@ -2456,11 +2561,16 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                          float slopeWeightQ2PtSigRef = 0.f,     // slopeWeightMode 1, > 0: per-track factor 1 / (1 + sigma(q/pt)^2 / ref^2) on the
                                                                 // weight, sigma(q/pt) of the incoming ITS reference (c/GeV); the CVF's
                                                                 // cvfQ2PtSigRef: smaller ref = low pt weighted down more. 0 = off
-                         std::string edgeTableFile = "")        // with writeSlopeSums: regressor table of the sector-edge fluctuations per second
+                         std::string edgeTableFile = "",        // with writeSlopeSums: regressor table of the sector-edge fluctuations per second
                                                                 // (o2_macros gsi/edgedipole/makeEdgeTable.C: "<time ms> <IDC A> <IDC C> <v_0..v_35>")
                                                                 // -> moments of the residual slope sums in r = (IDC of the side, edge dipole of the
                                                                 // sector's two boundaries) (fineSums branches yR, yRR, zR, zRR, both charges summed,
                                                                 // float; see EdgeMoments); ~0.9 kB per voxel in memory, 0.4 kB written. Not together with idcTableFile. Empty (default): off
+                         std::string vetoSectorFile = "")       // time veto of cluster residuals per sector and phi range (see SectorVeto): lines
+                                                                // "<sector> <first ms> <last ms> [<phiLo> <phiHi>]"; a TF inside [first, last] drops the
+                                                                // clusters of that sector in the phi range (deg, global; none = whole sector) before
+                                                                // anything is filled. Short ITS stave dropouts, buildVeto.py (o2_macros
+                                                                // gsi/edgedipole/TASK_SPIKES_1116). Empty (default): off
 {
   LOGP(info, "TrackData::filterFlag {}, UnbinnedResid::rejected {}",
        HasFilterFlagMember<TrackData>::value ? "available" : "NOT available (old O2, cut skipped)",
@@ -2688,6 +2798,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   std::vector<long int> nEdgeClustersSkipped_thread(nFileThreads, 0); // Does NEED to be merged
   long int nFlagClustersSkipped{0};
   std::vector<long int> nFlagClustersSkipped_thread(nFileThreads, 0); // Does NEED to be merged
+  long int nVetoClustersSkipped{0};
+  std::vector<long int> nVetoClustersSkipped_thread(nFileThreads, 0); // Does NEED to be merged
   long int nTracksSkippedByBadRangeList{0};
   std::vector<long int> nTracksSkippedByBadRangeList_thread(nFileThreads, 0); // Does NEED to be merged
   long int nTFs{0};
@@ -2730,6 +2842,14 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
   if (!edgeMoments.empty()) {
     LOGP(info, "edge moments of the residual slope sums: {} seconds from {}, mean IDC A {:.4f}, C {:.4f}; {:.1f} GB for the moments", edgeTable.timeMS.size(), edgeTableFile,
          edgeTable.mean[0], edgeTable.mean[1], edgeMoments.size() * sizeof(EdgeMoments) / 1e9);
+  }
+  SectorVeto sectorVeto;
+  std::atomic<long> nTFsWithVeto{0};
+  if (!vetoSectorFile.empty()) {
+    if (!sectorVeto.load(vetoSectorFile)) {
+      LOGP(fatal, "vetoSectorFile {}: no entries read", vetoSectorFile);
+    }
+    LOGP(info, "time veto per sector and phi range: {} entries from {}, longest {} ms", sectorVeto.entries.size(), vetoSectorFile, sectorVeto.maxLengthMS);
   }
   LOGP(info, "voxResTree from the {}{}", voxelMethod == 1 ? "residual slope method" : "CPM", writeSlopeSums ? ", residual slope sums written (fineSums)" : "");
   if (slopeWeightMode != 0 && slopeWeightMode != 1) {
@@ -2777,6 +2897,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              std::cref(clusterBias),
                              std::ref(nEdgeClustersSkipped_thread),
                              std::ref(nFlagClustersSkipped_thread),
+                             std::ref(nVetoClustersSkipped_thread),
                              std::ref(nTracksSkippedByBadRangeList_thread),
                              std::ref(nTFs_thread),
                              std::ref(nTFsSkippedByBadRangeList_thread),
@@ -2803,6 +2924,8 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
                              std::cref(edgeTable),
                              std::ref(edgeMoments),
                              std::ref(nTFsWithoutEdge),
+                             std::cref(sectorVeto),
+                             std::ref(nTFsWithVeto),
                              slopeWeightMode,
                              slopeWeightFloor,
                              slopeWeightCovScale,
@@ -2833,6 +2956,7 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     lumiSumCTP += lumiSumCTP_thread[iThread];
     nEdgeClustersSkipped += nEdgeClustersSkipped_thread[iThread];
     nFlagClustersSkipped += nFlagClustersSkipped_thread[iThread];
+    nVetoClustersSkipped += nVetoClustersSkipped_thread[iThread];
     nTracksSkippedByBadRangeList += nTracksSkippedByBadRangeList_thread[iThread];
     nTFs += nTFs_thread[iThread];
     nTFsSkippedByBadRangeList += nTFsSkippedByBadRangeList_thread[iThread];
@@ -2902,6 +3026,9 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
     isBadCalib = true;
   } else {
     LOGP(info, "clusterFlagMask 0x{:x}: skipped {} TPC cluster residuals with a flag of the mask", clusterFlagMask, nFlagClustersSkipped);
+    if (!sectorVeto.entries.empty()) {
+      LOGP(info, "vetoSectorFile: {} TFs with a vetoed sector / phi range, {} TPC cluster residuals skipped", nTFsWithVeto.load(), nVetoClustersSkipped);
+    }
     LOGP(info, "Processed tracks: {} ({}), max requested tracks: {} ({}), skipped {} edge clusters, skipped tracks by badRangeList {} ({}), skipped TFs outside requested time window {} of {} ({:.1f}%)", nTracksProcessed_final, nTracksProcessed_final / nSlices, maxTracks, maxTracksPerSlice, nEdgeClustersSkipped, nTracksSkippedByBadRangeList, nTracksSkippedByBadRangeList / nSlices, nTFsSkippedByTimeWindow, nTFs, (nTFs > 0) ? (100.0 * nTFsSkippedByTimeWindow / nTFs) : 0.0);
     LOGP(info, "Processed time: {}ms, skipped time by badRangeList {}ms ({})", nTFs * o2::constants::lhc::LHCOrbitMUS * 1.e-3 * 32, nTFsSkippedByBadRangeList * o2::constants::lhc::LHCOrbitMUS * 1.e-3 * 32, float(nTFsSkippedByBadRangeList) / float(nTFs));
   }
@@ -3158,6 +3285,11 @@ void staticMapCreatorCPM(std::string fileInput = "files.txt",
       sumsTree.GetUserInfo()->Add(new TNamed("edgeTableMeans", means.data())); // IDC A, IDC C, v_0..v_35
       sumsTree.GetUserInfo()->Add(new TNamed("edgeTFsWithoutEntry", std::to_string(nTFsWithoutEdge.load()).data()));
       LOGP(info, "edge moments: {} TFs without an edge table entry within {} ms (their clusters enter with r = 0)", nTFsWithoutEdge.load(), edgeTable.maxGapMS);
+    }
+    if (!sectorVeto.entries.empty()) {
+      sumsTree.GetUserInfo()->Add(new TNamed("vetoSectorFile", vetoSectorFile.data()));
+      sumsTree.GetUserInfo()->Add(new TNamed("vetoTFs", std::to_string(nTFsWithVeto.load()).data()));
+      sumsTree.GetUserInfo()->Add(new TNamed("vetoClusters", std::to_string(nVetoClustersSkipped).data()));
     }
     for (int isec = 0; isec < NSectors; isec++) {
       for (int iz = 0; iz < nZ2XBins; iz++) {
