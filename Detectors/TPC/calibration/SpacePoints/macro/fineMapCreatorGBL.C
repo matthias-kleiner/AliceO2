@@ -85,6 +85,10 @@
 /// inward, worst for tracks riding along the edge. Instead the clusters within edgeFitPads of the edge at the track WITHOUT the cluster are
 /// practically out of the fit (errors x RemovedSigmaScale), re-decided after every pass; the first pass by the measured position with a margin
 /// of one pad, which with MinFitClusters also drops the tracks riding along the edge over most of their length.
+/// centreFitPads > 0 (with edgeFitPads): the same at the sector centre (the IROC / OROC spacer cross along y = 0), in the rows
+/// centreFitRowFirst - centreFitRowLast: clusters within centreFitPads of the centre line at the track WITHOUT the cluster practically out of the
+/// fit, still summed, so that the cross is measured against a prediction from clusters outside it; with MinFitClusters the tracks riding
+/// along the centre (whose prediction moves with the shifted clusters, so that cluster - prediction cannot see the shift) drop out.
 /// deadPadFile ("sector row pad", pad = pad number in the row; the dead channel map): a dead pad cuts the charge cloud like the pad plane's edge, so
 /// the clusters beside it are shifted by up to a pad. Clusters within deadPadMargin pads of a dead pad at the track WITHOUT the cluster are out of the fit
 /// (with edgeFitPads) and not summed (status 8), and the voxels there are left to the smoothing.
@@ -1327,6 +1331,14 @@ struct EdgeFitCorrection {
   const RowGeometry* geometry = nullptr;
   double pads = 0.; ///< edgeFitPads: clusters within this many pads of the edge at the track without the cluster out of the fit
   const DeadPads* deadPads = nullptr; ///< with edgeFitPads: also the clusters beside a dead pad at the track without the cluster out of the fit
+  double centrePads = 0.;             ///< centreFitPads: clusters within this many pads of the centre line (y = 0) out of the fit (rows below)
+  int centreRowFirst = 0;
+  int centreRowLast = -1;
+  /// within centrePads (+ margin) of the centre line at pad-plane y [cm] in a row of pad width `width`
+  bool inCentre(int row, double padY, double width, double margin = 0.) const
+  {
+    return centrePads > 0. && row >= centreRowFirst && row <= centreRowLast && std::abs(padY) < (centrePads + margin) * width;
+  }
 };
 
 bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result, const EdgeFitCorrection* edgeFit = nullptr)
@@ -1518,7 +1530,8 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result,
         const double side = cluster.padY0 < 0. ? -1. : 1.;
         const double dPredicted = (geometry.padPlaneEdge[cluster.row] - side * predictedPadY) / width;
         if (edgeFit->pads > 0.) {
-          const bool removed = dPredicted < edgeFit->pads || (edgeFit->deadPads && edgeFit->deadPads->near(cluster.sector, cluster.row, predictedPadY));
+          const bool removed = dPredicted < edgeFit->pads || (edgeFit->deadPads && edgeFit->deadPads->near(cluster.sector, cluster.row, predictedPadY)) ||
+                               edgeFit->inCentre(cluster.row, predictedPadY, width);
           newEdgeShift |= removed != cluster.removed;
           cluster.removed = removed;
         }
@@ -2121,7 +2134,8 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     if (context.edgeFit.pads > 0.) {
       cluster.excluded = cluster.flagged || (isExcludedRow(cluster.row) && !(context.lastRowsInFit && cluster.row >= NRows - EdgeRows));
       cluster.removed = context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY) < (context.edgeFit.pads + 1.) * context.geometry->padWidth[cluster.row] ||
-                        context.deadPads.near(cluster.sector, cluster.row, cluster.padY, 1.);
+                        context.deadPads.near(cluster.sector, cluster.row, cluster.padY, 1.) ||
+                        context.edgeFit.inCentre(cluster.row, cluster.padY, context.geometry->padWidth[cluster.row], 1.);
     } else {
       cluster.excluded = cluster.flagged || isExcludedFromFit(cluster.row, context.edgeWeightByTruth && std::isfinite(cluster.yTrue) ? cluster.yTrue : cluster.padY, *context.geometry);
     }
@@ -2857,7 +2871,11 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        int padDriftBins = 3,                                                         // padSums: drift bins over 0 - 250 cm
                        std::string injectEdge = "",                                                  // test: "A,lambda,B,u0" (um, pads, um, |u|): known edge distortion added to the TPC
                                                                                                      // clusters' y, see injectEdgeY; empty: off
-                       bool injectSumOnly = false)                                                   // test, with injectEdge: clusters untouched, the injected shift summed instead of the residual
+                       bool injectSumOnly = false,                                                   // test, with injectEdge: clusters untouched, the injected shift summed instead of the residual
+                       float centreFitPads = 0.f,                                                    // > 0 (with edgeFitPads): clusters within this many pads of the centre line at the track
+                                                                                                     // without the cluster out of the fit, still summed (centre riders drop by MinFitClusters)
+                       int centreFitRowFirst = 0,                                                    // centreFitPads: first row
+                       int centreFitRowLast = 151)                                                   // centreFitPads: last row
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -3040,6 +3058,12 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   context.edgeWeightByTruth = edgeWeightByTruth;
   context.edgeFit.geometry = &geometry;
   context.edgeFit.pads = edgeFitPads;
+  if (centreFitPads > 0.f && !(edgeFitPads > 0.f)) {
+    LOGP(fatal, "centreFitPads needs edgeFitPads > 0 (the same out-of-fit mechanism)");
+  }
+  context.edgeFit.centrePads = centreFitPads;
+  context.edgeFit.centreRowFirst = centreFitRowFirst;
+  context.edgeFit.centreRowLast = centreFitRowLast;
   context.lastRowsInFit = lastRowsInFit;
   // env FINE_DRIFT_NORM="vD0 t00 bA bC" (dcaseries vdJointFit.C outMode 1, 11-14): every cluster's z from its file's drift reference
   // (records tree) onto the common one, z += s * ((1 - vD0 / vD_file) * L + vD0 * (t00 - t0_file) - b_side * L), L = 250 - |z|, s = +1 A,
@@ -3095,6 +3119,10 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   if (edgeFitPads > 0.f) {
     LOGP(info, "Clusters within {} pads of the edge at the track without the cluster out of the fit (instead of the de-weighting by the measured position)", edgeFitPads);
+  }
+  if (centreFitPads > 0.f) {
+    LOGP(info, "Clusters within {} pads of the sector centre line at the track without the cluster out of the fit, rows {}-{} (still summed)", centreFitPads,
+         centreFitRowFirst, centreFitRowLast);
   }
   if (truthClusters) {
     LOGP(info, "TEST: TPC clusters of the edge-tree tracks at the MC truth + noise");
