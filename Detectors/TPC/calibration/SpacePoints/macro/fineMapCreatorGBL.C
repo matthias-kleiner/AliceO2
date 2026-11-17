@@ -89,6 +89,11 @@
 /// centreFitRowFirst - centreFitRowLast: clusters within centreFitPads of the centre line at the track WITHOUT the cluster practically out of the
 /// fit, still summed, so that the cross is measured against a prediction from clusters outside it; with MinFitClusters the tracks riding
 /// along the centre (whose prediction moves with the shifted clusters, so that cluster - prediction cannot see the shift) drop out.
+/// centreBiasFile (with centreFitPads): the spacer cross as a per-cluster table (a cluster truncation at the GEM spacer, not a distortion),
+/// lines "group class bin shift_um" (group 0 rows 0-9, 1 10-24, 2 25-62, 3 63-151; class -1 = all, 0 normal, 1 split pad / shared, 2 single pad
+/// on the pad centre; bin = 0.25 pads of the track's distance from y = 0, 0-23; shift = the push AWAY from the centre): subtracted from the
+/// summed residual by the track without the cluster and the class, like the edge table (bestEdgeBiasFile by d_pred), so the map holds only
+/// the distortion there; the soft centre zone of the merge should then be off (smoothVoxelMap.C softCentrePads 0).
 /// deadPadFile ("sector row pad", pad = pad number in the row; the dead channel map): a dead pad cuts the charge cloud like the pad plane's edge, so
 /// the clusters beside it are shifted by up to a pad. Clusters within deadPadMargin pads of a dead pad at the track WITHOUT the cluster are out of the fit
 /// (with edgeFitPads) and not summed (status 8), and the voxels there are left to the smoothing.
@@ -1325,6 +1330,53 @@ struct DeadPads {
   }
 };
 
+/// centreBiasFile: the per-cluster shift away from the sector centre line per row group x cluster class (-1 = all) x 0.25-pad bin of |y|
+struct CentreBiasTable {
+  static constexpr int NGroups = 4;
+  static constexpr int NClasses = 4; // class -1 (all), 0, 1, 2
+  static constexpr int NBins = 24;
+  std::array<double, NGroups * NClasses * NBins> shift{};
+  std::array<char, NGroups * NClasses * NBins> valid{};
+  static int group(int row) { return row < 10 ? 0 : (row < 25 ? 1 : (row < 63 ? 2 : 3)); }
+  bool load(const std::string& file)
+  {
+    std::ifstream in(file);
+    std::string line;
+    int n = 0;
+    while (std::getline(in, line)) {
+      if (line.empty() || line[0] == '#') {
+        continue;
+      }
+      std::istringstream f(line);
+      int g, c, b;
+      double v;
+      if (!(f >> g >> c >> b >> v) || g < 0 || g >= NGroups || c < -1 || c > 2 || b < 0 || b >= NBins) {
+        continue;
+      }
+      const size_t k = (size_t(g) * NClasses + (c + 1)) * NBins + b;
+      shift[k] = v * 1e-4;
+      valid[k] = 1;
+      ++n;
+    }
+    return n > 0;
+  }
+  /// shift [cm] away from the centre at |y| [pads] (a missing class falls back to the all-class entry)
+  double at(int row, int cls, double padsFromCentre) const
+  {
+    const int b = int(padsFromCentre / 0.25);
+    if (b < 0 || b >= NBins) {
+      return 0.;
+    }
+    const int g = group(row);
+    const size_t kc = (size_t(g) * NClasses + (cls + 1)) * NBins + b;
+    if (cls >= 0 && valid[kc]) {
+      return shift[kc];
+    }
+    const size_t ka = (size_t(g) * NClasses) * NBins + b;
+    return valid[ka] ? shift[ka] : 0.;
+  }
+};
+
 /// edgeBiasInFit: the edge part of the cluster bias vs the unbiased track position, applied to the clusters between the fit passes
 struct EdgeFitCorrection {
   const o2::tpc::cluster_bias::ClusterBiasCorrection* table = nullptr;
@@ -1646,6 +1698,7 @@ struct FitContext {
   bool edgeWeightByTruth = false;                                             ///< test: the de-weighting within EdgePads decided at the truth
   bool edgeByPred = false;                                                    ///< edge cut, y/x bin and table lookup by the track without the cluster
   bool measuredFrameBins = false;                                             ///< voxels and fineMapInput lookup in the measured frame (before the map corrections), as stage 1 and the FT
+  const CentreBiasTable* centreBias = nullptr;                                ///< centreBiasFile: the spacer cross per cluster (by the track without the cluster)
   std::array<double, 4> injectEdge = {0., 0., 0., 0.};                        ///< test: known edge distortion (A [cm], lambda [pads], B [cm], u0), see injectEdgeY
   bool injectEdgeOn = false;                                                  ///< test: injectEdge given
   bool injectSumOnly = false;                                                 ///< test: sum the injected shift instead of the residual (the truth map)
@@ -2326,6 +2379,16 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
         edgeRecords[fit.active[point]].edgeCorr = side * bias;
       }
     }
+    if (context.centreBias) {
+      // the spacer-cross truncation: a shift away from the sector centre line, by the track without the cluster and the cluster class
+      const double width = context.geometry->padWidth[cluster.row];
+      const double sideC = predPadY < 0. ? -1. : 1.;
+      const double padMeas = (context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY0)) / width - 0.5;
+      const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
+      const double shift = context.centreBias->at(cluster.row, cls, std::abs(predPadY) / width);
+      contribution.residualY -= sideC * shift;
+      contribution.tableAddedY -= 1e4 * sideC * shift;
+    }
     contribution.weightZ = weight[1];
     if (context.padSums) {
       // the pad of the measured position (pad centres at integers), the residual as summed but without a fineMapInput added back
@@ -2875,7 +2938,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                        float centreFitPads = 0.f,                                                    // > 0 (with edgeFitPads): clusters within this many pads of the centre line at the track
                                                                                                      // without the cluster out of the fit, still summed (centre riders drop by MinFitClusters)
                        int centreFitRowFirst = 0,                                                    // centreFitPads: first row
-                       int centreFitRowLast = 151)                                                   // centreFitPads: last row
+                       int centreFitRowLast = 151,                                                   // centreFitPads: last row
+                       std::string centreBiasFile = "")                                              // the spacer cross as a per-cluster table (see CentreBiasTable); empty: off
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -3062,6 +3126,14 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     LOGP(fatal, "centreFitPads needs edgeFitPads > 0 (the same out-of-fit mechanism)");
   }
   context.edgeFit.centrePads = centreFitPads;
+  CentreBiasTable centreBias;
+  if (!centreBiasFile.empty()) {
+    if (!centreBias.load(centreBiasFile)) {
+      LOGP(fatal, "centreBiasFile {}: no table lines", centreBiasFile);
+    }
+    context.centreBias = &centreBias;
+    LOGP(info, "Spacer cross: per-cluster shift from {} subtracted from the summed residuals by the track without the cluster and the class", centreBiasFile);
+  }
   context.edgeFit.centreRowFirst = centreFitRowFirst;
   context.edgeFit.centreRowLast = centreFitRowLast;
   context.lastRowsInFit = lastRowsInFit;
