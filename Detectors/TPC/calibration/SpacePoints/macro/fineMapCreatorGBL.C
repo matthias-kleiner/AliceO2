@@ -93,7 +93,8 @@
 /// lines "group class bin shift_um" (group 0 rows 0-9, 1 10-24, 2 25-62, 3 63-151; class -1 = all, 0 normal, 1 split pad / shared, 2 single pad
 /// on the pad centre; bin = 0.25 pads of the track's distance from y = 0, 0-23; shift = the push AWAY from the centre): subtracted from the
 /// summed residual by the track without the cluster and the class, like the edge table (bestEdgeBiasFile by d_pred), so the map holds only
-/// the distortion there; the soft centre zone of the merge should then be off (smoothVoxelMap.C softCentrePads 0).
+/// the distortion there; the soft centre zone of the merge should then be off (smoothVoxelMap.C softCentrePads 0). The file may also hold
+/// lines "sector side row bin shift_um" (side 0 = -y, 1 = +y): a data-driven table per sector x side x pad row, used first where present.
 /// deadPadFile ("sector row pad", pad = pad number in the row; the dead channel map): a dead pad cuts the charge cloud like the pad plane's edge, so
 /// the clusters beside it are shifted by up to a pad. Clusters within deadPadMargin pads of a dead pad at the track WITHOUT the cluster are out of the fit
 /// (with edgeFitPads) and not summed (status 8), and the voxels there are left to the smoothing.
@@ -1331,41 +1332,76 @@ struct DeadPads {
 };
 
 /// centreBiasFile: the per-cluster shift away from the sector centre line per row group x cluster class (-1 = all) x 0.25-pad bin of |y|
+/// (lines "group class bin shift_um"), and optionally per sector x side (0 = -y, 1 = +y) x pad row x bin (lines "sector side row bin
+/// shift_um", the data-driven table), used first where present with the group x class entries as the fallback
 struct CentreBiasTable {
   static constexpr int NGroups = 4;
   static constexpr int NClasses = 4; // class -1 (all), 0, 1, 2
   static constexpr int NBins = 24;
+  static constexpr int NSectors = 36;
+  static constexpr int NRows = 152;
   std::array<double, NGroups * NClasses * NBins> shift{};
   std::array<char, NGroups * NClasses * NBins> valid{};
+  std::vector<float> rowShift; ///< [sector][side][row][bin], cm
+  std::vector<char> rowValid;
+  int nGroupEntries = 0;
+  int nRowEntries = 0;
   static int group(int row) { return row < 10 ? 0 : (row < 25 ? 1 : (row < 63 ? 2 : 3)); }
+  static size_t rowIndex(int sector, int side, int row, int bin) { return ((size_t(sector) * 2 + side) * NRows + row) * NBins + bin; }
   bool load(const std::string& file)
   {
     std::ifstream in(file);
     std::string line;
-    int n = 0;
     while (std::getline(in, line)) {
       if (line.empty() || line[0] == '#') {
         continue;
       }
       std::istringstream f(line);
-      int g, c, b;
-      double v;
-      if (!(f >> g >> c >> b >> v) || g < 0 || g >= NGroups || c < -1 || c > 2 || b < 0 || b >= NBins) {
-        continue;
+      std::vector<double> t;
+      double x;
+      while (f >> x) {
+        t.push_back(x);
       }
-      const size_t k = (size_t(g) * NClasses + (c + 1)) * NBins + b;
-      shift[k] = v * 1e-4;
-      valid[k] = 1;
-      ++n;
+      if (t.size() == 4) { // group class bin shift_um
+        const int g = int(t[0]);
+        const int c = int(t[1]);
+        const int b = int(t[2]);
+        if (g < 0 || g >= NGroups || c < -1 || c > 2 || b < 0 || b >= NBins) {
+          continue;
+        }
+        const size_t k = (size_t(g) * NClasses + (c + 1)) * NBins + b;
+        shift[k] = t[3] * 1e-4;
+        valid[k] = 1;
+        ++nGroupEntries;
+      } else if (t.size() == 5) { // sector side row bin shift_um
+        const int s = int(t[0]);
+        const int sd = int(t[1]);
+        const int r = int(t[2]);
+        const int b = int(t[3]);
+        if (s < 0 || s >= NSectors || sd < 0 || sd > 1 || r < 0 || r >= NRows || b < 0 || b >= NBins) {
+          continue;
+        }
+        if (rowShift.empty()) {
+          rowShift.assign(size_t(NSectors) * 2 * NRows * NBins, 0.f);
+          rowValid.assign(rowShift.size(), 0);
+        }
+        rowShift[rowIndex(s, sd, r, b)] = float(t[4] * 1e-4);
+        rowValid[rowIndex(s, sd, r, b)] = 1;
+        ++nRowEntries;
+      }
     }
-    return n > 0;
+    return nGroupEntries + nRowEntries > 0;
   }
-  /// shift [cm] away from the centre at |y| [pads] (a missing class falls back to the all-class entry)
-  double at(int row, int cls, double padsFromCentre) const
+  /// shift [cm] away from the centre at |y| [pads] on side (0 = -y, 1 = +y) of sector: the per-row entry if present, else the group x class
+  /// one (a missing class falls back to the all-class entry)
+  double at(int sector, int side, int row, int cls, double padsFromCentre) const
   {
     const int b = int(padsFromCentre / 0.25);
     if (b < 0 || b >= NBins) {
       return 0.;
+    }
+    if (!rowValid.empty() && sector >= 0 && sector < NSectors && row >= 0 && row < NRows && rowValid[rowIndex(sector, side, row, b)]) {
+      return rowShift[rowIndex(sector, side, row, b)];
     }
     const int g = group(row);
     const size_t kc = (size_t(g) * NClasses + (cls + 1)) * NBins + b;
@@ -2385,7 +2421,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       const double sideC = predPadY < 0. ? -1. : 1.;
       const double padMeas = (context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY0)) / width - 0.5;
       const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
-      const double shift = context.centreBias->at(cluster.row, cls, std::abs(predPadY) / width);
+      const double shift = context.centreBias->at(cluster.sector, predPadY < 0. ? 0 : 1, cluster.row, cls, std::abs(predPadY) / width);
       contribution.residualY -= sideC * shift;
       contribution.tableAddedY -= 1e4 * sideC * shift;
     }
@@ -3132,7 +3168,8 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
       LOGP(fatal, "centreBiasFile {}: no table lines", centreBiasFile);
     }
     context.centreBias = &centreBias;
-    LOGP(info, "Spacer cross: per-cluster shift from {} subtracted from the summed residuals by the track without the cluster and the class", centreBiasFile);
+    LOGP(info, "Spacer cross: per-cluster shift from {} ({} group x class, {} sector x side x row entries) subtracted from the summed residuals by the track without the cluster",
+         centreBiasFile, centreBias.nGroupEntries, centreBias.nRowEntries);
   }
   context.edgeFit.centreRowFirst = centreFitRowFirst;
   context.edgeFit.centreRowLast = centreFitRowLast;
