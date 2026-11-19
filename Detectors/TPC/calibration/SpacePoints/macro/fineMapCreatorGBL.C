@@ -95,6 +95,15 @@
 /// summed residual by the track without the cluster and the class, like the edge table (bestEdgeBiasFile by d_pred), so the map holds only
 /// the distortion there; the soft centre zone of the merge should then be off (smoothVoxelMap.C softCentrePads 0). The file may also hold
 /// lines "sector side row bin shift_um" (side 0 = -y, 1 = +y): a data-driven table per sector x side x pad row, used first where present.
+/// centreBiasInFit (with centreBiasFile and edgeFitPads; meant with centreFitPads 0): the table applied to the clusters INSIDE the track fit,
+/// between the fit passes at the track without the cluster (as edgeBiasInFit for the edge table), instead of to the summed residuals: the
+/// centre clusters stay in the fit without pulling the track, so the track at the line is not smeared by a gap; the summed residuals already
+/// hold the correction, centreRowSums record the residual before it (the full push, the next table directly).
+/// centreRowSums (with edgeQA; meant with centreFitPads): the per-row sums for the next table in the same pass (histogram edgeQA_centreRow:
+/// sector x side x row x 0.25-pad bin by the track without the cluster, all |z/x|, the residual before any centre table). With the centre zone
+/// out of the fit the tracks never see the clusters near the line nor the table, so the push is measured in full and does not depend on the
+/// table subtracted here: table = push - its 4-6 pad level; if it equals the table subtracted, this pass is final, else rerun with the new one.
+/// The log counts the centre riders (tracks lost only through the centre zone).
 /// deadPadFile ("sector row pad", pad = pad number in the row; the dead channel map): a dead pad cuts the charge cloud like the pad plane's edge, so
 /// the clusters beside it are shifted by up to a pad. Clusters within deadPadMargin pads of a dead pad at the track WITHOUT the cluster are out of the fit
 /// (with edgeFitPads) and not summed (status 8), and the voxels there are left to the smoothing.
@@ -769,6 +778,24 @@ struct EdgeQA {
   std::vector<double> edgeClass = std::vector<double>(ClassSize, 0.);
   std::vector<double> centreSector = std::vector<double>(SectorSize, 0.);
   std::vector<double> centreClass = std::vector<double>(ClassSize, 0.);
+  // centreRowSums (11-19): the one-pass spacer-cross table. Per sector x half (0 = y < 0 of the track without the cluster) x pad row x
+  // distance (0.25 pads of the track without the cluster from y = 0, out to 6 pads), all |z/x|, not beside dead pads, after the outlier cut:
+  // the unbiased residual as fitted, i.e. before any centre table (which is only subtracted from the summed residuals), signed away from the
+  // line: n, sum s r, sum r^2, w, w s r, w r^2 (r [um], w = the map's weight). With centreFitPads the clusters near the line are out of the
+  // fit, so cluster - prediction holds the full push (no pull of the track by the shifted clusters, no iteration); table = the push minus
+  // its 4-6 pad level.
+  static constexpr int NRow = 152;
+  enum RowStat { RowN,
+                 RowSR,
+                 RowR2,
+                 RowW,
+                 RowWSR,
+                 RowWR2,
+                 NRowStat };
+  static constexpr size_t RowSize = size_t(NSector) * NHalf * NRow * NDist * NRowStat;
+  std::vector<double> centreRow; ///< empty: centreRowSums off
+  explicit EdgeQA(bool rowSums = false) : centreRow(rowSums ? RowSize : 0, 0.) {}
+  static size_t rowCell(int sector, int half, int row, int dist) { return (((size_t(sector) * NHalf + half) * NRow + row) * NDist + dist) * NRowStat; }
   static size_t sectorCell(int sector, int half, int group, int drift, int dist) { return ((((size_t(sector) * NHalf + half) * NGroup + group) * NDrift + drift) * NDist + dist) * NStat; }
   static size_t classCell(int group, int cls, int mult, int drift, int dist) { return ((((size_t(group) * NClass + cls) * NMult + mult) * NDrift + drift) * NDist + dist) * NStat; }
   static void fill(double* cell, double w, double r, double t, double table)
@@ -788,6 +815,9 @@ struct EdgeQA {
     std::transform(edgeClass.begin(), edgeClass.end(), other.edgeClass.begin(), edgeClass.begin(), std::plus<double>());
     std::transform(centreSector.begin(), centreSector.end(), other.centreSector.begin(), centreSector.begin(), std::plus<double>());
     std::transform(centreClass.begin(), centreClass.end(), other.centreClass.begin(), centreClass.begin(), std::plus<double>());
+    if (!centreRow.empty() && other.centreRow.size() == centreRow.size()) {
+      std::transform(centreRow.begin(), centreRow.end(), other.centreRow.begin(), centreRow.begin(), std::plus<double>());
+    }
   }
   static void write(const char* name, const char* title, const std::vector<double>& block)
   {
@@ -806,6 +836,11 @@ struct EdgeQA {
     write("edgeQA_edgeClass", classLayout, edgeClass);
     write("edgeQA_centreSector", sectorLayout, centreSector);
     write("edgeQA_centreClass", classLayout, centreClass);
+    if (!centreRow.empty()) {
+      write("edgeQA_centreRow", "sector, half (0 y < 0 of the track without the cluster), pad row, distance (0.25 pads of the track without the cluster from y = 0), "
+                                "stat: n, sum s r, sum r^2, w, w s r, w r^2 (r = unbiased residual before any centre table [um], s = +1 away from the line); all |z/x|",
+            centreRow);
+    }
   }
 };
 
@@ -1264,6 +1299,7 @@ struct Cluster {
   double z0 = 0.;                                          ///< measured z, before any correction
   double yUncorrected = 0.;                                ///< y as fitted without the in-fit edge correction (after the map corrections)
   double edgeShift = 0.;                                   ///< edgeBiasInFit: the edge correction currently added to y [cm]
+  double centreShift = 0.;                                 ///< centreBiasInFit: the spacer-cross correction currently added to y [cm] (toward the line)
   double yTrue = std::numeric_limits<double>::quiet_NaN(); ///< MC: the true y at the row (sector frame, nominal x)
 };
 
@@ -1422,6 +1458,7 @@ struct EdgeFitCorrection {
   double centrePads = 0.;             ///< centreFitPads: clusters within this many pads of the centre line (y = 0) out of the fit (rows below)
   int centreRowFirst = 0;
   int centreRowLast = -1;
+  const CentreBiasTable* centre = nullptr; ///< centreBiasInFit: the spacer-cross table applied to the clusters between the fit passes
   /// within centrePads (+ margin) of the centre line at pad-plane y [cm] in a row of pad width `width`
   bool inCentre(int row, double padY, double width, double margin = 0.) const
   {
@@ -1623,18 +1660,28 @@ bool fitTrack(std::vector<Cluster>& clusters, TrackParD seed, FitResult& result,
           newEdgeShift |= removed != cluster.removed;
           cluster.removed = removed;
         }
-        if (!edgeFit->table) {
+        if (!edgeFit->table && !edgeFit->centre) {
           continue;
         }
         const double padMeas = (geometry.padPlaneEdge[cluster.row] - std::abs(cluster.padY0)) / width - 0.5;
         const int cls = o2::tpc::cluster_bias::classOfFlags(cluster.flags, std::abs(padMeas - std::round(padMeas)) < 0.25 / 64.);
-        const double snp = reference[point].getSnp();
-        const double slope = snp / std::sqrt(std::max(1e-6, (1. - snp) * (1. + snp)));
-        const double shift = side * edgeFit->table->inwardBias(edgeFit->table->unitOfRow(cluster.row), cls, o2::tpc::cluster_bias::driftLength(cluster.z0),
-                                                               std::abs(slope), dPredicted);
-        newEdgeShift |= std::abs(shift - cluster.edgeShift) > 1e-4;
-        cluster.edgeShift = shift;
-        cluster.y = cluster.yUncorrected + shift;
+        if (edgeFit->table) {
+          const double snp = reference[point].getSnp();
+          const double slope = snp / std::sqrt(std::max(1e-6, (1. - snp) * (1. + snp)));
+          const double shift = side * edgeFit->table->inwardBias(edgeFit->table->unitOfRow(cluster.row), cls, o2::tpc::cluster_bias::driftLength(cluster.z0),
+                                                                 std::abs(slope), dPredicted);
+          newEdgeShift |= std::abs(shift - cluster.edgeShift) > 1e-4;
+          cluster.edgeShift = shift;
+        }
+        if (edgeFit->centre) {
+          // centreBiasInFit: the spacer cross pushes the cluster AWAY from the centre line by the table's shift at the track without the
+          // cluster; the cluster is moved back toward the line, so that the centre clusters can stay in the fit without pulling the track
+          const double sideC = predictedPadY < 0. ? -1. : 1.;
+          const double shift = -sideC * edgeFit->centre->at(cluster.sector, predictedPadY < 0. ? 0 : 1, cluster.row, cls, std::abs(predictedPadY) / width);
+          newEdgeShift |= std::abs(shift - cluster.centreShift) > 1e-4;
+          cluster.centreShift = shift;
+        }
+        cluster.y = cluster.yUncorrected + cluster.edgeShift + cluster.centreShift;
       }
     }
     // the seed: the first point's reference plus GBL's correction there
@@ -1703,11 +1750,16 @@ enum Counter { Selected,
                EdgeTreeTruth,
                EdgeTreeSweepFailed,
                EdgeBiasCorrected,
+               CentreRiders,
+               CentreRiderClusters,
                NCounters };
 
 /// what the fit threads share read-only
 struct FitContext {
   GID::mask_t sources;
+  double trackPtMin = 0.;  ///< > 0: tracks with the ITS track's pT below this [GeV] skipped (as collisionDcaSeries ptMin)
+  double trackTglMax = 0.; ///< > 0: tracks with |tgl| of the ITS track at or above this skipped (as collisionDcaSeries maxTgl)
+  int trackMinTPC = 0;     ///< > 0: tracks with fewer TPC residuals skipped (as collisionDcaSeries minTpc)
   const BaseCorrection* baseCorrection = nullptr; ///< nullptr: no base correction
   const FineMapInput* fineMap = nullptr;          ///< nullptr: no previous fine map
   bool addBackFineMap = false;                    ///< the fineMap correction added back to the summed residuals
@@ -2080,6 +2132,12 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       trackRef.idxFirstResidual + trackRef.nResiduals + (context.itsInFit ? trackRef.nExtDetResid : 0) > task.residuals.size()) {
     return;
   }
+  // trackCuts (11-19): the track selection of collisionDcaSeries (ITS track pT, |tgl|, TPC clusters), to compare the two chains' tables
+  if ((context.trackPtMin > 0. && 1. / std::abs(itsTrack.getQ2Pt()) < context.trackPtMin) ||
+      (context.trackTglMax > 0. && std::abs(itsTrack.getTgl()) >= context.trackTglMax) ||
+      (context.trackMinTPC > 0 && int(trackRef.nResiduals) < context.trackMinTPC)) {
+    return;
+  }
   auto decodeResidual = [](short value) { return value * o2::tpc::param::MaxResid / 0x7fff; };
   // edge tree: a sampled track with a TPC cluster near the pad plane's edge (measured; one pad of margin for the best / true position)
   bool edgeTrack = false;
@@ -2109,6 +2167,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   bool sweepOK = truthState == 1;
   clusters.clear();
   int nFitClusters = 0;
+  int nCentreOnly = 0; // clusters out of the fit only because of the centre zone (the centre riders' count)
   for (unsigned int residualIndex = trackRef.idxFirstResidual; residualIndex < trackRef.idxFirstResidual + trackRef.nResiduals; ++residualIndex) {
     const auto& residual = task.residuals[residualIndex];
     if (residual.rejected) {
@@ -2222,9 +2281,11 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     cluster.flagged = context.clusterFlagMask != 0 && (residual.channel & context.clusterFlagMask);
     if (context.edgeFit.pads > 0.) {
       cluster.excluded = cluster.flagged || (isExcludedRow(cluster.row) && !(context.lastRowsInFit && cluster.row >= NRows - EdgeRows));
-      cluster.removed = context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY) < (context.edgeFit.pads + 1.) * context.geometry->padWidth[cluster.row] ||
-                        context.deadPads.near(cluster.sector, cluster.row, cluster.padY, 1.) ||
-                        context.edgeFit.inCentre(cluster.row, cluster.padY, context.geometry->padWidth[cluster.row], 1.);
+      const bool removedEdgeOrDead = context.geometry->padPlaneEdge[cluster.row] - std::abs(cluster.padY) < (context.edgeFit.pads + 1.) * context.geometry->padWidth[cluster.row] ||
+                                     context.deadPads.near(cluster.sector, cluster.row, cluster.padY, 1.);
+      const bool removedCentre = context.edgeFit.inCentre(cluster.row, cluster.padY, context.geometry->padWidth[cluster.row], 1.);
+      cluster.removed = removedEdgeOrDead || removedCentre;
+      nCentreOnly += !cluster.excluded && !removedEdgeOrDead && removedCentre;
     } else {
       cluster.excluded = cluster.flagged || isExcludedFromFit(cluster.row, context.edgeWeightByTruth && std::isfinite(cluster.yTrue) ? cluster.yTrue : cluster.padY, *context.geometry);
     }
@@ -2232,6 +2293,10 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
     clusters.push_back(cluster);
   }
   if (nFitClusters < MinFitClusters || clusters.empty()) {
+    if (nFitClusters < MinFitClusters && nFitClusters + nCentreOnly >= MinFitClusters) { // a centre rider: lost only through the centre zone
+      ++counters[CentreRiders];
+      counters[CentreRiderClusters] += clusters.size();
+    }
     return;
   }
   if (edgeTrack && !sweepOK && (context.truthClusters || context.edgeRemovePads > 0. || context.edgeWeightByTruth)) {
@@ -2248,7 +2313,7 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
   FitResult fit;
   if (!rotateTo(seed, clusters.front().alpha) ||
       !o2::base::PropagatorD::Instance()->PropagateToXBxByBz(seed, clusters.front().x, 0.999, 2., MatCorrType::USEMatCorrLUT) ||
-      !fitTrack(clusters, seed, fit, context.edgeFit.table || context.edgeFit.pads > 0. ? &context.edgeFit : nullptr)) {
+      !fitTrack(clusters, seed, fit, context.edgeFit.table || context.edgeFit.centre || context.edgeFit.pads > 0. ? &context.edgeFit : nullptr)) {
     ++counters[FitFailed];
     return;
   }
@@ -2344,6 +2409,22 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       fillEdgeQA(*edgeQA, cluster, context, edgePadY, unbiased[0], weight[0], snpQA / std::sqrt(std::max(1e-6, (1. - snpQA) * (1. + snpQA))),
                  trackRefQA.getMultStackPacked(stackQA) > 0 ? trackRefQA.getMultStack(stackQA) : 0.);
     }
+    if (edgeQA && !edgeQA->centreRow.empty() && !context.deadPads.near(cluster.sector, cluster.row, predPadY)) {
+      // centreRowSums: the push by the track without the cluster, all |z/x| (see EdgeQA); with centreBiasInFit the residual before the
+      // in-fit centre correction (the full push against a track that the corrected centre clusters no longer pull)
+      const int dist = int(std::abs(predPadY) / context.geometry->padWidth[cluster.row] / EdgeQA::DistStep);
+      if (dist < EdgeQA::NDist) {
+        const double away = predPadY < 0. ? -1. : 1.;
+        const double r = 1e4 * (unbiased[0] - cluster.centreShift);
+        double* cell = &edgeQA->centreRow[EdgeQA::rowCell(cluster.sector, predPadY < 0. ? 0 : 1, cluster.row, dist)];
+        cell[EdgeQA::RowN] += 1.;
+        cell[EdgeQA::RowSR] += away * r;
+        cell[EdgeQA::RowR2] += r * r;
+        cell[EdgeQA::RowW] += weight[0];
+        cell[EdgeQA::RowWSR] += weight[0] * away * r;
+        cell[EdgeQA::RowWR2] += weight[0] * r * r;
+      }
+    }
     if (std::abs(edgePadY) > context.geometry->padPlaneEdge[cluster.row] - context.skipEdgePads * context.geometry->padWidth[cluster.row]) {
       ++counters[EdgePadResiduals];
       mark(point, 5);
@@ -2415,7 +2496,10 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
         edgeRecords[fit.active[point]].edgeCorr = side * bias;
       }
     }
-    if (context.centreBias) {
+    if (context.edgeFit.centre) {
+      // centreBiasInFit: the residual already holds the table's correction (applied to the cluster in the fit)
+      contribution.tableAddedY += 1e4 * cluster.centreShift;
+    } else if (context.centreBias) {
       // the spacer-cross truncation: a shift away from the sector centre line, by the track without the cluster and the cluster class
       const double width = context.geometry->padWidth[cluster.row];
       const double sideC = predPadY < 0. ? -1. : 1.;
@@ -2804,7 +2888,7 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     batch.reserve(SumsBatchSize);
     std::vector<Cluster> clusters;
     std::array<long, NCounters> localCounters{};
-    std::unique_ptr<EdgeQA> localQA(edgeQA ? new EdgeQA : nullptr);
+    std::unique_ptr<EdgeQA> localQA(edgeQA ? new EdgeQA(!edgeQA->centreRow.empty()) : nullptr);
     auto flush = [&]() {
       std::lock_guard<std::mutex> lock(sumsMutex);
       for (const auto& contribution : batch) {
@@ -2911,6 +2995,10 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
   if (context.bestEdgeBias) {
     LOGP(info, "fineMapCreatorGBL{}: best-position edge bias added to {} summed residuals", label, counters[EdgeBiasCorrected].load());
   }
+  if (context.edgeFit.centrePads > 0.) {
+    LOGP(info, "fineMapCreatorGBL{}: centre riders (fewer than {} fit clusters only because of the centre zone, not fitted, not summed): {} tracks, {} clusters",
+         label, MinFitClusters, counters[CentreRiders].load(), counters[CentreRiderClusters].load());
+  }
   LOGP(info, "fineMapCreatorGBL{}: fit passes per track {:.2f} ({:.1f} % at the maximum {}), resident memory {:.2f} GB", label,
        nFitted ? double(counters[FitPasses]) / nFitted : 0., nFitted ? 100. * counters[AtMaxPasses] / nFitted : 0., MaxFitPasses, residentMemoryGB());
   return nFitted;
@@ -2975,7 +3063,13 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                                                                                                      // without the cluster out of the fit, still summed (centre riders drop by MinFitClusters)
                        int centreFitRowFirst = 0,                                                    // centreFitPads: first row
                        int centreFitRowLast = 151,                                                   // centreFitPads: last row
-                       std::string centreBiasFile = "")                                              // the spacer cross as a per-cluster table (see CentreBiasTable); empty: off
+                       std::string centreBiasFile = "",                                              // the spacer cross as a per-cluster table (see CentreBiasTable); empty: off
+                       bool centreRowSums = false,                                                   // per-row centre sums for the one-pass table (histogram edgeQA_centreRow, see EdgeQA)
+                       bool centreBiasInFit = false,                                                 // the centreBiasFile applied to the clusters inside the track fit (by the track
+                                                                                                     // without the cluster, between the fit passes) instead of the summed residuals
+                       float trackPtMin = 0.f,                                                       // > 0: only tracks with the ITS track's pT >= this [GeV] (collisionDcaSeries ptMin)
+                       float trackTglMax = 0.f,                                                      // > 0: only tracks with |tgl| < this (collisionDcaSeries maxTgl)
+                       int trackMinTPC = 0)                                                          // > 0: only tracks with at least this many TPC residuals (collisionDcaSeries minTpc)
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -3133,6 +3227,12 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   FitContext context;
   context.sources = GID::getSourcesMask(trackSources);
+  context.trackPtMin = trackPtMin;
+  context.trackTglMax = trackTglMax;
+  context.trackMinTPC = trackMinTPC;
+  if (trackPtMin > 0.f || trackTglMax > 0.f || trackMinTPC > 0) {
+    LOGP(info, "Track cuts (as collisionDcaSeries): ITS track pT >= {} GeV, |tgl| < {}, >= {} TPC residuals (0 = off)", trackPtMin, trackTglMax, trackMinTPC);
+  }
   context.baseCorrection = baseCorrection.map ? &baseCorrection : nullptr;
   context.fineMap = fineMap.nodes.empty() ? nullptr : &fineMap;
   context.addBackFineMap = addBackFineMap;
@@ -3173,6 +3273,18 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   }
   context.edgeFit.centreRowFirst = centreFitRowFirst;
   context.edgeFit.centreRowLast = centreFitRowLast;
+  if (centreBiasInFit) {
+    if (!context.centreBias) {
+      LOGP(fatal, "centreBiasInFit needs a centreBiasFile");
+    }
+    if (!(edgeFitPads > 0.f)) {
+      LOGP(fatal, "centreBiasInFit needs edgeFitPads > 0 (the in-fit correction runs between the fit passes of the same mechanism)");
+    }
+    context.edgeFit.centre = context.centreBias;
+    LOGP(info, "Spacer cross: the table applied to the clusters INSIDE the track fit (by the track without the cluster, between the fit passes), "
+               "not to the summed residuals; centre zone out of the fit: {} pads",
+         centreFitPads);
+  }
   context.lastRowsInFit = lastRowsInFit;
   // env FINE_DRIFT_NORM="vD0 t00 bA bC" (dcaseries vdJointFit.C outMode 1, 11-14): every cluster's z from its file's drift reference
   // (records tree) onto the common one, z += s * ((1 - vD0 / vD_file) * L + vD0 * (t00 - t0_file) - b_side * L), L = 250 - |z|, s = +1 A,
@@ -3271,7 +3383,15 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
   std::vector<std::array<ChargeSums, 2>> sums(size_t(NSectors) * voxelsPerSector);
   SelectedTFs selected;
   context.edgeQA = edgeQA;
-  std::unique_ptr<EdgeQA> edgeQASums(edgeQA ? new EdgeQA : nullptr);
+  if (centreRowSums && !edgeQA) {
+    LOGP(fatal, "centreRowSums needs edgeQA (the per-row centre sums are part of EdgeQA)");
+  }
+  std::unique_ptr<EdgeQA> edgeQASums(edgeQA ? new EdgeQA(centreRowSums) : nullptr);
+  if (centreRowSums) {
+    LOGP(info, "Centre row sums (one-pass spacer-cross table): per sector x side x row x 0.25-pad bin by the track without the cluster, all |z/x|, "
+               "centre zone out of the fit: {} pads{}",
+         centreFitPads, centreFitPads > 0.f ? "" : (centreBiasInFit ? " (none: the centre clusters stay in the fit, corrected by the table; summed before that correction)" : " (NONE: the push is pulled by the track)"));
+  }
   std::unique_ptr<PadSums> padSumsData(padSums ? new PadSums(padPhaseBins, padDriftBins) : nullptr);
   std::unique_ptr<SShapeSums> sShapeData(padSums ? new SShapeSums : nullptr);
   context.padSums = padSumsData.get();
