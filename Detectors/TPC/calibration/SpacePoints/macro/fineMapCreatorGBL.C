@@ -1123,6 +1123,7 @@ struct Contribution {
   double slopeZ = 0.;
   double residualZ = 0.;
   double weightZ = 0.;
+  std::array<float, 3> edgeR{}; ///< (11-20) edgeTableFile: the regressors (u, v_L, v_R) of the cluster's TF and sector, centred
 };
 
 /// per voxel and charge: entries, position sums, and per channel (y, z) sum w, w s, w s^2, w r, w s r, w r^2 (s the track slope)
@@ -1171,6 +1172,271 @@ struct ChargeSums {
       y[sum] += other.y[sum];
       z[sum] += other.z[sum];
     }
+  }
+};
+
+/// (11-20) The regressors of the sector-edge fluctuations per second (edgeTableFile, from o2_macros gsi/edgedipole/makeEdgeTable.C), as in
+/// staticMapCreatorCPM.C: text lines "<time ms> <IDC A> <IDC C> <v_0> ... <v_35>" (v_b = the smoothed edge dipole Dc of boundary b = sector
+/// s | s + 1 on the same side, b = 0..17 A, 18..35 C, in um; "nan" = no value). Every column is centred on its mean over the table; looked up
+/// by the TF time (nearest entry within maxGapMS); a missing value enters as 0 (= the mean).
+struct EdgeTable {
+  static constexpr int NBoundaries = 36;
+  static constexpr int NColumns = 2 + NBoundaries; ///< IDC A, IDC C, v_0 .. v_35
+  std::vector<long> timeMS;
+  std::vector<std::array<float, NColumns>> values; ///< centred; NaN = no value
+  std::array<double, NColumns> mean{};
+  long maxGapMS = 500;
+
+  bool load(const std::string& fileName)
+  {
+    std::ifstream input(fileName);
+    std::string line;
+    std::array<double, NColumns> sum{};
+    std::array<long, NColumns> count{};
+    while (std::getline(input, line)) {
+      if (line.empty() || line[0] == '#') {
+        continue;
+      }
+      std::istringstream fields(line);
+      long time = 0;
+      std::array<float, NColumns> row{};
+      std::string token;
+      if (!(fields >> time)) {
+        continue;
+      }
+      int column = 0;
+      for (; column < NColumns && fields >> token; ++column) {
+        row[column] = (token == "nan" || token == "-nan") ? NAN : std::stof(token);
+        if (std::isfinite(row[column])) {
+          sum[column] += row[column];
+          ++count[column];
+        }
+      }
+      if (column != NColumns) {
+        LOGP(fatal, "edgeTableFile {}: {} columns after the time instead of {} in line '{}'", fileName, column, NColumns, line);
+      }
+      timeMS.push_back(time);
+      values.push_back(row);
+    }
+    for (int column = 0; column < NColumns; ++column) {
+      mean[column] = count[column] ? sum[column] / count[column] : 0.;
+    }
+    for (auto& row : values) {
+      for (int column = 0; column < NColumns; ++column) {
+        row[column] -= mean[column];
+      }
+    }
+    for (size_t i = 1; i < timeMS.size(); ++i) {
+      if (timeMS[i] < timeMS[i - 1]) {
+        LOGP(fatal, "edgeTableFile {}: times not sorted (line {})", fileName, i + 1);
+      }
+    }
+    return !timeMS.empty();
+  }
+
+  /// the centred row nearest to tfTimeMS within maxGapMS, nullptr if none
+  const std::array<float, NColumns>* lookup(long tfTimeMS) const
+  {
+    const auto upper = std::lower_bound(timeMS.begin(), timeMS.end(), tfTimeMS);
+    long best = -1;
+    long bestGap = maxGapMS + 1;
+    for (const auto candidate : {upper - timeMS.begin(), upper - timeMS.begin() - 1}) {
+      if (candidate >= 0 && candidate < long(timeMS.size()) && std::abs(timeMS[candidate] - tfTimeMS) < bestGap) {
+        best = candidate;
+        bestGap = std::abs(timeMS[candidate] - tfTimeMS);
+      }
+    }
+    return best < 0 ? nullptr : &values[best];
+  }
+
+  /// boundaries of sector sec (0..35): low-y side s - 1 | s, high-y side s | s + 1 (same side of the TPC)
+  static int boundaryLow(int sec) { return (sec / 18) * 18 + (sec % 18 + 17) % 18; }
+  static int boundaryHigh(int sec) { return sec; }
+};
+
+/// (11-20) Per voxel (both charges together) the moments of the summed residuals in the regressors r = (u, v_L, v_R) of the sector-edge
+/// fluctuations (edgeTableFile), as staticMapCreatorCPM.C: u = IDC of the voxel's side, v_L / v_R = edge dipole of the sector's low-y / high-y
+/// boundary (all centred on the table). Per channel the first moments sum r_k S and the second moments sum r_k r_l S (pairs (0,0) (0,1) (0,2)
+/// (1,1) (1,2) (2,2)) of the six sums S of ChargeSums -> the voxel model D(r) = D0 + D1 u + E_L v_L + E_R v_R (o2_macros
+/// gsi/binning/cbc2/idcDerivative.C edgeMoments 1): at the fine level the IDC slope and the edge shapes the TPC-only fit sees.
+struct EdgeMoments {
+  static constexpr int NReg = 3;
+  static constexpr int NPairs = NReg * (NReg + 1) / 2;
+  std::array<std::array<double, ChargeSums::NSums>, NReg> yR{};
+  std::array<std::array<double, ChargeSums::NSums>, NPairs> yRR{};
+  std::array<std::array<double, ChargeSums::NSums>, NReg> zR{};
+  std::array<std::array<double, ChargeSums::NSums>, NPairs> zRR{};
+
+  static void fill(std::array<std::array<double, ChargeSums::NSums>, NReg>& first, std::array<std::array<double, ChargeSums::NSums>, NPairs>& second,
+                   double slope, double residual, double weight, const std::array<float, NReg>& r)
+  {
+    const double values[ChargeSums::NSums] = {weight, weight * slope, weight * slope * slope, weight * residual, weight * slope * residual, weight * residual * residual};
+    int pair = 0;
+    for (int k = 0; k < NReg; ++k) {
+      for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+        first[k][sum] += r[k] * values[sum];
+      }
+      for (int l = k; l < NReg; ++l, ++pair) {
+        const double rr = double(r[k]) * r[l];
+        for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+          second[pair][sum] += rr * values[sum];
+        }
+      }
+    }
+  }
+};
+
+/// (11-20) The coarse-level sector-edge fluctuation correction (o2_macros gblfit io/EdgeCorrection, gsi/edgedipole) applied to the clusters
+/// after the base correction (edgeShapeR / edgeShapeL with edgeTableFile): per sector the edge-shape maps of its high-y ("R", boundary s|s+1)
+/// and low-y ("L", s-1|s) boundary (voxResTree DS in cm per scaleUM um of the boundary's dipole; uniform y/x grid over the pad plane, uniform
+/// z/x), bilinear between the bin centres in u = y / pad-plane half width and the side-oriented z/x (constant beyond the outermost centres),
+/// times the boundary's dipole at the TF minus its mean over this pass's TF window (the window maps hold the window's mean edge state):
+/// x, y, z -= shapeR (v_R - <v_R>_w) / scale + shapeL (v_L - <v_L>_w) / scale. Same numbers as EdgeCorrection (window = this pass's
+/// firstTFTime .. lastTFTime instead of the windows file).
+struct EdgeTerm {
+  int nX = 152;
+  int nY = 20;
+  int nZ = 40;
+  double maxZ2X = 2.;
+  double scaleUM = 100.;
+  std::array<std::vector<float>, 2> nodes; ///< [term][((sector * nX + row) * nY + iy) * nZ + iz][3]
+  std::vector<double> halfWidth;           ///< per pad row: half width of the pad plane [cm]
+  const EdgeTable* table = nullptr;
+  std::array<double, EdgeTable::NBoundaries> windowMean{}; ///< of the centred v over the window's table rows
+  long windowRows = 0;
+
+  bool loadMap(const std::string& file, int term)
+  {
+    std::unique_ptr<TFile> input(TFile::Open(file.c_str()));
+    auto* tree = input ? input->Get<TTree>("voxResTree") : nullptr;
+    auto info = [&](const char* key) -> std::string {
+      auto* object = tree ? tree->GetUserInfo()->FindObject(key) : nullptr;
+      return object ? object->GetTitle() : "";
+    };
+    if (!tree || info("y2xBinning").empty() || info("z2xBinning").empty() || info("maxZ2X").empty()) {
+      LOGP(error, "edge term: {} has no voxResTree with the binning in its user info", file);
+      return false;
+    }
+    const std::string y2x = info("y2xBinning");
+    const std::string z2x = info("z2xBinning");
+    if (y2x.find_first_not_of("0123456789") != std::string::npos || z2x.find_first_not_of("0123456789") != std::string::npos || info("y2xEdge") != "padplane") {
+      LOGP(error, "edge term: {}: uniform binnings on the pad plane only (y/x \"{}\", z/x \"{}\", edge \"{}\")", file, y2x, z2x, info("y2xEdge"));
+      return false;
+    }
+    nY = std::stoi(y2x);
+    nZ = std::stoi(z2x);
+    maxZ2X = std::stod(info("maxZ2X"));
+    TrackResiduals::VoxRes* result = nullptr;
+    tree->SetBranchAddress("voxRes", &result);
+    auto& termNodes = nodes[term];
+    termNodes.assign(size_t(NSectors) * nX * nY * nZ * 3, 0.f);
+    long nSet = 0;
+    for (long entry = 0; entry < tree->GetEntries(); ++entry) {
+      tree->GetEntry(entry);
+      const int row = result->bvox[TrackResiduals::VoxX];
+      const int iy = result->bvox[TrackResiduals::VoxF];
+      const int iz = result->bvox[TrackResiduals::VoxZ];
+      if (result->bsec >= NSectors || row >= nX || iy >= nY || iz >= nZ || !(result->flags & TrackResiduals::SmoothDone)) {
+        continue;
+      }
+      const size_t node = ((size_t(result->bsec) * nX + row) * nY + iy) * nZ + iz;
+      for (int c = 0; c < 3; ++c) {
+        termNodes[3 * node + c] = result->DS[c];
+      }
+      ++nSet;
+    }
+    tree->ResetBranchAddresses();
+    delete result;
+    LOGP(info, "edge term: {}: {} smoothed nodes (grid {} x {} x {}, maxZ2X {})", file, nSet, nX, nY, nZ, maxZ2X);
+    return nSet > 0;
+  }
+
+  bool load(const std::string& mapR, const std::string& mapL, const EdgeTable& edgeTable, long firstTFTime, long lastTFTime, double scale)
+  {
+    table = &edgeTable;
+    scaleUM = scale;
+    if (!loadMap(mapR, 0) || !loadMap(mapL, 1)) {
+      return false;
+    }
+    const auto& mapper = o2::tpc::Mapper::instance();
+    halfWidth.assign(nX, 0.);
+    for (int row = 0; row < nX; ++row) {
+      halfWidth[row] = 0.5 * mapper.getNumberOfPadsInRowSector(row) * mapper.getPadRegionInfo(o2::tpc::Mapper::REGION[row]).getPadWidth();
+    }
+    std::array<double, EdgeTable::NBoundaries> sum{};
+    std::array<long, EdgeTable::NBoundaries> count{};
+    for (size_t i = 0; i < edgeTable.timeMS.size(); ++i) {
+      if (firstTFTime > 0 && (edgeTable.timeMS[i] < firstTFTime || edgeTable.timeMS[i] > lastTFTime)) {
+        continue;
+      }
+      ++windowRows;
+      for (int b = 0; b < EdgeTable::NBoundaries; ++b) {
+        const float v = edgeTable.values[i][2 + b];
+        if (std::isfinite(v)) {
+          sum[b] += v;
+          ++count[b];
+        }
+      }
+    }
+    for (int b = 0; b < EdgeTable::NBoundaries; ++b) {
+      windowMean[b] = count[b] ? sum[b] / count[b] : 0.;
+    }
+    return windowRows > 0;
+  }
+
+  /// per boundary v(TF) - <v>_window [um] (0 without a table row or value)
+  std::array<float, EdgeTable::NBoundaries> scales(double tfTimeMS) const
+  {
+    std::array<float, EdgeTable::NBoundaries> s{};
+    const auto* row = table ? table->lookup(long(tfTimeMS)) : nullptr;
+    for (int b = 0; row && b < EdgeTable::NBoundaries; ++b) {
+      const float v = (*row)[2 + b];
+      s[b] = std::isfinite(v) ? float(v - windowMean[b]) : 0.f;
+    }
+    return s;
+  }
+
+  /// shape of term (0 R, 1 L) at the cluster [cm per scaleUM um]
+  std::array<double, 3> shape(int term, int sector, int row, double rowX, double y, double z) const
+  {
+    std::array<double, 3> value{};
+    if (sector < 0 || sector >= NSectors || row < 0 || row >= nX || !(rowX > 0.) || !(halfWidth[row] > 0.)) {
+      return value;
+    }
+    const double u = y / halfWidth[row];
+    const double zx = (sector >= 18 ? -z : z) / rowX;
+    const double fu = std::clamp((u + 1.) * nY / 2. - 0.5, 0., double(nY - 1));
+    const double fz = std::clamp(zx / maxZ2X * nZ - 0.5, 0., double(nZ - 1));
+    const int iu = std::min(int(fu), nY - 2);
+    const int iz = std::min(int(fz), nZ - 2);
+    const double wu = fu - iu;
+    const double wz = fz - iz;
+    const auto& termNodes = nodes[term];
+    for (int a = 0; a < 2; ++a) {
+      for (int b = 0; b < 2; ++b) {
+        const double w = (a ? wu : 1. - wu) * (b ? wz : 1. - wz);
+        const size_t node = ((size_t(sector) * nX + row) * nY + iu + a) * nZ + iz + b;
+        for (int c = 0; c < 3; ++c) {
+          value[c] += w * termNodes[3 * node + c];
+        }
+      }
+    }
+    return value;
+  }
+
+  /// x, y, z of a cluster (as corrected so far) minus the term at the TF's scales
+  void apply(int sector, int row, double rowX, const std::array<float, EdgeTable::NBoundaries>& s, double& x, double& y, double& z) const
+  {
+    if (sector < 0 || sector >= NSectors) {
+      return;
+    }
+    const auto r = shape(0, sector, row, rowX, y, z);
+    const auto l = shape(1, sector, row, rowX, y, z);
+    const double fr = s[EdgeTable::boundaryHigh(sector)] / scaleUM;
+    const double fl = s[EdgeTable::boundaryLow(sector)] / scaleUM;
+    x -= r[0] * fr + l[0] * fl;
+    y -= r[1] * fr + l[1] * fl;
+    z -= r[2] * fr + l[2] * fl;
   }
 };
 
@@ -1761,6 +2027,9 @@ struct FitContext {
   double trackTglMax = 0.; ///< > 0: tracks with |tgl| of the ITS track at or above this skipped (as collisionDcaSeries maxTgl)
   int trackMinTPC = 0;     ///< > 0: tracks with fewer TPC residuals skipped (as collisionDcaSeries minTpc)
   const BaseCorrection* baseCorrection = nullptr; ///< nullptr: no base correction
+  const EdgeTerm* edgeTerm = nullptr;             ///< (11-20) the coarse-level edge term applied after the base correction; nullptr: off
+  const EdgeTable* edgeTable = nullptr;           ///< (11-20) regressors of the edge moments; nullptr: off
+  std::vector<EdgeMoments>* edgeMoments = nullptr; ///< (11-20) per voxel the edge moments (filled under the sums mutex); nullptr: off
   const FineMapInput* fineMap = nullptr;          ///< nullptr: no previous fine map
   bool addBackFineMap = false;                    ///< the fineMap correction added back to the summed residuals
   const TrackResiduals* binning = nullptr;
@@ -2138,6 +2407,11 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       (context.trackMinTPC > 0 && int(trackRef.nResiduals) < context.trackMinTPC)) {
     return;
   }
+  // edge term (11-20): the boundaries' dipoles at this TF minus their window means
+  std::array<float, EdgeTable::NBoundaries> edgeScales{};
+  if (context.edgeTerm) {
+    edgeScales = context.edgeTerm->scales(task.info->timeMS);
+  }
   auto decodeResidual = [](short value) { return value * o2::tpc::param::MaxResid / 0x7fff; };
   // edge tree: a sampled track with a TPC cluster near the pad plane's edge (measured; one pad of margin for the best / true position)
   bool edgeTrack = false;
@@ -2270,6 +2544,9 @@ void processTrack(const TFTask& task, size_t trackIndex, const FitContext& conte
       cluster.x = x;
       cluster.y = y;
       cluster.z = z;
+    }
+    if (context.edgeTerm) {
+      context.edgeTerm->apply(cluster.sector, cluster.row, cluster.xNominal, edgeScales, cluster.x, cluster.y, cluster.z);
     }
     if (context.fineMap) {
       const double measuredPosition[3] = {cluster.xNominal, cluster.padY, cluster.z0};
@@ -2577,7 +2854,8 @@ struct SelectedTFs {
 void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, const std::string& y2xBinning, const std::string& z2xBinning, float maxZ2X,
                  const std::vector<std::array<ChargeSums, 2>>& sums, const std::vector<std::pair<std::string, std::string>>& extraInfo, long nTracks,
                  double minEntries, bool writeSums, int runNumber, double orbitResetMS, bool isPbPb, long firstTFTime, long lastTFTime, const SelectedTFs& selected, const EdgeQA* edgeQA,
-                 const PadSums* padSums = nullptr, const SShapeSums* sShapeSums = nullptr)
+                 const PadSums* padSums = nullptr, const SShapeSums* sShapeSums = nullptr, const std::vector<EdgeMoments>* edgeMoments = nullptr,
+                 const EdgeTable* edgeTable = nullptr, const std::string& edgeTableFile = "", const std::string& edgeTermInfo = "")
 {
   // CTP luminosity and IDC of the selected TFs, as staticMapCreatorCPM.C (PbPb: mean CTP luminosity x 2.414)
   double meanCTP = calculateMean(selected.ctpLumi) * (isPbPb ? 2.414 : 1.);
@@ -2726,11 +3004,44 @@ void writeOutput(const std::string& fileOutput, const TrackResiduals& binning, c
     sumsTree.Branch("position", position, "position[2][3]/F");
     sumsTree.Branch("y", channelY, "y[2][6]/F");
     sumsTree.Branch("z", channelZ, "z[2][6]/F");
+    // (11-20) edge moments as staticMapCreatorCPM.C (both charges summed, float; idcDerivative.C edgeMoments reads them)
+    const bool withEdge = edgeMoments && edgeTable && edgeMoments->size() == treeSums.size();
+    float edgeYR[EdgeMoments::NReg][ChargeSums::NSums] = {};
+    float edgeYRR[EdgeMoments::NPairs][ChargeSums::NSums] = {};
+    float edgeZR[EdgeMoments::NReg][ChargeSums::NSums] = {};
+    float edgeZRR[EdgeMoments::NPairs][ChargeSums::NSums] = {};
+    if (withEdge) {
+      sumsTree.Branch("yR", edgeYR, Form("yR[%d][%d]/F", EdgeMoments::NReg, ChargeSums::NSums));
+      sumsTree.Branch("yRR", edgeYRR, Form("yRR[%d][%d]/F", EdgeMoments::NPairs, ChargeSums::NSums));
+      sumsTree.Branch("zR", edgeZR, Form("zR[%d][%d]/F", EdgeMoments::NReg, ChargeSums::NSums));
+      sumsTree.Branch("zRR", edgeZRR, Form("zRR[%d][%d]/F", EdgeMoments::NPairs, ChargeSums::NSums));
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeRegressors", "u = IDC of the side - mean; v_L, v_R = edge dipole (um) of the sector's boundary s-1|s, s|s+1 - mean; pairs (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)"));
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeTable", edgeTableFile.data()));
+      std::string means;
+      for (int column = 0; column < EdgeTable::NColumns; ++column) {
+        means += fmt::format("{}{:.4f}", column ? " " : "", edgeTable->mean[column]);
+      }
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeTableMeans", means.data())); // IDC A, IDC C, v_0..v_35
+      sumsTree.GetUserInfo()->Add(new TNamed("edgeTerm", edgeTermInfo.empty() ? "none" : edgeTermInfo.data()));
+    }
     for (size_t voxel = 0; voxel < treeSums.size(); ++voxel) {
       if (treeSums[voxel][0].entries + treeSums[voxel][1].entries <= 0.) {
         continue;
       }
       voxelIndex = int(voxel);
+      if (withEdge) {
+        const auto& moments = (*edgeMoments)[voxel];
+        for (int sum = 0; sum < ChargeSums::NSums; ++sum) {
+          for (int k = 0; k < EdgeMoments::NReg; ++k) {
+            edgeYR[k][sum] = float(moments.yR[k][sum]);
+            edgeZR[k][sum] = float(moments.zR[k][sum]);
+          }
+          for (int pair = 0; pair < EdgeMoments::NPairs; ++pair) {
+            edgeYRR[pair][sum] = float(moments.yRR[pair][sum]);
+            edgeZRR[pair][sum] = float(moments.zRR[pair][sum]);
+          }
+        }
+      }
       for (int charge = 0; charge < 2; ++charge) {
         const auto& chargeSums = treeSums[voxel][charge];
         entries[charge] = chargeSums.entries;
@@ -2893,6 +3204,11 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
       std::lock_guard<std::mutex> lock(sumsMutex);
       for (const auto& contribution : batch) {
         sums[contribution.voxel][contribution.charge].add(contribution);
+        if (context.edgeMoments) {
+          auto& moments = (*context.edgeMoments)[contribution.voxel];
+          EdgeMoments::fill(moments.yR, moments.yRR, contribution.slopeY, contribution.residualY, contribution.weightY, contribution.edgeR);
+          EdgeMoments::fill(moments.zR, moments.zRR, contribution.slopeZ, contribution.residualZ, contribution.weightZ, contribution.edgeR);
+        }
         if (context.padSums && contribution.padCell >= 0) {
           context.padSums->add(contribution.padCell, contribution.weightY, contribution.padResidualY, contribution.weightZ, contribution.padResidualZ);
         }
@@ -2909,8 +3225,19 @@ long runPass(const std::vector<const TFInfo*>& passTFs, const std::vector<std::s
     size_t firstTrack = 0;
     size_t lastTrack = 0;
     while (queue.next(task, firstTrack, lastTrack)) {
+      // edge moments (11-20): the TF's regressors, centred on the table (u = IDC of the side, v_L, v_R per sector)
+      const auto* edgeRow = context.edgeTable ? context.edgeTable->lookup(long(task->info->timeMS)) : nullptr;
       for (size_t track = firstTrack; track < lastTrack; ++track) {
+        const size_t firstNew = batch.size();
         processTrack(*task, track, context, localCounters, clusters, batch, localQA.get());
+        for (size_t i = firstNew; edgeRow && i < batch.size(); ++i) {
+          const int sector = int(batch[i].voxel / size_t(context.voxelsPerSector));
+          auto value = [&](int column) {
+            const float v = (*edgeRow)[column];
+            return std::isfinite(v) ? v : 0.f;
+          };
+          batch[i].edgeR = {value(sector < 18 ? 0 : 1), value(2 + EdgeTable::boundaryLow(sector)), value(2 + EdgeTable::boundaryHigh(sector))};
+        }
         if (batch.size() >= SumsBatchSize) {
           flush();
         }
@@ -3069,7 +3396,14 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
                                                                                                      // without the cluster, between the fit passes) instead of the summed residuals
                        float trackPtMin = 0.f,                                                       // > 0: only tracks with the ITS track's pT >= this [GeV] (collisionDcaSeries ptMin)
                        float trackTglMax = 0.f,                                                      // > 0: only tracks with |tgl| < this (collisionDcaSeries maxTgl)
-                       int trackMinTPC = 0)                                                          // > 0: only tracks with at least this many TPC residuals (collisionDcaSeries minTpc)
+                       int trackMinTPC = 0,                                                          // > 0: only tracks with at least this many TPC residuals (collisionDcaSeries minTpc)
+                       std::string edgeTableFile = "",                                               // (11-20) with writeSums: regressor table of the sector-edge fluctuations per second
+                                                                                                     // (o2_macros gsi/edgedipole/makeEdgeTable.C) -> per voxel the moments of the sums in
+                                                                                                     // (IDC of the side, Dc of the sector's two boundaries), fineSums branches yR, yRR, zR, zRR as
+                                                                                                     // staticMapCreatorCPM.C (see EdgeMoments; ~0.9 kB per voxel in memory); empty: off
+                       std::string edgeShapeR = "",                                                  // (11-20, with edgeTableFile) the coarse edge term applied to the clusters after the base
+                       std::string edgeShapeL = "",                                                  // correction: edge-shape maps of the high-y / low-y boundary (see EdgeTerm); empty: off
+                       float edgeScaleUM = 100.f)                                                    // the shapes' unit: cm per this many um of the dipole
 {
   using namespace fine_map;
   const auto startTime = std::chrono::steady_clock::now();
@@ -3416,6 +3750,39 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
          sShapeTable.nGroup, sShapeTable.nClass, sShapeTable.nDrift, sShapeTable.driftStep, sShapeTable.nSlope, sShapeTable.nPhase,
          sShapeTable.splitCentre ? ", not interpolated across the pad centre" : "");
   }
+  // (11-20) sector-edge fluctuations: the regressor table, the per-voxel edge moments, optionally the coarse edge term on the clusters
+  EdgeTable edgeTable;
+  EdgeTerm edgeTerm;
+  std::vector<EdgeMoments> edgeMoments;
+  std::string edgeTermInfo;
+  if (!edgeTableFile.empty()) {
+    if (!writeSums || !edgeTable.load(edgeTableFile)) {
+      LOGP(fatal, "edgeTableFile {}: no entries read, or writeSums is off (the moments go into fineSums)", edgeTableFile);
+    }
+    edgeMoments.resize(sums.size());
+    context.edgeTable = &edgeTable;
+    context.edgeMoments = &edgeMoments;
+    long nTFsWithoutEntry = 0;
+    for (const auto* tf : fitTFs) {
+      nTFsWithoutEntry += edgeTable.lookup(long(tf->timeMS)) == nullptr;
+    }
+    LOGP(info, "edge moments of the summed residuals: {} seconds from {}, mean IDC A {:.4f}, C {:.4f}; {:.1f} GB for the moments; {} of {} TFs without a table entry "
+               "within {} ms (their clusters enter with r = 0)",
+         edgeTable.timeMS.size(), edgeTableFile, edgeTable.mean[0], edgeTable.mean[1], edgeMoments.size() * sizeof(EdgeMoments) / 1e9, nTFsWithoutEntry, fitTFs.size(),
+         edgeTable.maxGapMS);
+  }
+  if (!edgeShapeR.empty() || !edgeShapeL.empty()) {
+    if (edgeTableFile.empty() || edgeShapeR.empty() || edgeShapeL.empty()) {
+      LOGP(fatal, "the edge term needs edgeTableFile, edgeShapeR and edgeShapeL");
+    }
+    if (!edgeTerm.load(edgeShapeR, edgeShapeL, edgeTable, firstTFTime, lastTFTime, edgeScaleUM)) {
+      LOGP(fatal, "edge term: cannot load the shapes {} / {} or no table rows in the window {} - {}", edgeShapeR, edgeShapeL, firstTFTime, lastTFTime);
+    }
+    context.edgeTerm = &edgeTerm;
+    edgeTermInfo = fmt::format("shapes {} (R) / {} (L), {} um per unit, window mean over {} table rows", edgeShapeR, edgeShapeL, edgeScaleUM, edgeTerm.windowRows);
+    LOGP(info, "edge term applied to the clusters after the base correction: {}; window means C1|C2 {:+.1f}, A2|A3 {:+.1f} um (centred)", edgeTermInfo,
+         edgeTerm.windowMean[19], edgeTerm.windowMean[2]);
+  }
   const long nFitted = runPass(fitTFs, files, context, nThreads, sums, selected, "", edgeQASums.get());
   std::vector<std::pair<std::string, std::string>> extraInfo;
   extraInfo.emplace_back("smoothing", "none");
@@ -3427,6 +3794,7 @@ void fineMapCreatorGBL(std::string fileInput = "files.txt",                     
     edgeTree->Close();
   }
   writeOutput(fileOutput, *binning, y2xBinning, z2xBinning, maxZ2X, sums, extraInfo, nFitted, minEntries, writeSums, runNumber,
-              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected, edgeQASums.get(), padSumsData.get(), sShapeData.get());
+              orbitResetMS, isPbPb, firstTFTime, lastTFTime, selected, edgeQASums.get(), padSumsData.get(), sShapeData.get(),
+              edgeMoments.empty() ? nullptr : &edgeMoments, edgeTableFile.empty() ? nullptr : &edgeTable, edgeTableFile, edgeTermInfo);
   LOGP(info, "fineMapCreatorGBL: {:.1f} s", std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime).count());
 }
