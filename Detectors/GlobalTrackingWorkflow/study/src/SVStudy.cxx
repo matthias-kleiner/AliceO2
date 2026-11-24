@@ -44,6 +44,26 @@
 #include "DCAFitter/DCAFitterN.h"
 #include "MathUtils/fit.h"
 #include "GlobalTrackingStudy/V0Ext.h"
+#include "GlobalTrackingStudy/V0FullOutputParams.h"
+#include "DataFormatsGlobalTracking/V0WithClusters.h"
+#include "DataFormatsITS/TrackITS.h"
+#include "DataFormatsITSMFT/CompCluster.h"
+#include "DataFormatsITSMFT/ROFRecord.h"
+#include "DataFormatsITSMFT/TopologyDictionary.h"
+#include "DataFormatsITSMFT/ClusterPattern.h"
+#include "DataFormatsTOF/Cluster.h"
+#include "DataFormatsTRD/TrackTRD.h"
+#include "DataFormatsTRD/Tracklet64.h"
+#include "DataFormatsTRD/TriggerRecord.h"
+#include "CommonDataFormat/TFIDInfo.h"
+#include "CommonConstants/PhysicsConstants.h"
+#include "DetectorsBase/TFIDInfoHelper.h"
+#include "TPCFastTransformPOD.h"
+#include "MathUtils/Utils.h"
+#include "CommonDataFormat/InteractionRecord.h"
+#include <unordered_map>
+#include <algorithm>
+#include <cmath>
 #include "GPUO2InterfaceConfiguration.h"
 // #include "GPUSettingsO2.h"
 #include "GPUParam.h"
@@ -71,8 +91,8 @@ using timeEst = o2::dataformats::TimeStampWithError<float, float>;
 class SVStudySpec final : public Task
 {
  public:
-  SVStudySpec(std::shared_ptr<DataRequest> dr, std::shared_ptr<o2::base::GRPGeomRequest> gr, GTrackID::mask_t src, bool useTPCCl, bool useMC)
-    : mDataRequest(dr), mGGCCDBRequest(gr), mTracksSrc(src), mUseTPCCl(useTPCCl), mUseMC(useMC) {}
+  SVStudySpec(std::shared_ptr<DataRequest> dr, std::shared_ptr<o2::base::GRPGeomRequest> gr, GTrackID::mask_t src, bool useTPCCl, bool useMC, bool fullOutput)
+    : mDataRequest(dr), mGGCCDBRequest(gr), mTracksSrc(src), mUseTPCCl(useTPCCl), mUseMC(useMC), mFullOutput(fullOutput) {}
   ~SVStudySpec() final = default;
   void init(InitContext& ic) final;
   void run(ProcessingContext& pc) final;
@@ -82,8 +102,33 @@ class SVStudySpec final : public Task
   o2::dataformats::V0Ext processV0(int iv, o2::globaltracking::RecoContainer& recoData);
 
  private:
+  /// ITS cluster of the full output whose pattern bytes are in the TF's pattern stream
+  struct ITSPattRequest {
+    int cluster; ///< entry of the cluster in the output ITS cluster table
+    int index;   ///< index of the cluster in the TF
+  };
+  /// output of --full-output for one TF
+  struct FullOutput {
+    std::vector<o2::dataformats::V0WithClusters> v0s;
+    std::vector<o2::dataformats::V0Prong> prongs;
+    std::vector<o2::dataformats::V0TPCCluster> clTPC;
+    std::vector<o2::dataformats::V0ITSCluster> clITS;
+    std::vector<uint8_t> itsPatterns;
+    std::vector<o2::dataformats::V0TOFCluster> clTOF;
+    std::vector<o2::dataformats::V0TRDTracklet> trdTracklets;
+    std::unordered_map<uint32_t, int> prongEntry; ///< prong table entry of a global track ID (GTrackID::getRawWOFlags)
+    std::vector<ITSPattRequest> pattRequests;
+  };
+
   void updateTimeDependentParams(ProcessingContext& pc);
   bool refitV0(const V0ID& id, o2::dataformats::V0& v0, o2::globaltracking::RecoContainer& recoData);
+  const o2::dataformats::V0* getV0(int iv, o2::globaltracking::RecoContainer& recoData);
+  void getTPCOccupancy(const PVertex& pv, float& occBef, float& occAft) const;
+  void processFull(o2::globaltracking::RecoContainer& recoData, ProcessingContext& pc);
+  bool passProngCuts(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
+  int addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out);
+  void fillITSPatterns(const o2::globaltracking::RecoContainer& recoData, FullOutput& out) const;
+  void writeFullDebug(const o2::dataformats::V0WithClusters& v0, const FullOutput& out, const PVertex& pv, int tfCounter) const;
   std::shared_ptr<DataRequest> mDataRequest;
   std::shared_ptr<o2::base::GRPGeomRequest> mGGCCDBRequest;
   bool mUseMC{false}; ///< MC flag
@@ -91,12 +136,26 @@ class SVStudySpec final : public Task
   float mSelK0 = -1;
   bool mRefit = false;
   bool mUseTPCCl = false;
+  bool mStudyTree = true;                                         ///< write svStudy.root
+  bool mFullOutput = false;                                       ///< send the selected V0s with the raw clusters of their prongs
+  std::vector<o2::dataformats::V0> mRefitV0s;                     ///< refitted V0s of the TF (index = V0 finder entry), shared by svStudy.root and the full output
+  std::vector<int8_t> mRefitStatus;                               ///< per V0 finder entry: -1 not refitted yet, 0 refit failed, 1 refitted
+  const o2::gpu::TPCFastTransformPOD* mCorrMap = nullptr;         ///< TPC transformation of the TF (full output)
+  const o2::itsmft::TopologyDictionary* mITSDict = nullptr;       ///< ITS cluster dictionary (full output: which patterns to store)
+  o2::InteractionRecord mTFStart{};                               ///< first BC of the TF
+  std::unique_ptr<o2::utils::TreeStreamRedirector> mFullDebugOut; ///< --debug-tree: transformed clusters of the full-output V0s
+  mutable bool mNoDictWarned = false;
+  bool mMaxV0sWarned = false;
+  size_t mNV0sFull = 0;    ///< V0s written with clusters
+  size_t mNProngsFull = 0; ///< prongs written
+  size_t mNClTPCFull = 0;  ///< TPC clusters written
   float mMaxEta = 0.8;
   float mBz = 0;
   int mNHBPerTF = 0;
   int mNTPCOccBinLength = 0; ///< TPC occ. histo bin length in TBs
-  float mNTPCOccBinLengthInv;
+  float mNTPCOccBinLengthInv = 0.f;
   float mTPCTBinMUSInv = 0.f;
+  float mTPCTBinMUS = 0.f;
   GTrackID::mask_t mTracksSrc{};
   o2::vertexing::DCAFitterN<2> mFitterV0;
   std::vector<float> mTBinClOccAft, mTBinClOccBef;
@@ -107,7 +166,13 @@ class SVStudySpec final : public Task
 void SVStudySpec::init(InitContext& ic)
 {
   o2::base::GRPGeomHelper::instance().setRequest(mGGCCDBRequest);
-  mDBGOut = std::make_unique<o2::utils::TreeStreamRedirector>("svStudy.root", "recreate");
+  mStudyTree = !ic.options().get<bool>("disable-study-tree");
+  if (mStudyTree) {
+    mDBGOut = std::make_unique<o2::utils::TreeStreamRedirector>("svStudy.root", "recreate");
+  }
+  if (mFullOutput && ic.options().get<bool>("debug-tree")) {
+    mFullDebugOut = std::make_unique<o2::utils::TreeStreamRedirector>("v0s_full_debug.root", "recreate");
+  }
   mRefit = ic.options().get<bool>("refit");
   mSelK0 = ic.options().get<float>("sel-k0");
   mMaxEta = ic.options().get<float>("max-eta");
@@ -163,7 +228,20 @@ void SVStudySpec::run(ProcessingContext& pc)
     }
   }
 
-  process(recoData);
+  // the V0 finder sends only the V0 indices unless svertexer.createFullV0s: then every V0 is refitted, once per TF for both outputs
+  const auto nv0 = recoData.getV0sIdx().size();
+  if (nv0 > recoData.getV0s().size()) {
+    mRefit = true;
+  }
+  mRefitStatus.assign(nv0, -1);
+  mRefitV0s.resize(nv0);
+
+  if (mStudyTree) {
+    process(recoData);
+  }
+  if (mFullOutput) {
+    processFull(recoData, pc);
+  }
 }
 
 void SVStudySpec::updateTimeDependentParams(ProcessingContext& pc)
@@ -197,10 +275,14 @@ void SVStudySpec::updateTimeDependentParams(ProcessingContext& pc)
       mParam = o2::gpu::GPUO2InterfaceUtils::getFullParamShared(0.f, mNHBPerTF);
     }
     auto& elParam = o2::tpc::ParameterElectronics::Instance();
+    mTPCTBinMUS = elParam.ZbinWidth;
     mTPCTBinMUSInv = 1. / elParam.ZbinWidth; // 1./TPC bin in microseconds
   }
   mBz = o2::base::Propagator::Instance()->getNominalBz();
   mFitterV0.setBz(mBz);
+  if (mFullOutput) {
+    mCorrMap = &o2::gpu::TPCFastTransformPOD::get(pc.inputs().get<const char*>("corrMap"));
+  }
 }
 
 o2::dataformats::V0Ext SVStudySpec::processV0(int iv, o2::globaltracking::RecoContainer& recoData)
@@ -213,9 +295,13 @@ o2::dataformats::V0Ext SVStudySpec::processV0(int iv, o2::globaltracking::RecoCo
   static int tfID = 0;
 
   const auto& v0id = v0IDs[iv];
-  if (mRefit && !refitV0(v0id, v0ext.v0, recoData)) {
-    invalidate();
-    return v0ext;
+  if (mRefit) {
+    const auto* v0refit = getV0(iv, recoData);
+    if (!v0refit) {
+      invalidate();
+      return v0ext;
+    }
+    v0ext.v0 = *v0refit;
   }
   const auto& v0sel = mRefit ? v0ext.v0 : v0s[iv];
   if (mMaxEta < std::abs(v0sel.getEta())) {
@@ -320,9 +406,6 @@ void SVStudySpec::process(o2::globaltracking::RecoContainer& recoData)
 {
   auto v0IDs = recoData.getV0sIdx();
   auto nv0 = v0IDs.size();
-  if (nv0 > recoData.getV0s().size()) {
-    mRefit = true;
-  }
   std::map<int, std::vector<int>> pv2sv;
   static int tfID = 0;
   for (int iv = 0; iv < nv0; iv++) {
@@ -347,9 +430,7 @@ void SVStudySpec::process(o2::globaltracking::RecoContainer& recoData)
     if (v0extVec.size()) {
       const auto& pv = recoData.getPrimaryVertex(pvID);
       float tpcOccBef = 0., tpcOccAft = 0.;
-      int tb = pv.getTimeStamp().getTimeStamp() * mTPCTBinMUSInv * mNTPCOccBinLengthInv;
-      tpcOccBef = tb < 0 ? mTBinClOccBef[0] : (tb >= mTBinClOccBef.size() ? mTBinClOccBef.back() : mTBinClOccBef[tb]);
-      tpcOccAft = tb < 0 ? mTBinClOccAft[0] : (tb >= mTBinClOccAft.size() ? mTBinClOccAft.back() : mTBinClOccAft[tb]);
+      getTPCOccupancy(pv, tpcOccBef, tpcOccAft);
 
       (*mDBGOut) << "v0"
                  << "orbit=" << recoData.startIR.orbit << "tfID=" << tfID << "tpcOccBef=" << tpcOccBef << "tpcOccAft=" << tpcOccAft
@@ -405,9 +486,358 @@ bool SVStudySpec::refitV0(const V0ID& id, o2::dataformats::V0& v0, o2::globaltra
   return true;
 }
 
+const o2::dataformats::V0* SVStudySpec::getV0(int iv, o2::globaltracking::RecoContainer& recoData)
+{
+  // the V0 of the finder if it sent them (svertexer.createFullV0s), else the refit of this device, done once per TF
+  if (!mRefit) {
+    return &recoData.getV0s()[iv];
+  }
+  if (mRefitStatus[iv] < 0) {
+    mRefitStatus[iv] = refitV0(recoData.getV0sIdx()[iv], mRefitV0s[iv], recoData) ? 1 : 0;
+  }
+  return mRefitStatus[iv] ? &mRefitV0s[iv] : nullptr;
+}
+
+void SVStudySpec::getTPCOccupancy(const PVertex& pv, float& occBef, float& occAft) const
+{
+  // TPC clusters before / after the time of the primary vertex (0 without the TPC occupancy map)
+  occBef = occAft = 0.f;
+  if (mTBinClOccBef.empty() || mTBinClOccAft.empty()) {
+    return;
+  }
+  int tb = pv.getTimeStamp().getTimeStamp() * mTPCTBinMUSInv * mNTPCOccBinLengthInv;
+  occBef = tb < 0 ? mTBinClOccBef[0] : (tb >= mTBinClOccBef.size() ? mTBinClOccBef.back() : mTBinClOccBef[tb]);
+  occAft = tb < 0 ? mTBinClOccAft[0] : (tb >= mTBinClOccAft.size() ? mTBinClOccAft.back() : mTBinClOccAft[tb]);
+}
+
+bool SVStudySpec::passProngCuts(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const
+{
+  // cuts that need only the prong tracks: applied before the refit
+  const auto& par = V0FullOutputParams::Instance();
+  int charge[2] = {0, 0};
+  for (int ip = 0; ip < 2; ip++) {
+    const auto gid = id.getProngID(ip);
+    charge[ip] = recoData.getTrackParam(gid).getCharge();
+    const auto refs = recoData.getSingleDetectorRefs(gid);
+    const bool hasTPC = refs[GTrackID::TPC].isIndexSet();
+    if (par.requireTPCBoth && !hasTPC) {
+      return false;
+    }
+    if (hasTPC && recoData.getTPCTrack(refs[GTrackID::TPC]).getNClusters() < par.minTPCClusters) {
+      return false;
+    }
+  }
+  return !par.requireOppositeCharges || charge[0] * charge[1] < 0;
+}
+
+int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out)
+{
+  // each prong is stored once per TF: the V0s sharing it point to the same entry
+  const auto found = out.prongEntry.find(gid.getRawWOFlags());
+  if (found != out.prongEntry.end()) {
+    return found->second;
+  }
+  const int entry = out.prongs.size();
+  out.prongEntry[gid.getRawWOFlags()] = entry;
+  auto& prong = out.prongs.emplace_back();
+  prong.gid = gid;
+  prong.track = recoData.getTrackParam(gid);
+  float t = 0.f, tErr = 0.f;
+  recoData.getTrackTime(gid, t, tErr);
+  if (gid.getSource() == GTrackID::TPC) { // TPC-only tracks give their time in time bins
+    t *= mTPCTBinMUS;
+    tErr *= mTPCTBinMUS;
+  }
+  prong.timeMUS = t;
+  prong.timeErrMUS = tErr;
+  const auto refs = recoData.getSingleDetectorRefs(gid);
+  if (refs[GTrackID::ITSTPC].isIndexSet()) {
+    prong.chi2ITSTPC = recoData.getTPCITSTrack(refs[GTrackID::ITSTPC]).getChi2Match();
+  }
+  // TPC: the attached clusters, in the order of the track's cluster references
+  if (refs[GTrackID::TPC].isIndexSet()) {
+    const auto& trk = recoData.getTPCTrack(refs[GTrackID::TPC]);
+    prong.tpc = trk;
+    prong.flags |= o2::dataformats::V0Prong::HasTPC;
+    const auto& clusters = recoData.getTPCClusters();
+    const auto clRefs = recoData.getTPCTracksClusterRefs();
+    prong.tpcClusters.setFirstEntry(out.clTPC.size());
+    for (int j = 0; j < trk.getNClusterReferences(); j++) {
+      uint8_t sector = 0, row = 0;
+      uint32_t clIdx = 0;
+      trk.getClusterReference(clRefs, j, sector, row, clIdx);
+      auto& cl = out.clTPC.emplace_back();
+      cl.cl = clusters.clusters[sector][row][clIdx];
+      cl.sector = sector;
+      cl.row = row;
+      if (!recoData.clusterShMapTPC.empty()) {
+        cl.shMap = recoData.clusterShMapTPC[clusters.clusterOffset[sector][row] + clIdx];
+      }
+    }
+    prong.tpcClusters.setEntries(out.clTPC.size() - prong.tpcClusters.getFirstEntry());
+  }
+  // ITS: clusters of the ITS track, or of the afterburner tracklet attached in the ITS-TPC matching
+  std::vector<int> itsIndices;
+  if (refs[GTrackID::ITS].isIndexSet()) {
+    const auto& trk = recoData.getITSTrack(refs[GTrackID::ITS]);
+    const auto clRefs = recoData.getITSTracksClusterRefs();
+    for (int i = 0; i < trk.getNumberOfClusters(); i++) {
+      itsIndices.push_back(clRefs[trk.getFirstClusterEntry() + i]);
+    }
+    prong.flags |= o2::dataformats::V0Prong::HasITS;
+  } else if (refs[GTrackID::ITSAB].isIndexSet()) {
+    const auto& ab = recoData.getITSABRef(refs[GTrackID::ITSAB]);
+    const auto clRefs = recoData.getITSABClusterRefs();
+    for (int i = 0; i < ab.getEntries(); i++) {
+      itsIndices.push_back(clRefs[ab.getFirstEntry() + i]);
+    }
+    prong.flags |= o2::dataformats::V0Prong::HasITS | o2::dataformats::V0Prong::ITSAB;
+  }
+  const auto itsClusters = recoData.getITSClusters();
+  const auto rofs = recoData.getITSClustersROFRecords();
+  prong.itsClusters.setFirstEntry(out.clITS.size());
+  for (const int idx : itsIndices) {
+    if (idx < 0 || idx >= (int)itsClusters.size()) {
+      continue;
+    }
+    const auto& c = itsClusters[idx];
+    auto& cl = out.clITS.emplace_back();
+    cl.chipID = c.getSensorID();
+    cl.row = c.getRow();
+    cl.col = c.getCol();
+    cl.pattID = c.getPatternID();
+    if (c.getPatternID() == o2::itsmft::CompCluster::InvalidPatternID || (mITSDict && mITSDict->isGroup(c.getPatternID()))) {
+      out.pattRequests.push_back({int(out.clITS.size()) - 1, idx}); // pattern bytes in the TF's pattern stream, copied by fillITSPatterns
+    }
+    auto rof = std::upper_bound(rofs.begin(), rofs.end(), idx, [](int v, const o2::itsmft::ROFRecord& r) { return v < r.getFirstEntry(); });
+    if (rof != rofs.begin()) {
+      cl.rofBC = std::prev(rof)->getBCData().differenceInBC(mTFStart);
+    }
+  }
+  prong.itsClusters.setEntries(out.clITS.size() - prong.itsClusters.getFirstEntry());
+  // TOF: the matched cluster
+  prong.tofClusters.setFirstEntry(out.clTOF.size());
+  if (refs[GTrackID::TOF].isIndexSet()) {
+    const auto tofClusters = recoData.getTOFClusters();
+    const int idx = refs[GTrackID::TOF].getIndex();
+    if (idx < (int)tofClusters.size()) {
+      const auto& c = tofClusters[idx];
+      auto& cl = out.clTOF.emplace_back();
+      cl.timeRaw = c.getTimeRaw();
+      cl.tot = c.getTot();
+      cl.channel = c.getMainContributingChannel();
+      prong.flags |= o2::dataformats::V0Prong::HasTOF;
+    }
+  }
+  prong.tofClusters.setEntries(out.clTOF.size() - prong.tofClusters.getFirstEntry());
+  // TRD: the tracklets of the TPC-TRD or ITS-TPC-TRD track
+  prong.trdTracklets.setFirstEntry(out.trdTracklets.size());
+  if (refs[GTrackID::TRD].isIndexSet()) {
+    const auto& trk = recoData.getTrack<o2::trd::TrackTRD>(refs[GTrackID::TRD]);
+    const auto tracklets = recoData.getTRDTracklets();
+    const auto trigs = recoData.getTRDTriggerRecords();
+    for (int layer = 0; layer < 6; layer++) {
+      const int it = trk.getTrackletIndex(layer);
+      if (it < 0 || it >= (int)tracklets.size()) {
+        continue;
+      }
+      auto& tr = out.trdTracklets.emplace_back();
+      tr.word = tracklets[it].getTrackletWord();
+      tr.layer = layer;
+      auto trig = std::upper_bound(trigs.begin(), trigs.end(), it, [](int v, const o2::trd::TriggerRecord& t) { return v < t.getFirstTracklet(); });
+      if (trig != trigs.begin()) {
+        tr.trigBC = std::prev(trig)->getBCData().differenceInBC(mTFStart);
+      }
+    }
+    prong.flags |= o2::dataformats::V0Prong::HasTRD;
+  }
+  prong.trdTracklets.setEntries(out.trdTracklets.size() - prong.trdTracklets.getFirstEntry());
+  return entry;
+}
+
+void SVStudySpec::fillITSPatterns(const o2::globaltracking::RecoContainer& recoData, FullOutput& out) const
+{
+  // the TF's pattern stream holds, in cluster order, the patterns of the clusters with an invalid or a group pattern ID
+  if (!mITSDict) {
+    if (!mNoDictWarned) {
+      LOGP(warning, "No ITS cluster dictionary: patterns of ITS clusters of V0 prongs are not stored");
+      mNoDictWarned = true;
+    }
+    return;
+  }
+  auto& requests = out.pattRequests;
+  std::sort(requests.begin(), requests.end(), [](const ITSPattRequest& a, const ITSPattRequest& b) { return a.index < b.index; });
+  const auto clusters = recoData.getITSClusters();
+  auto pattIt = recoData.getITSClustersPatterns().begin();
+  size_t ir = 0;
+  for (int k = 0; k < (int)clusters.size() && ir < requests.size(); k++) {
+    const auto pattID = clusters[k].getPatternID();
+    if (pattID != o2::itsmft::CompCluster::InvalidPatternID && !mITSDict->isGroup(pattID)) {
+      continue;
+    }
+    const auto start = pattIt;
+    o2::itsmft::ClusterPattern::skipPattern(pattIt);
+    for (; ir < requests.size() && requests[ir].index == k; ir++) {
+      out.clITS[requests[ir].cluster].pattEntry = out.itsPatterns.size();
+      out.itsPatterns.insert(out.itsPatterns.end(), start, pattIt);
+    }
+  }
+}
+
+void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, ProcessingContext& pc)
+{
+  const auto& par = V0FullOutputParams::Instance();
+  o2::dataformats::TFIDInfo tfID;
+  o2::base::TFIDInfoHelper::fillTFIDInfo(pc, tfID);
+  mTFStart = {0, tfID.firstTForbit};
+  o2::dataformats::V0sTFInfo tfInfo;
+  tfInfo.vDrift = mCorrMap->getVDrift();
+  tfInfo.t0 = mCorrMap->getT0();
+  tfInfo.lumi = mCorrMap->getLumi();
+  tfInfo.idc = mCorrMap->getIDC();
+  tfInfo.tpcOcc = recoData.occupancyMapTPC.empty() ? -1.f : recoData.occupancyMapTPC[0];
+  tfInfo.nHBFPerTF = mNHBPerTF;
+
+  FullOutput out;
+  const auto v0IDs = recoData.getV0sIdx();
+  const float massK0 = o2::constants::physics::MassK0Short;
+  const float massLambda = o2::constants::physics::MassLambda;
+  for (int iv = 0; iv < (int)v0IDs.size(); iv++) {
+    if (par.maxV0sPerTF >= 0 && (int)out.v0s.size() >= par.maxV0sPerTF) {
+      if (!mMaxV0sWarned) {
+        LOGP(warning, "More than {} selected V0s in TF {}, the others are not written (svFullOutput.maxV0sPerTF; warned once)", par.maxV0sPerTF, tfID.tfCounter);
+        mMaxV0sWarned = true;
+      }
+      break;
+    }
+    const auto& id = v0IDs[iv];
+    if (id.getVertexID() < 0 || !passProngCuts(id, recoData)) {
+      continue;
+    }
+    const auto* v0 = getV0(iv, recoData);
+    if (!v0) {
+      continue;
+    }
+    o2::dataformats::V0WithClusters cand;
+    cand.dca = v0->getDCA();
+    cand.cosPA = v0->getCosPA();
+    cand.qT = v0->calcAPQt();
+    cand.alpha = v0->calcAPAlpha();
+    cand.r = std::sqrt(v0->calcR2());
+    cand.massK0 = std::sqrt(std::max(0.f, v0->calcMass2AsK0()));
+    cand.massLambda = std::sqrt(std::max(0.f, v0->calcMass2AsLambda()));
+    cand.massAntiLambda = std::sqrt(std::max(0.f, v0->calcMass2AsAntiLambda()));
+    cand.massGamma = std::sqrt(std::max(0.f, v0->calcMass2AsPhoton()));
+    if (cand.dca > par.maxDCA || cand.cosPA < par.minCosPA || cand.qT < par.minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > par.maxR) {
+      continue;
+    }
+    if (par.selK0 && std::abs(cand.massK0 - massK0) < par.maxDMassK0) {
+      cand.selection |= o2::dataformats::V0WithClusters::K0;
+    }
+    if (par.selLambda && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < par.maxDMassLambda) {
+      cand.selection |= o2::dataformats::V0WithClusters::Lambda;
+    }
+    if (par.selLambda && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < par.maxDMassLambda) {
+      cand.selection |= o2::dataformats::V0WithClusters::AntiLambda;
+    }
+    if (!cand.selection) {
+      continue;
+    }
+    if (id.isPhotonOnly()) {
+      cand.selection |= o2::dataformats::V0WithClusters::PhotonOnly;
+    }
+    cand.v0 = *v0;
+    cand.v0ID = id;
+    const auto& pv = recoData.getPrimaryVertex(id.getVertexID());
+    getTPCOccupancy(pv, cand.tpcOccBef, cand.tpcOccAft);
+    for (int ip = 0; ip < 2; ip++) {
+      cand.prong[ip] = addProng(id.getProngID(ip), recoData, out);
+    }
+    out.v0s.push_back(cand);
+    if (mFullDebugOut) {
+      writeFullDebug(out.v0s.back(), out, pv, tfID.tfCounter);
+    }
+  }
+  if (!out.pattRequests.empty()) {
+    fillITSPatterns(recoData, out);
+  }
+  mNV0sFull += out.v0s.size();
+  mNProngsFull += out.prongs.size();
+  mNClTPCFull += out.clTPC.size();
+  LOGP(info, "Full output of TF {}: {} V0s of {} candidates, {} prongs, {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets", tfID.tfCounter, out.v0s.size(), v0IDs.size(), out.prongs.size(),
+       out.clTPC.size(), out.clITS.size(), out.clTOF.size(), out.trdTracklets.size());
+  pc.outputs().snapshot(Output{"GLO", "V0FULL", 0}, out.v0s);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLPRONG", 0}, out.prongs);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLCLTPC", 0}, out.clTPC);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLCLITS", 0}, out.clITS);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLITSPATT", 0}, out.itsPatterns);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLCLTOF", 0}, out.clTOF);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLTRDTRKL", 0}, out.trdTracklets);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLTF", 0}, tfInfo);
+  pc.outputs().snapshot(Output{"GLO", "V0FULLOCCMAP", 0}, std::vector<unsigned int>(recoData.occupancyMapTPC.begin(), recoData.occupancyMapTPC.end()));
+  pc.outputs().snapshot(Output{"GLO", "V0FULLTFID", 0}, tfID);
+}
+
+void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, const FullOutput& out, const PVertex& pv, int tfCounter) const
+{
+  // the stored TPC clusters of both prongs transformed with the map of the TF: z with the prong's time0 (the frame of its TPC track) and
+  // zPV with the time of the primary vertex (absolute z, comparable to the V0 vertex)
+  constexpr int NSectorsA = 18;
+  const float pvTimeTB = pv.getTimeStamp().getTimeStamp() * mTPCTBinMUSInv;
+  std::vector<int> clProng, clSector, clRow;
+  std::vector<float> clPad, clTime, clX, clY, clZ, clZPV, clGx, clGy;
+  float time0[2] = {-1.f, -1.f};
+  int nClTPC[2] = {0, 0}, nClITS[2] = {0, 0}, prongFlags[2] = {0, 0};
+  for (int ip = 0; ip < 2; ip++) {
+    const auto& prong = out.prongs[v0.prong[ip]];
+    prongFlags[ip] = prong.flags;
+    nClTPC[ip] = prong.tpcClusters.getEntries();
+    nClITS[ip] = prong.itsClusters.getEntries();
+    if (!prong.hasTPC()) {
+      continue;
+    }
+    time0[ip] = prong.tpc.getTime0();
+    for (int i = prong.tpcClusters.getFirstEntry(); i < (int)prong.tpcClusters.getEntriesBound(); i++) {
+      const auto& c = out.clTPC[i];
+      float x = 0.f, y = 0.f, z = 0.f, xPV = 0.f, yPV = 0.f, zPV = 0.f;
+      mCorrMap->Transform(c.sector, c.row, c.cl.getPad(), c.cl.getTime(), x, y, z, time0[ip]);
+      mCorrMap->Transform(c.sector, c.row, c.cl.getPad(), c.cl.getTime(), xPV, yPV, zPV, pvTimeTB);
+      const float alpha = o2::math_utils::sector2Angle(c.sector % NSectorsA);
+      const float sinAlpha = std::sin(alpha), cosAlpha = std::cos(alpha);
+      clProng.push_back(ip);
+      clSector.push_back(c.sector);
+      clRow.push_back(c.row);
+      clPad.push_back(c.cl.getPad());
+      clTime.push_back(c.cl.getTime());
+      clX.push_back(x);
+      clY.push_back(y);
+      clZ.push_back(z);
+      clZPV.push_back(zPV);
+      clGx.push_back(x * cosAlpha - y * sinAlpha);
+      clGy.push_back(x * sinAlpha + y * cosAlpha);
+    }
+  }
+  int selection = v0.selection;
+  float vx = v0.v0.getX(), vy = v0.v0.getY(), vz = v0.v0.getZ();
+  float pvTimeMUS = pv.getTimeStamp().getTimeStamp();
+  (*mFullDebugOut) << "v0"
+                   << "tf=" << tfCounter << "selection=" << selection << "massK0=" << v0.massK0 << "massLambda=" << v0.massLambda
+                   << "massAntiLambda=" << v0.massAntiLambda << "r=" << v0.r << "cosPA=" << v0.cosPA << "dca=" << v0.dca << "qT=" << v0.qT
+                   << "alpha=" << v0.alpha << "vx=" << vx << "vy=" << vy << "vz=" << vz << "pvTimeMUS=" << pvTimeMUS
+                   << "time0P=" << time0[0] << "time0N=" << time0[1] << "nClTPCP=" << nClTPC[0] << "nClTPCN=" << nClTPC[1]
+                   << "nClITSP=" << nClITS[0] << "nClITSN=" << nClITS[1] << "flagsP=" << prongFlags[0] << "flagsN=" << prongFlags[1]
+                   << "clProng=" << clProng << "clSector=" << clSector << "clRow=" << clRow << "clPad=" << clPad << "clTime=" << clTime
+                   << "clX=" << clX << "clY=" << clY << "clZ=" << clZ << "clZPV=" << clZPV << "clGx=" << clGx << "clGy=" << clGy
+                   << "\n";
+}
+
 void SVStudySpec::endOfStream(EndOfStreamContext& ec)
 {
   mDBGOut.reset();
+  mFullDebugOut.reset();
+  if (mFullOutput) {
+    LOGP(info, "SV study full output: {} V0s, {} prongs, {} TPC clusters", mNV0sFull, mNProngsFull, mNClTPCFull);
+  }
 }
 
 void SVStudySpec::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
@@ -415,9 +845,13 @@ void SVStudySpec::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
   if (o2::base::GRPGeomHelper::instance().finaliseCCDB(matcher, obj)) {
     return;
   }
+  if (matcher == ConcreteDataMatcher("ITS", "CLUSDICT", 0)) {
+    mITSDict = (const o2::itsmft::TopologyDictionary*)obj;
+    return;
+  }
 }
 
-DataProcessorSpec getSVStudySpec(GTrackID::mask_t srcTracks, GTrackID::mask_t srcCls, bool useMC)
+DataProcessorSpec getSVStudySpec(GTrackID::mask_t srcTracks, GTrackID::mask_t srcCls, bool useMC, bool fullOutput)
 {
   std::vector<OutputSpec> outputs;
   auto dataRequest = std::make_shared<DataRequest>();
@@ -427,6 +861,19 @@ DataProcessorSpec getSVStudySpec(GTrackID::mask_t srcTracks, GTrackID::mask_t sr
   dataRequest->requestPrimaryVertices(useMC);
   dataRequest->requestSecondaryVertices(useMC);
   dataRequest->inputs.emplace_back("meanvtx", "GLO", "MEANVERTEX", 0, Lifetime::Condition, ccdbParamSpec("GLO/Calib/MeanVertex", {}, 1));
+  if (fullOutput) {
+    dataRequest->inputs.emplace_back("corrMap", o2::header::gDataOriginTPC, "TPCCORRMAP", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULL", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLPRONG", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLCLTPC", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLCLITS", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLITSPATT", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLCLTOF", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLTRDTRKL", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLTF", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLOCCMAP", 0, Lifetime::Timeframe);
+    outputs.emplace_back("GLO", "V0FULLTFID", 0, Lifetime::Timeframe);
+  }
   auto ggRequest = std::make_shared<o2::base::GRPGeomRequest>(true,                           // orbitResetTime
                                                               true,                           // GRPECS=true
                                                               false,                          // GRPLHCIF
@@ -440,11 +887,13 @@ DataProcessorSpec getSVStudySpec(GTrackID::mask_t srcTracks, GTrackID::mask_t sr
     "sv-study",
     dataRequest->inputs,
     outputs,
-    AlgorithmSpec{adaptFromTask<SVStudySpec>(dataRequest, ggRequest, srcTracks, useTPCcl, useMC)},
+    AlgorithmSpec{adaptFromTask<SVStudySpec>(dataRequest, ggRequest, srcTracks, useTPCcl, useMC, fullOutput)},
     Options{
       {"refit", VariantType::Bool, false, {"refit SVertices"}},
       {"sel-k0", VariantType::Float, -1.f, {"If positive, select K0s with this mass margin"}},
       {"max-eta", VariantType::Float, 1.2f, {"Cut on track eta"}},
+      {"disable-study-tree", VariantType::Bool, false, {"do not write svStudy.root (e.g. with --full-output only)"}},
+      {"debug-tree", VariantType::Bool, false, {"with --full-output: write v0s_full_debug.root with the transformed TPC clusters of the written V0s (test runs)"}},
     }};
 }
 
