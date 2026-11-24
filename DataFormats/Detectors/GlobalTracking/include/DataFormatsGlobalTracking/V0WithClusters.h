@@ -105,8 +105,13 @@ struct V0WithClusters {
     K0 = 0x1,         ///< passed the K0s selection
     Lambda = 0x2,     ///< passed the Lambda selection (proton = positive prong)
     AntiLambda = 0x4, ///< passed the anti-Lambda selection
-    PhotonOnly = 0x8  ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
+    PhotonOnly = 0x8, ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
+    Gamma = 0x10      ///< passed the photon-conversion selection
   };
+  enum SampleClass : uint8_t { ClassK0 = 0,
+                               ClassLambda = 1,
+                               ClassAntiLambda = 2,
+                               ClassGamma = 3 };
   V0 v0{};                    ///< V0 refitted by the study device (DCAFitter with the V0 finder's settings), prongs at the decay vertex
   V0Index v0ID{};             ///< prong IDs and primary vertex ID of the V0 finder (only valid within the TF)
   int prong[2] = {-1, -1};    ///< entries of the positive / negative prong in the TF's prong table
@@ -122,6 +127,17 @@ struct V0WithClusters {
   float tpcOccBef = 0.f;      ///< TPC clusters before the time of the primary vertex, as tpcOccBef in svStudy.root (0: no occupancy map)
   float tpcOccAft = 0.f;      ///< same after
   uint8_t selection = 0;      ///< Selection bits
+  uint8_t sampleClass = 0;    ///< SampleClass of the downsampling (first passed type of K0s, Lambda, anti-Lambda, photon)
+  float weight = 1.f;         ///< downsampling weight: V0s of its class and pT bin in the TF / kept ones (1: all kept)
+  float pvX = 0.f;            ///< primary vertex the V0 finder assigned (v0ID.getVertexID()) [cm]
+  float pvY = 0.f;
+  float pvZ = 0.f;
+  float pvTimeMUS = 0.f;    ///< its time [mus since the TF start]
+  float pvTimeErrMUS = 0.f; ///< and the time error
+  int pvNContrib = 0;       ///< its number of contributors
+  int nCompatPV = 0;        ///< primary vertices of the TF compatible in time with both prongs (TPC-only prong: its TPC time window;
+                            ///< else its time +- svFullOutput.pvTimeNSigma errors): 1 = unique, e.g. the z of TPC-only photon legs
+                            ///< from the vertex time      ///< Selection bits
   ClassDefNV(V0WithClusters, 1);
 };
 

@@ -62,6 +62,7 @@
 #include "MathUtils/Utils.h"
 #include "CommonDataFormat/InteractionRecord.h"
 #include <unordered_map>
+#include <map>
 #include <algorithm>
 #include <cmath>
 #include "GPUO2InterfaceConfiguration.h"
@@ -126,6 +127,7 @@ class SVStudySpec final : public Task
   void getTPCOccupancy(const PVertex& pv, float& occBef, float& occAft) const;
   void processFull(o2::globaltracking::RecoContainer& recoData, ProcessingContext& pc);
   bool passProngCuts(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
+  int countCompatiblePVs(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
   int addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out);
   void fillITSPatterns(const o2::globaltracking::RecoContainer& recoData, FullOutput& out) const;
   void writeFullDebug(const o2::dataformats::V0WithClusters& v0, const FullOutput& out, const PVertex& pv, int tfCounter) const;
@@ -684,6 +686,48 @@ void SVStudySpec::fillITSPatterns(const o2::globaltracking::RecoContainer& recoD
   }
 }
 
+namespace
+{
+/// reproducible pseudo-random number in [0, 1) of a V0 of a TF (splitmix64 of the TF counter and the V0 index)
+double v0Random(uint32_t tfCounter, uint32_t iv)
+{
+  uint64_t z = (uint64_t(tfCounter) << 32 | iv) + 0x9e3779b97f4a7c15ULL;
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+  z = z ^ (z >> 31);
+  return (z >> 11) * (1. / 9007199254740992.);
+}
+} // namespace
+
+int SVStudySpec::countCompatiblePVs(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const
+{
+  // primary vertices whose time is compatible with both prongs: a TPC-only prong (on one side) by its TPC time window, else by its time
+  const auto& par = V0FullOutputParams::Instance();
+  float tMin = -1e9f, tMax = 1e9f;
+  for (int ip = 0; ip < 2; ip++) {
+    const auto gid = id.getProngID(ip);
+    float lo = 0.f, hi = 0.f;
+    if (gid.getSource() == GTrackID::TPC) {
+      const auto& trk = recoData.getTPCTrack(gid);
+      lo = (trk.getTime0() - trk.getDeltaTBwd()) * mTPCTBinMUS;
+      hi = (trk.getTime0() + trk.getDeltaTFwd()) * mTPCTBinMUS;
+    } else {
+      float t = 0.f, tErr = 0.f;
+      recoData.getTrackTime(gid, t, tErr);
+      lo = t - par.pvTimeNSigma * tErr;
+      hi = t + par.pvTimeNSigma * tErr;
+    }
+    tMin = std::max(tMin, lo);
+    tMax = std::min(tMax, hi);
+  }
+  int n = 0;
+  for (const auto& pv : recoData.getPrimaryVertices()) {
+    const float t = pv.getTimeStamp().getTimeStamp(), err = par.pvTimeNSigma * pv.getTimeStamp().getTimeStampError();
+    n += (t + err >= tMin && t - err <= tMax);
+  }
+  return n;
+}
+
 void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, ProcessingContext& pc)
 {
   const auto& par = V0FullOutputParams::Instance();
@@ -698,18 +742,21 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
   tfInfo.tpcOcc = recoData.occupancyMapTPC.empty() ? -1.f : recoData.occupancyMapTPC[0];
   tfInfo.nHBFPerTF = mNHBPerTF;
 
+  using V0C = o2::dataformats::V0WithClusters;
   FullOutput out;
   const auto v0IDs = recoData.getV0sIdx();
   const float massK0 = o2::constants::physics::MassK0Short;
   const float massLambda = o2::constants::physics::MassLambda;
+  // 1) selected candidates (no clusters yet), with their sampling class and pT bin
+  struct Sel {
+    int iv;
+    int bin;
+    double rnd;
+    V0C cand;
+  };
+  std::vector<Sel> sel;
+  const double logPtMin = std::log10(par.ptMin), logPtMax = std::log10(par.ptMax);
   for (int iv = 0; iv < (int)v0IDs.size(); iv++) {
-    if (par.maxV0sPerTF >= 0 && (int)out.v0s.size() >= par.maxV0sPerTF) {
-      if (!mMaxV0sWarned) {
-        LOGP(warning, "More than {} selected V0s in TF {}, the others are not written (svFullOutput.maxV0sPerTF; warned once)", par.maxV0sPerTF, tfID.tfCounter);
-        mMaxV0sWarned = true;
-      }
-      break;
-    }
     const auto& id = v0IDs[iv];
     if (id.getVertexID() < 0 || !passProngCuts(id, recoData)) {
       continue;
@@ -718,7 +765,7 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     if (!v0) {
       continue;
     }
-    o2::dataformats::V0WithClusters cand;
+    V0C cand;
     cand.dca = v0->getDCA();
     cand.cosPA = v0->getCosPA();
     cand.qT = v0->calcAPQt();
@@ -728,28 +775,79 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     cand.massLambda = std::sqrt(std::max(0.f, v0->calcMass2AsLambda()));
     cand.massAntiLambda = std::sqrt(std::max(0.f, v0->calcMass2AsAntiLambda()));
     cand.massGamma = std::sqrt(std::max(0.f, v0->calcMass2AsPhoton()));
-    if (cand.dca > par.maxDCA || cand.cosPA < par.minCosPA || cand.qT < par.minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > par.maxR) {
-      continue;
+    if (!(cand.dca > par.maxDCA || cand.cosPA < par.minCosPA || cand.qT < par.minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > par.maxR)) {
+      if (par.selK0 && std::abs(cand.massK0 - massK0) < par.maxDMassK0) {
+        cand.selection |= V0C::K0;
+      }
+      if (par.selLambda && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < par.maxDMassLambda) {
+        cand.selection |= V0C::Lambda;
+      }
+      if (par.selLambda && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < par.maxDMassLambda) {
+        cand.selection |= V0C::AntiLambda;
+      }
     }
-    if (par.selK0 && std::abs(cand.massK0 - massK0) < par.maxDMassK0) {
-      cand.selection |= o2::dataformats::V0WithClusters::K0;
-    }
-    if (par.selLambda && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < par.maxDMassLambda) {
-      cand.selection |= o2::dataformats::V0WithClusters::Lambda;
-    }
-    if (par.selLambda && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < par.maxDMassLambda) {
-      cand.selection |= o2::dataformats::V0WithClusters::AntiLambda;
+    if (par.selGamma && (id.isPhotonOnly() || cand.massGamma < par.maxMassGamma) && cand.qT < par.maxQtGamma && cand.r > par.minRGamma && cand.r < par.maxRGamma &&
+        cand.cosPA > par.minCosPAGamma && (par.maxDCAGamma < 0.f || cand.dca < par.maxDCAGamma)) {
+      cand.selection |= V0C::Gamma;
     }
     if (!cand.selection) {
       continue;
     }
+    cand.sampleClass = (cand.selection & V0C::K0) ? V0C::ClassK0 : ((cand.selection & V0C::Lambda) ? V0C::ClassLambda : ((cand.selection & V0C::AntiLambda) ? V0C::ClassAntiLambda : V0C::ClassGamma));
     if (id.isPhotonOnly()) {
-      cand.selection |= o2::dataformats::V0WithClusters::PhotonOnly;
+      cand.selection |= V0C::PhotonOnly;
     }
     cand.v0 = *v0;
     cand.v0ID = id;
+    const double logPt = std::log10(std::max(1e-6f, v0->getPt()));
+    const int bin = logPt < logPtMin ? 0 : (logPt >= logPtMax ? par.nPtBins + 1 : 1 + int((logPt - logPtMin) / (logPtMax - logPtMin) * par.nPtBins));
+    sel.push_back({iv, bin, v0Random(tfID.tfCounter, iv), cand});
+  }
+  // 2) flat in V0 pT: per class and bin at most maxPerBin* V0s, those with the lowest random numbers; weight = candidates / kept
+  const int maxPerBin[4] = {par.maxPerBinK0, par.maxPerBinLambda, par.maxPerBinLambda, par.maxPerBinGamma};
+  std::map<std::pair<int, int>, std::vector<int>> groups;
+  for (int k = 0; k < (int)sel.size(); k++) {
+    groups[{sel[k].cand.sampleClass, sel[k].bin}].push_back(k);
+  }
+  std::vector<int> kept;
+  for (auto& [key, idx] : groups) {
+    const int cap = maxPerBin[key.first];
+    if (cap >= 0 && (int)idx.size() > cap) {
+      std::sort(idx.begin(), idx.end(), [&](int a, int b) { return sel[a].rnd < sel[b].rnd; });
+    }
+    const int nKeep = cap < 0 ? idx.size() : std::min<int>(cap, idx.size());
+    for (int j = 0; j < nKeep; j++) {
+      sel[idx[j]].cand.weight = float(idx.size()) / nKeep;
+      kept.push_back(idx[j]);
+    }
+  }
+  // 3) at most maxV0sPerTF, again at random
+  if (par.maxV0sPerTF >= 0 && (int)kept.size() > par.maxV0sPerTF) {
+    if (!mMaxV0sWarned) {
+      LOGP(warning, "{} sampled V0s in TF {}: {} kept at random (svFullOutput.maxV0sPerTF; warned once)", kept.size(), tfID.tfCounter, par.maxV0sPerTF);
+      mMaxV0sWarned = true;
+    }
+    std::sort(kept.begin(), kept.end(), [&](int a, int b) { return sel[a].rnd < sel[b].rnd; });
+    const float scale = float(kept.size()) / par.maxV0sPerTF;
+    kept.resize(par.maxV0sPerTF);
+    for (int k : kept) {
+      sel[k].cand.weight *= scale;
+    }
+  }
+  std::sort(kept.begin(), kept.end()); // V0 finder order
+  // 4) the kept V0s with their primary vertex, prongs and clusters
+  for (int k : kept) {
+    auto& cand = sel[k].cand;
+    const auto& id = cand.v0ID;
     const auto& pv = recoData.getPrimaryVertex(id.getVertexID());
     getTPCOccupancy(pv, cand.tpcOccBef, cand.tpcOccAft);
+    cand.pvX = pv.getX();
+    cand.pvY = pv.getY();
+    cand.pvZ = pv.getZ();
+    cand.pvTimeMUS = pv.getTimeStamp().getTimeStamp();
+    cand.pvTimeErrMUS = pv.getTimeStamp().getTimeStampError();
+    cand.pvNContrib = pv.getNContributors();
+    cand.nCompatPV = countCompatiblePVs(id, recoData);
     for (int ip = 0; ip < 2; ip++) {
       cand.prong[ip] = addProng(id.getProngID(ip), recoData, out);
     }
@@ -764,8 +862,13 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
   mNV0sFull += out.v0s.size();
   mNProngsFull += out.prongs.size();
   mNClTPCFull += out.clTPC.size();
-  LOGP(info, "Full output of TF {}: {} V0s of {} candidates, {} prongs, {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets", tfID.tfCounter, out.v0s.size(), v0IDs.size(), out.prongs.size(),
-       out.clTPC.size(), out.clITS.size(), out.clTOF.size(), out.trdTracklets.size());
+  int nPerClass[4] = {0, 0, 0, 0};
+  for (const auto& v : out.v0s) {
+    nPerClass[v.sampleClass]++;
+  }
+  LOGP(info, "Full output of TF {}: {} V0s (K0s {}, Lambda {}, anti-Lambda {}, photons {}) of {} selected, {} candidates; {} prongs, {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets",
+       tfID.tfCounter, out.v0s.size(), nPerClass[0], nPerClass[1], nPerClass[2], nPerClass[3], sel.size(), v0IDs.size(), out.prongs.size(), out.clTPC.size(), out.clITS.size(),
+       out.clTOF.size(), out.trdTracklets.size());
   pc.outputs().snapshot(Output{"GLO", "V0FULL", 0}, out.v0s);
   pc.outputs().snapshot(Output{"GLO", "V0FULLPRONG", 0}, out.prongs);
   pc.outputs().snapshot(Output{"GLO", "V0FULLCLTPC", 0}, out.clTPC);
