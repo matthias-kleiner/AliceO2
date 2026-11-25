@@ -33,6 +33,10 @@
 #include "StrangenessTracking/StrangenessTracker.h"
 #include "DataFormatsTPC/TrackTPC.h"
 #include <numeric>
+#include <memory>
+#include <mutex>
+#include <string>
+#include "CommonUtils/TreeStreamRedirector.h"
 #include <algorithm>
 #include "GPUO2InterfaceRefit.h"
 #include "DataFormatsTPC/PIDResponse.h"
@@ -134,6 +138,10 @@ class SVertexer
 
   void setNThreads(int n);
   int getNThreads() const { return mNThreads; }
+  /// debug output: tree "trk" (every vertex-track entry of the track selection and its fate) and tree "v0" (every pair tried by
+  /// checkV0 with its cut variables and the stage where it stopped); empty name: off
+  void setDebugTree(const std::string& fname);
+  void closeDebugTree();
   void setUseMC(bool v) { mUseMC = v; }
   bool getUseMC() const { return mUseMC; }
 
@@ -201,6 +209,41 @@ class SVertexer
   PIDResponse mPIDresponse;
 
   int mNThreads = 1;
+  /// debug tree entry of one pair tried by checkV0 (unset values: -999 / -1)
+  struct V0Dbg {
+    unsigned int gidP = 0; // raw global track ID of the positive prong
+    unsigned int gidN = 0; // and of the negative one
+    int vMin = -1;         // first vertex shared by both seeds
+    int vMax = -1;         // last one
+    int tpcOnly = 0;       // a prong is TPC-only
+    float minRP = -1.f;    // innermost radius of the positive prong (TPC inner reference for TPC without ITS: lower side of the causality cut)
+    float minRN = -1.f;    // and of the negative one
+    float innerRP = -1.f;  // innermost TPC cluster radius of the positive prong if it has TPC but no ITS (upper side of the causality cut), < 0: minR
+    float innerRN = -1.f;  // and of the negative one
+    float x = -999.f;      // V0 position (DCAFitter)
+    float y = -999.f;
+    float z = -999.f;
+    float r = -1.f;         // V0 radius to the mean vertex
+    float drP = -999.f;     // r - minR of the positive prong (causality)
+    float drN = -999.f;     // r - minR of the negative prong
+    float chi2 = -1.f;      // DCAFitter chi2 at the PCA
+    float pt = -1.f;        // V0 pT
+    float tgl2 = -1.f;      // V0 tan(lambda)^2
+    float mG = -1.f;        // mass as photon
+    float mK0 = -1.f;       // as K0s
+    float mL = -1.f;        // as Lambda
+    float mAL = -1.f;       // as anti-Lambda
+    int hyp = 0;            // bits of the passed mass hypotheses (1 << HypV0)
+    float dcaXY = -1.f;     // DCA (xy) of the V0 line to the mean vertex
+    float cosPAXY = -2.f;   // cosPA (xy) to the mean vertex
+    float cosPABest = -2.f; // largest cosPA to the shared vertices
+    int vBest = -1;         // and its vertex
+  };
+  void writeV0Dbg(const V0Dbg& d, int stage);
+  void writeTrkDbg(unsigned int gid, int iv, int stage, float minR);
+  std::unique_ptr<o2::utils::TreeStreamRedirector> mDebugStream;
+  std::mutex mDebugMutex;
+  int mDebugTF = 0;
   int mNV0s = 0, mNCascades = 0, mN3Bodies = 0, mNStrangeTracks = 0;
   float mBz = 0;
   float mMinR2ToMeanVertex = 0;

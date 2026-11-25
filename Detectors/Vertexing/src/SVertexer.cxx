@@ -45,6 +45,7 @@ void SVertexer::process(const o2::globaltracking::RecoContainer& recoData, o2::f
   mNV0s = mNCascades = mN3Bodies = 0;
   updateTimeDependentParams(); // TODO RS: strictly speaking, one should do this only in case of the CCDB objects update
   mPVertices = recoData.getPrimaryVertices();
+  mDebugTF++;
   buildT2V(recoData); // build track->vertex refs from vertex->track (if other workflow will need this, consider producing a message in the VertexTrackMatcher)
   int ntrP = mTracksPool[POS].size(), ntrN = mTracksPool[NEG].size();
   if (mStrTracker) {
@@ -492,7 +493,12 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
         }
         // unconstrained TPC tracks require special treatment: there is no point in checking DCA to mean vertex since it is not precise,
         // but we need to create a clone of TPC track constrained to this particular vertex time.
+        const size_t nPoolBefore = mTracksPool[0].size() + mTracksPool[1].size();
         if (processTPCTrack(mTPCTracksArray[tvid], tvid, iv)) {
+          if (mDebugStream) { // stage 0: TPC-only track added as a clone for this vertex, 1: discarded
+            const bool added = mTracksPool[0].size() + mTracksPool[1].size() > nPoolBefore;
+            writeTrkDbg(tvid.getRaw(), iv, added ? 0 : 1, added ? (mTPCTracksArray[tvid].getSign() < 0 ? mTracksPool[1] : mTracksPool[0]).back().minR : -1.f);
+          }
           continue;
         }
       }
@@ -501,10 +507,16 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
         auto tref = tmap.find(tvid);
         if (tref != tmap.end()) {
           mTracksPool[tref->second.second][tref->second.first].vBracket.setMax(iv); // this track was already processed with other vertex, account the latter
+          if (mDebugStream) {
+            writeTrkDbg(tvid.getRaw(), iv, 2, -1.f); // ambiguous, already in the pool: vertex bracket extended
+          }
           continue;
         }
         // was it already rejected?
         if (rejmap.find(tvid) != rejmap.end()) {
+          if (mDebugStream) {
+            writeTrkDbg(tvid.getRaw(), iv, 3, -1.f); // ambiguous, already rejected
+          }
           continue;
         }
       }
@@ -552,9 +564,15 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
         if (tvid.isAmbiguous()) {
           rejmap[tvid] = true;
         }
+        if (mDebugStream) {
+          writeTrkDbg(tvid.getRaw(), iv, 4, -1.f); // rejected by acceptTrack (PV contributor / min. DCA to the mean vertex)
+        }
         continue;
       }
       if ((isTPCloaded && !hasTPC) && (isITSloaded && (nITSclu < mSVParams->mITSSAminNclu && (!shortOBITSOnlyTrack || mSVParams->mRejectITSonlyOBtrack)))) {
+        if (mDebugStream) {
+          writeTrkDbg(tvid.getRaw(), iv, 5, -1.f); // short ITS-only
+        }
         continue; // reject short ITS-only
       }
 
@@ -570,6 +588,9 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
       }
       if (tvid.getSource() == GIndex::TPC) { // constrained TPC track?
         correctTPCTrack(mTracksPool[posneg].back(), mTPCTracksArray[tvid], -1, -1);
+      }
+      if (mDebugStream) {
+        writeTrkDbg(tvid.getRaw(), iv, 6, mTracksPool[posneg].back().minR); // added to the pool
       }
       if (tvid.isAmbiguous()) { // track attached to >1 vertex, remember that it was already processed
         tmap[tvid] = {mTracksPool[posneg].size() - 1, posneg};
@@ -599,10 +620,24 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   auto& fitterV0 = mFitterV0[ithread];
   // Fast rough cuts on pairs before feeding to DCAFitter, tracks are not in the same Frame or at same X
   bool isTPConly = (seedP.gid.getSource() == GIndex::TPC || seedN.gid.getSource() == GIndex::TPC);
+  V0Dbg d; // debug tree entry (only written with setDebugTree)
+  if (mDebugStream) {
+    d.gidP = seedP.gid.getRaw();
+    d.gidN = seedN.gid.getRaw();
+    auto ov = seedP.vBracket.getOverlap(seedN.vBracket);
+    d.vMin = ov.getMin();
+    d.vMax = ov.getMax();
+    d.tpcOnly = isTPConly;
+    d.minRP = seedP.minR;
+    d.minRN = seedN.minR;
+    d.innerRP = seedP.rInnerUpdate;
+    d.innerRN = seedN.rInnerUpdate;
+  }
   if (mSVParams->mTPCTrackPhotonTune && isTPConly) {
     // Check if Tgl is close enough
     if (std::abs(seedP.getTgl() - seedN.getTgl()) > mSVParams->maxV0TglAbsDiff) {
       LOG(debug) << "RejTgl";
+      writeV0Dbg(d, 0);
       return false;
     }
     // Check in transverse plane
@@ -618,6 +653,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     float dcr = c2c - r2r;
     if (std::abs(dcr) > mSVParams->mTPCTrackD2R) {
       LOG(debug) << "RejD2R " << c2c << " " << r2r << " " << dcr;
+      writeV0Dbg(d, 0);
       return false;
     }
     // Will the conversion point look somewhat reasonable
@@ -626,6 +662,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     float dR = std::hypot(r2_r * trkPosCircle.xC + r1_r * trkEleCircle.xC, r2_r * trkPosCircle.yC + r1_r * trkEleCircle.yC);
     if (dR > mSVParams->mTPCTrackDR) {
       LOG(debug) << "RejDR" << dR;
+      writeV0Dbg(d, 0);
       return false;
     }
 
@@ -648,17 +685,28 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
 
   if (nCand == 0) { // discard this pair
     LOG(debug) << "RejDCAFitter";
+    writeV0Dbg(d, 1);
     return false;
   }
   const auto& v0XYZ = fitterV0.getPCACandidate();
   // validate V0 radial position
   // check closeness to the beam-line
   float dxv0 = v0XYZ[0] - mMeanVertex.getX(), dyv0 = v0XYZ[1] - mMeanVertex.getY(), r2v0 = dxv0 * dxv0 + dyv0 * dyv0;
+  float rv0 = std::sqrt(r2v0), drv0P = rv0 - seedP.minR, drv0N = rv0 - seedN.minR;
+  if (mDebugStream) {
+    d.x = v0XYZ[0];
+    d.y = v0XYZ[1];
+    d.z = v0XYZ[2];
+    d.r = rv0;
+    d.drP = drv0P;
+    d.drN = drv0N;
+    d.chi2 = fitterV0.getChi2AtPCACandidate();
+  }
   if (r2v0 < mMinR2ToMeanVertex) {
     LOG(debug) << "RejMinR2ToMeanVertex";
+    writeV0Dbg(d, 2);
     return false;
   }
-  float rv0 = std::sqrt(r2v0), drv0P = rv0 - seedP.minR, drv0N = rv0 - seedN.minR;
   // upper side of the causality check: the V0 must not lie beyond the innermost measured point of a prong. The lower side
   // (maxV0ToProngsRDiff) uses minR, for all tracks with TPC but without ITS the TPC inner reference: with the innermost cluster it
   // would reject V0s whose TPC track misses its inner part.
@@ -667,11 +715,13 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   if (drv0PUp > mSVParams->causalityRTolerance || drv0P < -mSVParams->maxV0ToProngsRDiff ||
       drv0NUp > mSVParams->causalityRTolerance || drv0N < -mSVParams->maxV0ToProngsRDiff) {
     LOG(debug) << "RejCausality " << drv0PUp << " " << drv0P << " " << drv0NUp << " " << drv0N;
+    writeV0Dbg(d, 3);
     return false;
   }
   const int cand = 0;
   if (!fitterV0.isPropagateTracksToVertexDone(cand) && !fitterV0.propagateTracksToVertex(cand)) {
     LOG(debug) << "RejProp failed";
+    writeV0Dbg(d, 4);
     return false;
   }
   const auto& trPProp = fitterV0.getTrack(0, cand);
@@ -685,17 +735,46 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   // Similar equation for 3D distance involving pV0[2]
   std::array<float, 3> pV0 = {pP[0] + pN[0], pP[1] + pN[1], pP[2] + pN[2]};
   float pt2V0 = pV0[0] * pV0[0] + pV0[1] * pV0[1], prodXYv0 = dxv0 * pV0[0] + dyv0 * pV0[1], tDCAXY = prodXYv0 / pt2V0;
+  float p2V0 = pt2V0 + pV0[2] * pV0[2], ptV0 = std::sqrt(pt2V0);
+  float p2Pos = pP[0] * pP[0] + pP[1] * pP[1] + pP[2] * pP[2], p2Neg = pN[0] * pN[0] + pN[1] * pN[1] + pN[2] * pN[2];
+  float dcaXdbg = dxv0 - pV0[0] * tDCAXY;
+  float dcaYdbg = dyv0 - pV0[1] * tDCAXY;
+  auto bestCosPADbg = [&]() { // largest cosPA to the shared vertices, regardless of the cut (debug tree)
+    auto ov = seedP.vBracket.getOverlap(seedN.vBracket);
+    for (int iv = ov.getMin(); iv <= ov.getMax(); iv++) {
+      const auto& pv = mPVertices[iv];
+      float dx = v0XYZ[0] - pv.getX();
+      float dy = v0XYZ[1] - pv.getY();
+      float dz = v0XYZ[2] - pv.getZ();
+      float c = (dx * pV0[0] + dy * pV0[1] + dz * pV0[2]) / std::sqrt((dx * dx + dy * dy + dz * dz) * p2V0);
+      if (c > d.cosPABest) {
+        d.cosPABest = c;
+        d.vBest = iv;
+      }
+    }
+  };
+  if (mDebugStream) {
+    d.pt = ptV0;
+    d.tgl2 = pV0[2] * pV0[2] / pt2V0;
+    d.mG = mV0Hyps[Photon].calcMass(p2Pos, p2Neg, p2V0);
+    d.mK0 = mV0Hyps[K0].calcMass(p2Pos, p2Neg, p2V0);
+    d.mL = mV0Hyps[Lambda].calcMass(p2Pos, p2Neg, p2V0);
+    d.mAL = mV0Hyps[AntiLambda].calcMass(p2Pos, p2Neg, p2V0);
+    d.dcaXY = std::sqrt(dcaXdbg * dcaXdbg + dcaYdbg * dcaYdbg);
+    d.cosPAXY = prodXYv0 / std::sqrt(r2v0 * pt2V0);
+    bestCosPADbg();
+  }
   if (pt2V0 < mMinPt2V0) { // pt cut
     LOG(debug) << "RejPt2 " << pt2V0;
+    writeV0Dbg(d, 5);
     return false;
   }
   if (pV0[2] * pV0[2] / pt2V0 > mMaxTgl2V0) { // tgLambda cut
     LOG(debug) << "RejTgL " << pV0[2] * pV0[2] / pt2V0;
+    writeV0Dbg(d, 6);
     return false;
   }
-  float p2V0 = pt2V0 + pV0[2] * pV0[2], ptV0 = std::sqrt(pt2V0);
   // apply mass selections
-  float p2Pos = pP[0] * pP[0] + pP[1] * pP[1] + pP[2] * pP[2], p2Neg = pN[0] * pN[0] + pN[1] * pN[1] + pN[2] * pN[2];
 
   bool goodHyp = false, photonOnly = mSVParams->mTPCTrackPhotonTune && isTPConly;
   std::array<bool, NHypV0> hypCheckStatus{};
@@ -703,6 +782,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   for (int ipid = 0; (ipid < nPID) && mSVParams->checkV0Hypothesis; ipid++) {
     if (mV0Hyps[ipid].check(p2Pos, p2Neg, p2V0, ptV0)) {
       goodHyp = hypCheckStatus[ipid] = true;
+      d.hyp |= 1 << ipid;
     }
   }
   // check tight lambda mass only
@@ -744,6 +824,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   if (!goodHyp && mSVParams->checkV0Hypothesis) {
     LOG(debug) << "RejHypo";
     if (!checkFor3BodyDecays && !checkForCascade) {
+      writeV0Dbg(d, 7);
       return false;
     } else {
       rejectAfter3BodyCheck = true;
@@ -757,6 +838,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     if (dca2 > mMaxDCAXY2ToMeanVertexV0Casc || cosPAXY < mSVParams->minCosPAXYMeanVertexCascV0) {
       LOG(debug) << "Rej for cascade DCAXY2: " << dca2 << " << cosPAXY: " << cosPAXY;
       if (!checkFor3BodyDecays) {
+        writeV0Dbg(d, 8);
         return false;
       } else {
         rejectAfter3BodyCheck = true;
@@ -779,9 +861,11 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
       if (mSVParams->mTPCTrackPhotonTune && isTPConly) {
         // Check for looser cut for tpc-only photons only
         if (dca2 > mSVParams->mTPCTrackMaxDCAXY2ToMeanVertex) {
+          writeV0Dbg(d, 8);
           return false;
         }
       } else {
+        writeV0Dbg(d, 8);
         return false;
       }
     }
@@ -815,6 +899,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     bestCosPA = cosPA;
   }
   if (!candFound) {
+    writeV0Dbg(d, 9); // no shared vertex with cosPA above the cut
     return false;
   }
   if (bestCosPA < mSVParams->minCosPACascV0) {
@@ -831,6 +916,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     n3bodyDecays += check3bodyDecays(v0Idxnew, v0new, rv0, pV0, p2V0, iP, POS, vlist, ithread);
   }
   if (rejectAfter3BodyCheck) {
+    writeV0Dbg(d, 10);
     return false;
   }
 
@@ -874,7 +960,53 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     }
   }
 
+  writeV0Dbg(d, mV0sIdxTmp[ithread].size() - nV0Ini != 0 ? 12 : 11); // 12: V0 stored, 11: not stored (cascade-only V0 without cascade)
   return mV0sIdxTmp[ithread].size() - nV0Ini != 0;
+}
+
+//__________________________________________________________________
+void SVertexer::setDebugTree(const std::string& fname)
+{
+  closeDebugTree();
+  if (!fname.empty()) {
+    mDebugStream = std::make_unique<o2::utils::TreeStreamRedirector>(fname.c_str(), "recreate");
+    LOGP(info, "SVertexer debug trees trk / v0 written to {}", fname);
+  }
+}
+
+void SVertexer::closeDebugTree()
+{
+  if (mDebugStream) {
+    mDebugStream->Close();
+    mDebugStream.reset();
+  }
+}
+
+void SVertexer::writeTrkDbg(unsigned int gid, int iv, int stage, float minR)
+{
+  if (!mDebugStream) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mDebugMutex);
+  int tf = mDebugTF;
+  (*mDebugStream) << "trk"
+                  << "tf=" << tf << "gid=" << gid << "iv=" << iv << "stage=" << stage << "minR=" << minR << "\n";
+}
+
+void SVertexer::writeV0Dbg(const V0Dbg& dc, int stage)
+{
+  if (!mDebugStream) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mDebugMutex);
+  auto d = dc; // the stream needs lvalues
+  int tf = mDebugTF;
+  (*mDebugStream) << "v0"
+                  << "tf=" << tf << "stage=" << stage << "gidP=" << d.gidP << "gidN=" << d.gidN << "vMin=" << d.vMin << "vMax=" << d.vMax
+                  << "tpcOnly=" << d.tpcOnly << "minRP=" << d.minRP << "minRN=" << d.minRN << "innerRP=" << d.innerRP << "innerRN=" << d.innerRN << "x=" << d.x << "y=" << d.y << "z=" << d.z
+                  << "r=" << d.r << "drP=" << d.drP << "drN=" << d.drN << "chi2=" << d.chi2 << "pt=" << d.pt << "tgl2=" << d.tgl2
+                  << "mG=" << d.mG << "mK0=" << d.mK0 << "mL=" << d.mL << "mAL=" << d.mAL << "hyp=" << d.hyp << "dcaXY=" << d.dcaXY
+                  << "cosPAXY=" << d.cosPAXY << "cosPABest=" << d.cosPABest << "vBest=" << d.vBest << "\n";
 }
 
 //__________________________________________________________________

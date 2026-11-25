@@ -93,6 +93,7 @@ void SecondaryVertexingSpec::init(InitContext& ic)
   mVertexer.setEnableCascades(mEnableCascades);
   mVertexer.setEnable3BodyDecays(mEnable3BodyVertices);
   mVertexer.setNThreads(ic.options().get<int>("threads"));
+  mVertexer.setDebugTree(ic.options().get<std::string>("sv-debug-tree"));
   mVertexer.setUseMC(mUseMC);
   if (mEnableStrangenessTracking) {
     mStrTracker.setCorrType(o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrLUT);
@@ -149,6 +150,7 @@ void SecondaryVertexingSpec::endOfStream(EndOfStreamContext& ec)
 {
   LOGF(info, "Secondary vertexing total timing: Cpu: %.3e Real: %.3e s in %d slots, nThreads = %d",
        mTimer.CpuTime(), mTimer.RealTime(), mTimer.Counter() - 1, mVertexer.getNThreads());
+  mVertexer.closeDebugTree();
 }
 
 void SecondaryVertexingSpec::finaliseCCDB(ConcreteDataMatcher& matcher, void* obj)
@@ -250,7 +252,8 @@ DataProcessorSpec getSecondaryVertexingSpec(GTrackID::mask_t src, bool enableCas
   std::vector<OutputSpec> outputs;
   Options opts{
     {"material-lut-path", VariantType::String, "", {"Path of the material LUT file"}},
-    {"threads", VariantType::Int, 1, {"Number of threads"}}};
+    {"threads", VariantType::Int, 1, {"Number of threads"}},
+    {"sv-debug-tree", VariantType::String, "", {"debug output file: trees trk (track selection) and v0 (every pair tried, cut variables, stage reached)"}}};
   auto dataRequest = std::make_shared<DataRequest>();
   if (enableCCDBParams) {
     dataRequest->inputs.emplace_back("SVParam", "GLO", "SVPARAM", 0, Lifetime::Condition, ccdbParamSpec("GLO/Config/SVertexerParam"));
