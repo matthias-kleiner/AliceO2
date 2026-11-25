@@ -24,7 +24,8 @@ namespace o2::svstudy
 /// (K0s, Lambda, anti-Lambda, photon) is assigned to one sampling class (in this order of priority); the types it passed are flagged in
 /// V0WithClusters::selection. Per TF and class the V0s are then sampled flat in V0 pT: in each of nPtBins log bins between ptMin and ptMax
 /// (plus one bin below and one above) at most maxPerBin* V0s are kept, chosen at random (reproducible: hash of the TF and the V0 index);
-/// each kept V0 gets the weight (V0s of its class and bin) / (kept ones).
+/// each kept V0 gets the weight (V0s of its class and bin) / (kept ones). Far V0s (bit Far) are sampled apart from the others of their
+/// class, with maxPerBinFar (default: all kept), and are not subject to maxV0sPerTF.
 struct V0FullOutputParams : o2::conf::ConfigurableParamHelper<V0FullOutputParams> {
   // prong cuts, before the refit
   bool requireOppositeCharges = true; ///< prongs of opposite charge
@@ -66,7 +67,8 @@ struct V0FullOutputParams : o2::conf::ConfigurableParamHelper<V0FullOutputParams
   int maxPerBinK0 = 5;      ///< K0s kept per TF and pT bin
   int maxPerBinLambda = 5;  ///< Lambdas kept per TF and pT bin, and the same for the anti-Lambdas
   int maxPerBinGamma = 5;   ///< photons kept per TF and pT bin
-  int maxV0sPerTF = -1;     ///< after the sampling at most this many V0s per TF, chosen at random (< 0: no limit)
+  int maxPerBinFar = -1;    ///< far K0s / Lambdas (bit Far) kept per TF and pT bin, sampled apart from the other V0s of their class (< 0: all)
+  int maxV0sPerTF = -1;     ///< after the sampling at most this many V0s per TF that are not far, chosen at random (< 0: no limit)
   float pvTimeNSigma = 4.f; ///< nCompatPV: primary vertices within this many sigma of their time error of the prongs' time windows
   float legScoreWeight = 0.f; ///< weight of the pointing angle in legScore (1 - weight: leg distance), as deduplicationScoreWeight in O2Physics
                               ///< (0.5 there); 0: the leg distance alone picks the true photon most often (MC)

@@ -886,15 +886,17 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       }
     }
   }
-  // 2) flat in V0 pT: per class and bin at most maxPerBin* V0s, those with the lowest random numbers; weight = candidates / kept
+  // 2) flat in V0 pT: per class and bin at most maxPerBin* V0s, those with the lowest random numbers; weight = candidates / kept.
+  // Far V0s (bit Far) are sampled separately from the other V0s of their class (group = class + 4), with maxPerBinFar: rare, they
+  // would otherwise be lost among the many V0s of the same class and pT bin
   const int maxPerBin[4] = {par.maxPerBinK0, par.maxPerBinLambda, par.maxPerBinLambda, par.maxPerBinGamma};
   std::map<std::pair<int, int>, std::vector<int>> groups;
   for (int k = 0; k < (int)sel.size(); k++) {
-    groups[{sel[k].cand.sampleClass, sel[k].bin}].push_back(k);
+    groups[{sel[k].cand.sampleClass + ((sel[k].cand.selection & V0C::Far) ? 4 : 0), sel[k].bin}].push_back(k);
   }
   std::vector<int> kept;
   for (auto& [key, idx] : groups) {
-    const int cap = maxPerBin[key.first];
+    const int cap = key.first >= 4 ? par.maxPerBinFar : maxPerBin[key.first];
     if (cap >= 0 && (int)idx.size() > cap) {
       std::sort(idx.begin(), idx.end(), [&](int a, int b) { return sel[a].rnd < sel[b].rnd; });
     }
@@ -904,7 +906,16 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       kept.push_back(idx[j]);
     }
   }
-  // 3) at most maxV0sPerTF, again at random
+  // 3) at most maxV0sPerTF V0s that are not far, again at random; the far ones are all kept
+  std::vector<int> keptFar;
+  kept.erase(std::remove_if(kept.begin(), kept.end(), [&](int k) {
+               if (sel[k].cand.selection & V0C::Far) {
+                 keptFar.push_back(k);
+                 return true;
+               }
+               return false;
+             }),
+             kept.end());
   if (par.maxV0sPerTF >= 0 && (int)kept.size() > par.maxV0sPerTF) {
     if (!mMaxV0sWarned) {
       LOGP(warning, "{} sampled V0s in TF {}: {} kept at random (svFullOutput.maxV0sPerTF; warned once)", kept.size(), tfID.tfCounter, par.maxV0sPerTF);
@@ -917,6 +928,7 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       sel[k].cand.weight *= scale;
     }
   }
+  kept.insert(kept.end(), keptFar.begin(), keptFar.end());
   std::sort(kept.begin(), kept.end()); // V0 finder order
   // 4) the kept V0s with their primary vertex, prongs and clusters
   for (int k : kept) {

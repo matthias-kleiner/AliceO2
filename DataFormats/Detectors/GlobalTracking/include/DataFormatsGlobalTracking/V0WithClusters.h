@@ -131,7 +131,7 @@ struct V0WithClusters {
   float tpcOccAft = 0.f;      ///< same after
   uint8_t selection = 0;      ///< Selection bits
   uint8_t sampleClass = 0;    ///< SampleClass of the downsampling (first passed type of K0s, Lambda, anti-Lambda, photon)
-  float weight = 1.f;         ///< downsampling weight: V0s of its class and pT bin in the TF / kept ones (1: all kept)
+  float weight = 1.f;         ///< downsampling weight: V0s of its class (far ones apart: bit Far) and pT bin in the TF / kept ones (1: all kept)
   float pvX = 0.f;            ///< primary vertex the V0 finder assigned (v0ID.getVertexID()) [cm]
   float pvY = 0.f;
   float pvZ = 0.f;
