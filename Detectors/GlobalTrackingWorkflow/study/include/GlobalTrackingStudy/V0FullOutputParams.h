@@ -43,6 +43,14 @@ struct V0FullOutputParams : o2::conf::ConfigurableParamHelper<V0FullOutputParams
   float maxDMassLambda = 0.005f; ///< max. |m(p pi) - m(Lambda)| [GeV]
   float minAlphaLambda = 0.28f;  ///< min. Armenteros alpha of a Lambda (anti-Lambda: max. -minAlphaLambda)
   float maxAlphaLambda = 0.7f;   ///< max. Armenteros alpha of a Lambda (anti-Lambda: min. -maxAlphaLambda)
+  // far K0s and Lambda: beyond maxR, both legs without ITS (V0 finder's svertexer.farV0Mode), with these cuts instead of the ones above
+  bool selFar = true;               ///< select far K0s / Lambda
+  float maxRFar = 250.f;            ///< max. transverse decay radius [cm] of far V0s
+  float maxDCAFar = 0.1f;           ///< max. V0::getDCA of far V0s (MC: 90 % of the true ones below 0.07, half of the fakes above 0.5)
+  float minQtFar = 0.04f;           ///< min. Armenteros qT [GeV] of far V0s (rejects photon-like pairs; ~2 % of K0s, ~8 % of Lambda below)
+  float minCosPAFar = 0.999f;       ///< min. cosine of the pointing angle of far V0s
+  float maxDMassK0Far = 0.02f;      ///< max. |m(pi+ pi-) - m(K0s)| [GeV] of far V0s
+  float maxDMassLambdaFar = 0.01f;  ///< max. |m(p pi) - m(Lambda)| [GeV] of far V0s
   // photon conversions, after the refit (only these cuts apply to them)
   bool selGamma = true;        ///< select photon conversions: V0 finder's photon-only flag or m(e+ e-) < maxMassGamma
   float maxMassGamma = 0.05f;  ///< max. m(e+ e-) [GeV]

@@ -107,7 +107,8 @@ struct V0WithClusters {
     AntiLambda = 0x4,  ///< passed the anti-Lambda selection
     PhotonOnly = 0x8,  ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
     Gamma = 0x10,      ///< passed the photon-conversion selection
-    BestForLegs = 0x20 ///< best V0 (lowest legScore) for its tracks: greedy matching over the selected V0s of the TF, each track in at most one
+    BestForLegs = 0x20, ///< best V0 (lowest legScore) for its tracks: greedy matching over the selected V0s of the TF, each track in at most one
+    Far = 0x40          ///< selected with the far cuts (svFullOutput.*Far): beyond maxR, both legs without ITS
   };
   enum SampleClass : uint8_t { ClassK0 = 0,
                                ClassLambda = 1,

@@ -815,15 +815,23 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     cand.massLambda = std::sqrt(std::max(0.f, v0->calcMass2AsLambda()));
     cand.massAntiLambda = std::sqrt(std::max(0.f, v0->calcMass2AsAntiLambda()));
     cand.massGamma = std::sqrt(std::max(0.f, v0->calcMass2AsPhoton()));
-    if (!(cand.dca > par.maxDCA || cand.cosPA < par.minCosPA || cand.qT < par.minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > par.maxR)) {
-      if (par.selK0 && std::abs(cand.massK0 - massK0) < par.maxDMassK0) {
+    // far V0s (beyond maxR, both legs without ITS) get their own cuts
+    const bool far = par.selFar && cand.r > par.maxR && !id.getProngID(0).includesDet(DetID::ITS) && !id.getProngID(1).includesDet(DetID::ITS);
+    const float maxDCA = far ? par.maxDCAFar : par.maxDCA, minCosPA = far ? par.minCosPAFar : par.minCosPA, maxR = far ? par.maxRFar : par.maxR;
+    const float dmK0 = far ? par.maxDMassK0Far : par.maxDMassK0, dmL = far ? par.maxDMassLambdaFar : par.maxDMassLambda;
+    const float minQt = far ? par.minQtFar : par.minQt;
+    if (!(cand.dca > maxDCA || cand.cosPA < minCosPA || cand.qT < minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > maxR)) {
+      if (par.selK0 && std::abs(cand.massK0 - massK0) < dmK0) {
         cand.selection |= V0C::K0;
       }
-      if (par.selLambda && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < par.maxDMassLambda) {
+      if (par.selLambda && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < dmL) {
         cand.selection |= V0C::Lambda;
       }
-      if (par.selLambda && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < par.maxDMassLambda) {
+      if (par.selLambda && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < dmL) {
         cand.selection |= V0C::AntiLambda;
+      }
+      if (far && cand.selection) {
+        cand.selection |= V0C::Far;
       }
     }
     if (par.selGamma && (id.isPhotonOnly() || cand.massGamma < par.maxMassGamma) && cand.qT < par.maxQtGamma && cand.r > par.minRGamma && cand.r < par.maxRGamma &&
