@@ -756,6 +756,16 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
   };
   std::vector<Sel> sel;
   const double logPtMin = std::log10(par.ptMin), logPtMax = std::log10(par.ptMax);
+  // 0) the V0 finder builds a pair with TPC-only prongs once per compatible primary vertex (track shifted in z to the vertex time):
+  //    per prong pair only the copy with the largest cosPA is kept; the number of copies and the second-best one are stored
+  struct PairCopies {
+    int best = -1;
+    int second = -1;
+    int n = 0;
+  };
+  std::unordered_map<uint64_t, PairCopies> pairs;
+  std::vector<uint64_t> pairKey(v0IDs.size(), 0);
+  size_t nCopies = 0;
   for (int iv = 0; iv < (int)v0IDs.size(); iv++) {
     const auto& id = v0IDs[iv];
     if (id.getVertexID() < 0 || !passProngCuts(id, recoData)) {
@@ -765,7 +775,36 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     if (!v0) {
       continue;
     }
+    pairKey[iv] = (uint64_t(id.getProngID(0).getRawWOFlags()) << 32) | id.getProngID(1).getRawWOFlags();
+    auto& cp = pairs[pairKey[iv]]; // key != 0: the two prongs are different tracks
+    cp.n++;
+    nCopies++;
+    const float cosPA = v0->getCosPA();
+    if (cp.best < 0 || cosPA > getV0(cp.best, recoData)->getCosPA()) {
+      cp.second = cp.best;
+      cp.best = iv;
+    } else if (cp.second < 0 || cosPA > getV0(cp.second, recoData)->getCosPA()) {
+      cp.second = iv;
+    }
+  }
+  for (int iv = 0; iv < (int)v0IDs.size(); iv++) {
+    const auto& id = v0IDs[iv];
+    if (!pairKey[iv]) { // no vertex, failed the prong cuts or the refit
+      continue;
+    }
+    const auto& copies = pairs[pairKey[iv]];
+    if (copies.best != iv) {
+      continue;
+    }
+    const auto* v0 = getV0(iv, recoData);
     V0C cand;
+    cand.nPairPV = copies.n;
+    if (copies.second >= 0) {
+      const auto& pv2 = recoData.getPrimaryVertex(v0IDs[copies.second].getVertexID());
+      cand.cosPA2 = getV0(copies.second, recoData)->getCosPA();
+      cand.pv2Z = pv2.getZ();
+      cand.pv2TimeMUS = pv2.getTimeStamp().getTimeStamp();
+    }
     cand.dca = v0->getDCA();
     cand.cosPA = v0->getCosPA();
     cand.qT = v0->calcAPQt();
@@ -866,8 +905,8 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
   for (const auto& v : out.v0s) {
     nPerClass[v.sampleClass]++;
   }
-  LOGP(info, "Full output of TF {}: {} V0s (K0s {}, Lambda {}, anti-Lambda {}, photons {}) of {} selected, {} candidates; {} prongs, {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets",
-       tfID.tfCounter, out.v0s.size(), nPerClass[0], nPerClass[1], nPerClass[2], nPerClass[3], sel.size(), v0IDs.size(), out.prongs.size(), out.clTPC.size(), out.clITS.size(),
+  LOGP(info, "Full output of TF {}: {} V0s (K0s {}, Lambda {}, anti-Lambda {}, photons {}) of {} selected, {} candidates ({} after the prong cuts, {} prong pairs); {} prongs, {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets",
+       tfID.tfCounter, out.v0s.size(), nPerClass[0], nPerClass[1], nPerClass[2], nPerClass[3], sel.size(), v0IDs.size(), nCopies, pairs.size(), out.prongs.size(), out.clTPC.size(), out.clITS.size(),
        out.clTOF.size(), out.trdTracklets.size());
   pc.outputs().snapshot(Output{"GLO", "V0FULL", 0}, out.v0s);
   pc.outputs().snapshot(Output{"GLO", "V0FULLPRONG", 0}, out.prongs);
@@ -923,10 +962,13 @@ void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, cons
   int selection = v0.selection;
   float vx = v0.v0.getX(), vy = v0.v0.getY(), vz = v0.v0.getZ();
   float pvTimeMUS = pv.getTimeStamp().getTimeStamp();
+  int nCompatPV = v0.nCompatPV, nPairPV = v0.nPairPV;
+  float cosPA2 = v0.cosPA2, pv2Z = v0.pv2Z, pv2TimeMUS = v0.pv2TimeMUS;
   (*mFullDebugOut) << "v0"
                    << "tf=" << tfCounter << "selection=" << selection << "massK0=" << v0.massK0 << "massLambda=" << v0.massLambda
                    << "massAntiLambda=" << v0.massAntiLambda << "r=" << v0.r << "cosPA=" << v0.cosPA << "dca=" << v0.dca << "qT=" << v0.qT
                    << "alpha=" << v0.alpha << "vx=" << vx << "vy=" << vy << "vz=" << vz << "pvTimeMUS=" << pvTimeMUS
+                   << "nCompatPV=" << nCompatPV << "nPairPV=" << nPairPV << "cosPA2=" << cosPA2 << "pv2Z=" << pv2Z << "pv2TimeMUS=" << pv2TimeMUS
                    << "time0P=" << time0[0] << "time0N=" << time0[1] << "nClTPCP=" << nClTPC[0] << "nClTPCN=" << nClTPC[1]
                    << "nClITSP=" << nClITS[0] << "nClITSN=" << nClITS[1] << "flagsP=" << prongFlags[0] << "flagsN=" << prongFlags[1]
                    << "clProng=" << clProng << "clSector=" << clSector << "clRow=" << clRow << "clPad=" << clPad << "clTime=" << clTime

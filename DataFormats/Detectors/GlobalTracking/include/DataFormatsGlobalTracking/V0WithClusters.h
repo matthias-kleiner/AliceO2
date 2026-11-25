@@ -112,7 +112,8 @@ struct V0WithClusters {
                                ClassLambda = 1,
                                ClassAntiLambda = 2,
                                ClassGamma = 3 };
-  V0 v0{};                    ///< V0 refitted by the study device (DCAFitter with the V0 finder's settings), prongs at the decay vertex
+  V0 v0{};                    ///< the V0 finder's V0 if it sent them (svertexer.createFullV0s), else the study device's refit (DCAFitter with
+                              ///< the V0 finder's settings); prongs at the decay vertex
   V0Index v0ID{};             ///< prong IDs and primary vertex ID of the V0 finder (only valid within the TF)
   int prong[2] = {-1, -1};    ///< entries of the positive / negative prong in the TF's prong table
   float dca = 0.f;            ///< V0::getDCA of the refit (chi2 at the point of closest approach of the prongs, as cut in the V0 finder)
@@ -137,8 +138,13 @@ struct V0WithClusters {
   int pvNContrib = 0;       ///< its number of contributors
   int nCompatPV = 0;        ///< primary vertices of the TF compatible in time with both prongs (TPC-only prong: its TPC time window;
                             ///< else its time +- svFullOutput.pvTimeNSigma errors): 1 = unique, e.g. the z of TPC-only photon legs
-                            ///< from the vertex time      ///< Selection bits
-  ClassDefNV(V0WithClusters, 1);
+                            ///< from the vertex time
+  int nPairPV = 1;          ///< primary vertices the V0 finder built this prong pair with (TPC-only prongs: one copy per vertex, shifted
+                            ///< in z to its time); only the copy with the largest cosPA is written (this one)
+  float cosPA2 = -2.f;      ///< cosPA of the copy with the second-largest cosPA (-2: no other copy)
+  float pv2Z = 0.f;         ///< z [cm] of the primary vertex of that copy
+  float pv2TimeMUS = 0.f;   ///< and its time [mus since the TF start]
+  ClassDefNV(V0WithClusters, 2);
 };
 
 /// per-TF quantities: the TPC transformation used in the reconstruction and the TPC occupancy
