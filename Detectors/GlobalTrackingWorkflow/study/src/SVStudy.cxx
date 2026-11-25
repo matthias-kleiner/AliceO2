@@ -62,6 +62,7 @@
 #include "MathUtils/Utils.h"
 #include "CommonDataFormat/InteractionRecord.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <algorithm>
 #include <cmath>
@@ -842,6 +843,41 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     const int bin = logPt < logPtMin ? 0 : (logPt >= logPtMax ? par.nPtBins + 1 : 1 + int((logPt - logPtMin) / (logPtMax - logPtMin) * par.nPtBins));
     sel.push_back({iv, bin, v0Random(tfID.tfCounter, iv), cand});
   }
+  // 1b) V0s sharing a track (before the downsampling, which may drop the competitors): count and greedy matching by legScore
+  {
+    std::unordered_map<uint32_t, std::vector<int>> byLeg;
+    for (int k = 0; k < (int)sel.size(); k++) {
+      auto& c = sel[k].cand;
+      c.legScore = par.legScoreWeight * 60.f * std::acos(std::clamp(c.cosPA, -1.f, 1.f)) + (1.f - par.legScoreWeight) * std::sqrt(std::max(0.f, c.dca)) / 3.f;
+      for (int ip = 0; ip < 2; ip++) {
+        byLeg[c.v0ID.getProngID(ip).getRawWOFlags()].push_back(k);
+      }
+    }
+    std::vector<int> order(sel.size());
+    for (int k = 0; k < (int)sel.size(); k++) {
+      order[k] = k;
+      std::unordered_set<int> others;
+      for (int ip = 0; ip < 2; ip++) {
+        for (int o : byLeg[sel[k].cand.v0ID.getProngID(ip).getRawWOFlags()]) {
+          if (o != k) {
+            others.insert(o);
+          }
+        }
+      }
+      sel[k].cand.nSharedLeg = others.size();
+    }
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return sel[a].cand.legScore < sel[b].cand.legScore; });
+    std::unordered_set<uint32_t> usedLegs;
+    for (int k : order) {
+      const uint32_t l0 = sel[k].cand.v0ID.getProngID(0).getRawWOFlags();
+      const uint32_t l1 = sel[k].cand.v0ID.getProngID(1).getRawWOFlags();
+      if (!usedLegs.count(l0) && !usedLegs.count(l1)) {
+        sel[k].cand.selection |= V0C::BestForLegs;
+        usedLegs.insert(l0);
+        usedLegs.insert(l1);
+      }
+    }
+  }
   // 2) flat in V0 pT: per class and bin at most maxPerBin* V0s, those with the lowest random numbers; weight = candidates / kept
   const int maxPerBin[4] = {par.maxPerBinK0, par.maxPerBinLambda, par.maxPerBinLambda, par.maxPerBinGamma};
   std::map<std::pair<int, int>, std::vector<int>> groups;
@@ -964,11 +1000,13 @@ void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, cons
   float pvTimeMUS = pv.getTimeStamp().getTimeStamp();
   int nCompatPV = v0.nCompatPV, nPairPV = v0.nPairPV;
   float cosPA2 = v0.cosPA2, pv2Z = v0.pv2Z, pv2TimeMUS = v0.pv2TimeMUS;
+  int nSharedLeg = v0.nSharedLeg;
+  float legScore = v0.legScore;
   (*mFullDebugOut) << "v0"
                    << "tf=" << tfCounter << "selection=" << selection << "massK0=" << v0.massK0 << "massLambda=" << v0.massLambda
                    << "massAntiLambda=" << v0.massAntiLambda << "r=" << v0.r << "cosPA=" << v0.cosPA << "dca=" << v0.dca << "qT=" << v0.qT
                    << "alpha=" << v0.alpha << "vx=" << vx << "vy=" << vy << "vz=" << vz << "pvTimeMUS=" << pvTimeMUS
-                   << "nCompatPV=" << nCompatPV << "nPairPV=" << nPairPV << "cosPA2=" << cosPA2 << "pv2Z=" << pv2Z << "pv2TimeMUS=" << pv2TimeMUS
+                   << "nCompatPV=" << nCompatPV << "nPairPV=" << nPairPV << "cosPA2=" << cosPA2 << "pv2Z=" << pv2Z << "pv2TimeMUS=" << pv2TimeMUS << "nSharedLeg=" << nSharedLeg << "legScore=" << legScore
                    << "time0P=" << time0[0] << "time0N=" << time0[1] << "nClTPCP=" << nClTPC[0] << "nClTPCN=" << nClTPC[1]
                    << "nClITSP=" << nClITS[0] << "nClITSN=" << nClITS[1] << "flagsP=" << prongFlags[0] << "flagsN=" << prongFlags[1]
                    << "clProng=" << clProng << "clSector=" << clSector << "clRow=" << clRow << "clPad=" << clPad << "clTime=" << clTime

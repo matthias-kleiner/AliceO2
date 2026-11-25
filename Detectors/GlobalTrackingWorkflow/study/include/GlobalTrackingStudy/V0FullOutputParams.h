@@ -60,6 +60,8 @@ struct V0FullOutputParams : o2::conf::ConfigurableParamHelper<V0FullOutputParams
   int maxPerBinGamma = 5;   ///< photons kept per TF and pT bin
   int maxV0sPerTF = -1;     ///< after the sampling at most this many V0s per TF, chosen at random (< 0: no limit)
   float pvTimeNSigma = 4.f; ///< nCompatPV: primary vertices within this many sigma of their time error of the prongs' time windows
+  float legScoreWeight = 0.f; ///< weight of the pointing angle in legScore (1 - weight: leg distance), as deduplicationScoreWeight in O2Physics
+                              ///< (0.5 there); 0: the leg distance alone picks the true photon most often (MC)
 
   O2ParamDef(V0FullOutputParams, "svFullOutput");
 };

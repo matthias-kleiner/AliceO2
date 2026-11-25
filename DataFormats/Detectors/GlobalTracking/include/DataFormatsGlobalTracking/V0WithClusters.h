@@ -102,11 +102,12 @@ struct V0Prong {
 /// selected V0 with its selection variables
 struct V0WithClusters {
   enum Selection : uint8_t {
-    K0 = 0x1,         ///< passed the K0s selection
-    Lambda = 0x2,     ///< passed the Lambda selection (proton = positive prong)
-    AntiLambda = 0x4, ///< passed the anti-Lambda selection
-    PhotonOnly = 0x8, ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
-    Gamma = 0x10      ///< passed the photon-conversion selection
+    K0 = 0x1,          ///< passed the K0s selection
+    Lambda = 0x2,      ///< passed the Lambda selection (proton = positive prong)
+    AntiLambda = 0x4,  ///< passed the anti-Lambda selection
+    PhotonOnly = 0x8,  ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
+    Gamma = 0x10,      ///< passed the photon-conversion selection
+    BestForLegs = 0x20 ///< best V0 (lowest legScore) for its tracks: greedy matching over the selected V0s of the TF, each track in at most one
   };
   enum SampleClass : uint8_t { ClassK0 = 0,
                                ClassLambda = 1,
@@ -144,7 +145,10 @@ struct V0WithClusters {
   float cosPA2 = -2.f;      ///< cosPA of the copy with the second-largest cosPA (-2: no other copy)
   float pv2Z = 0.f;         ///< z [cm] of the primary vertex of that copy
   float pv2TimeMUS = 0.f;   ///< and its time [mus since the TF start]
-  ClassDefNV(V0WithClusters, 2);
+  int nSharedLeg = 0;       ///< other selected V0s of the TF (any class, before the downsampling) using one of its tracks
+  float legScore = 0.f;     ///< w * 60 * acos(cosPA) + (1 - w) * sqrt(dca) / 3 cm, w = svFullOutput.legScoreWeight (lower: better); ranks the
+                            ///< V0s sharing a track (BestForLegs), as the photon-conversion-builder deduplication in O2Physics
+  ClassDefNV(V0WithClusters, 3);
 };
 
 /// per-TF quantities: the TPC transformation used in the reconstruction and the TPC occupancy
