@@ -1159,8 +1159,8 @@ int SVertexer::checkCascades(const V0Index& v0Idx, const V0& v0, float rv0, std:
       continue; // skip the track used by V0
     }
     auto& bach = tracks[it];
-    if (mSVParams->mSkipTPCOnlyCascade && (bach.gid.getSource() == GIndex::TPC)) {
-      continue; // reject TPC-only bachelors
+    if ((mSVParams->mSkipTPCOnlyCascade && (bach.gid.getSource() == GIndex::TPC)) || bach.farOnly) {
+      continue; // reject TPC-only bachelors; TPC clones kept for the far V0 mode only are never bachelors
     }
     if (!bach.hasTPC && bach.nITSclu < mSVParams->mITSSAminNcluCascades) {
       continue; // reject short ITS-only
@@ -1330,8 +1330,8 @@ int SVertexer::check3bodyDecays(const V0Index& v0Idx, const V0& v0, float rv0, s
       continue; // skip the track used by V0
     }
     auto& bach = tracks[it];
-    if (mSVParams->mSkipTPCOnly3Body && (bach.gid.getSource() == GIndex::TPC)) {
-      continue; // reject TPC-only bachelors
+    if ((mSVParams->mSkipTPCOnly3Body && (bach.gid.getSource() == GIndex::TPC)) || bach.farOnly) {
+      continue; // reject TPC-only bachelors; TPC clones kept for the far V0 mode only are never bachelors
     }
     if (bach.vBracket > v0vlist.getMax()) {
       LOG(debug) << "Skipping";
