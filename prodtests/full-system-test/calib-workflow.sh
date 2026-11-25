@@ -105,6 +105,13 @@ if [[ ${CALIB_ASYNC_EXTRACTCOSMICS:-0} == 1 ]] ; then
   fi
   add_W o2-cosmics-match-workflow "$DISABLE_ROOT_INPUT $DISABLE_MC --track-sources TPC --enable-cluster-output --road-detectors ${COSMICS_ROAD_DETECTORS:-none}$COSMICS_OPT" "$COSMICS_CONFIG"
 fi
+if [[ ${CALIB_ASYNC_EXTRACTV0S:-0} == 1 ]] ; then
+  # V0s (K0s, Lambda, photon conversions) with the raw TPC / ITS / TOF clusters and TRD tracklets of their prongs -> o2_v0s_full.root
+  # (selection and downsampling: svFullOutput.*). It takes the V0 finder's V0s from the chain, without a refit if the finder sends the
+  # full V0s (svertexer.createFullV0s=true)
+  : ${V0S_TRACK_SOURCES:=$TRACK_SOURCES}
+  add_W o2-sv-study-workflow "$DISABLE_ROOT_INPUT $DISABLE_MC --disable-study-tree --full-output --track-sources $V0S_TRACK_SOURCES $TPC_CORR_OPT" "$TPC_CORR_KEY"
+fi
 
 # output-proxy for aggregator
 if workflow_has_parameter CALIB_PROXIES; then
