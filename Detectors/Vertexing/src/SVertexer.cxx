@@ -48,6 +48,7 @@ void SVertexer::process(const o2::globaltracking::RecoContainer& recoData, o2::f
   mDebugTF++;
   buildT2V(recoData); // build track->vertex refs from vertex->track (if other workflow will need this, consider producing a message in the VertexTrackMatcher)
   int ntrP = mTracksPool[POS].size(), ntrN = mTracksPool[NEG].size();
+  mFarV0Counts.assign(mNThreads, {0, 0, 0});
   if (mStrTracker) {
     mStrTracker->loadData(recoData);
     mStrTracker->prepareITStracks();
@@ -77,8 +78,31 @@ void SVertexer::process(const o2::globaltracking::RecoContainer& recoData, o2::f
 #else
       int iThread = 0;
 #endif
-      checkV0(seedP, seedN, itp, itn, iThread);
+      bool stored = false;
+      if (!seedP.farOnly && !seedN.farOnly) { // far-only TPC clones (failing the photon track cuts) are used in the far mode only
+        stored = checkV0(seedP, seedN, itp, itn, iThread);
+      }
+      if (!stored && mSVParams->farV0Mode && seedP.hasTPC && seedN.hasTPC && !seedP.hasITS() && !seedN.hasITS() &&
+          (mSVParams->farV0BothTPCOnly || seedP.gid.getSource() != GIndex::TPC || seedN.gid.getSource() != GIndex::TPC)) {
+        checkV0(seedP, seedN, itp, itn, iThread, true);
+      }
     }
+  }
+  if (mSVParams->farV0Mode) {
+    std::array<size_t, 3> far{0, 0, 0};
+    size_t nFarOnly = 0;
+    for (const auto& c : mFarV0Counts) {
+      for (int i = 0; i < 3; i++) {
+        far[i] += c[i];
+      }
+    }
+    for (int i = 0; i < 2; i++) {
+      for (const auto& t : mTracksPool[i]) {
+        nFarOnly += t.farOnly;
+      }
+    }
+    LOGP(info, "Far V0 mode: {} pairs tried, {} passed the seed cuts, {} V0s stored; track pool {} + {}, of them {} far-only TPC clones", far[0], far[1], far[2],
+         ntrP, ntrN, nFarOnly);
   }
 
   produceOutput(pc);
@@ -495,9 +519,10 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
         // but we need to create a clone of TPC track constrained to this particular vertex time.
         const size_t nPoolBefore = mTracksPool[0].size() + mTracksPool[1].size();
         if (processTPCTrack(mTPCTracksArray[tvid], tvid, iv)) {
-          if (mDebugStream) { // stage 0: TPC-only track added as a clone for this vertex, 1: discarded
+          if (mDebugStream) { // stage 0: TPC-only track added as a clone for this vertex, 7: added for the far V0 mode only, 1: discarded
             const bool added = mTracksPool[0].size() + mTracksPool[1].size() > nPoolBefore;
-            writeTrkDbg(tvid.getRaw(), iv, added ? 0 : 1, added ? (mTPCTracksArray[tvid].getSign() < 0 ? mTracksPool[1] : mTracksPool[0]).back().minR : -1.f);
+            const auto* clone = added ? &(mTPCTracksArray[tvid].getSign() < 0 ? mTracksPool[1] : mTracksPool[0]).back() : nullptr;
+            writeTrkDbg(tvid.getRaw(), iv, clone ? (clone->farOnly ? 7 : 0) : 1, clone ? clone->minR : -1.f);
           }
           continue;
         }
@@ -615,7 +640,7 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
 }
 
 //__________________________________________________________________
-bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, int iN, int ithread)
+bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, int iN, int ithread, bool far)
 {
   auto& fitterV0 = mFitterV0[ithread];
   // Fast rough cuts on pairs before feeding to DCAFitter, tracks are not in the same Frame or at same X
@@ -632,8 +657,17 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     d.minRN = seedN.minR;
     d.innerRP = seedP.rInnerUpdate;
     d.innerRN = seedN.rInnerUpdate;
+    d.far = far;
   }
-  if (mSVParams->mTPCTrackPhotonTune && isTPConly) {
+  if (far) {
+    mFarV0Counts[ithread][0]++;
+    if (mSVParams->farV0SeedCuts && !checkFarV0Seed(seedP, seedN)) {
+      writeV0Dbg(d, 13); // far mode: rejected by the seed cuts
+      return false;
+    }
+    mFarV0Counts[ithread][1]++;
+  }
+  if (mSVParams->mTPCTrackPhotonTune && isTPConly && !far) {
     // Check if Tgl is close enough
     if (std::abs(seedP.getTgl() - seedN.getTgl()) > mSVParams->maxV0TglAbsDiff) {
       LOG(debug) << "RejTgl";
@@ -674,8 +708,14 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   }
 
   // feed DCAFitter
+  if (far) {
+    fitterV0.setMaxR(mSVParams->farV0MaxRIni);
+  }
   int nCand = fitterV0.process(seedP, seedN);
-  if (mSVParams->mTPCTrackPhotonTune && isTPConly) {
+  if (far) {
+    fitterV0.setMaxR(mSVParams->maxRIni);
+  }
+  if (mSVParams->mTPCTrackPhotonTune && isTPConly && !far) {
     // Reset immediately to the defaults
     fitterV0.setMaxDZIni(mSVParams->maxDZIni);
     fitterV0.setMaxDXYIni(mSVParams->maxDXYIni);
@@ -702,7 +742,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     d.drN = drv0N;
     d.chi2 = fitterV0.getChi2AtPCACandidate();
   }
-  if (r2v0 < mMinR2ToMeanVertex) {
+  if (r2v0 < mMinR2ToMeanVertex || (far && rv0 < mSVParams->farV0MinR)) {
     LOG(debug) << "RejMinR2ToMeanVertex";
     writeV0Dbg(d, 2);
     return false;
@@ -712,8 +752,8 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   // would reject V0s whose TPC track misses its inner part.
   const float drv0PUp = seedP.rInnerUpdate > 0.f ? rv0 - seedP.rInnerUpdate : drv0P;
   const float drv0NUp = seedN.rInnerUpdate > 0.f ? rv0 - seedN.rInnerUpdate : drv0N;
-  if (drv0PUp > mSVParams->causalityRTolerance || drv0P < -mSVParams->maxV0ToProngsRDiff ||
-      drv0NUp > mSVParams->causalityRTolerance || drv0N < -mSVParams->maxV0ToProngsRDiff) {
+  const float tolR = far ? mSVParams->farV0CausalityRTolerance : mSVParams->causalityRTolerance;
+  if (drv0PUp > tolR || drv0P < -mSVParams->maxV0ToProngsRDiff || drv0NUp > tolR || drv0N < -mSVParams->maxV0ToProngsRDiff) {
     LOG(debug) << "RejCausality " << drv0PUp << " " << drv0P << " " << drv0NUp << " " << drv0N;
     writeV0Dbg(d, 3);
     return false;
@@ -776,14 +816,18 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   }
   // apply mass selections
 
-  bool goodHyp = false, photonOnly = mSVParams->mTPCTrackPhotonTune && isTPConly;
+  bool goodHyp = false, photonOnly = mSVParams->mTPCTrackPhotonTune && isTPConly && !far;
   std::array<bool, NHypV0> hypCheckStatus{};
-  int nPID = photonOnly ? (Photon + 1) : NHypV0;
-  for (int ipid = 0; (ipid < nPID) && mSVParams->checkV0Hypothesis; ipid++) {
+  int nPID = photonOnly ? (Photon + 1) : (far ? AntiLambda + 1 : NHypV0); // far mode: K0s, Lambda, anti-Lambda only
+  for (int ipid = far ? K0 : 0; (ipid < nPID) && mSVParams->checkV0Hypothesis; ipid++) {
     if (mV0Hyps[ipid].check(p2Pos, p2Neg, p2V0, ptV0)) {
       goodHyp = hypCheckStatus[ipid] = true;
       d.hyp |= 1 << ipid;
     }
+  }
+  if (far && mV0Hyps[Photon].check(p2Pos, p2Neg, p2V0, ptV0)) { // photons are left to the photon path
+    writeV0Dbg(d, 7);
+    return false;
   }
   // check tight lambda mass only
   bool goodLamForCascade = false, goodALamForCascade = false;
@@ -809,12 +853,12 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
   }
 
   // we want to reconstruct the 3 body decay of hypernuclei starting from the V0 of a proton and a pion (e.g. H3L->d + (p + pi-), or He4L->He3 + (p + pi-)))
-  bool checkFor3BodyDecays = mEnable3BodyDecays &&
+  bool checkFor3BodyDecays = mEnable3BodyDecays && !far &&
                              (!mSVParams->checkV0Hypothesis || good3bodyV0Hyp) &&
                              (pt2V0 > 0.5) &&
                              (!mSVParams->mSkipTPCOnly3Body || !isTPConly);
   bool rejectAfter3BodyCheck = false; // To reject v0s which can be 3-body decay candidates but not cascade or v0
-  bool checkForCascade = mEnableCascades &&
+  bool checkForCascade = mEnableCascades && !far &&
                          (!mSVParams->mSkipTPCOnlyCascade || !usesTPCOnly) &&
                          r2v0 < mMaxR2ToMeanVertexCascV0 &&
                          (!mSVParams->checkV0Hypothesis || (goodLamForCascade || goodALamForCascade) &&
@@ -852,13 +896,14 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     }
   }
 
-  if (dca2 > mMaxDCAXY2ToMeanVertex || cosPAXY < mSVParams->minCosPAXYMeanVertex) {
+  const float maxDCAXY2 = far ? mSVParams->farV0MaxDCAXYToMeanVertex * mSVParams->farV0MaxDCAXYToMeanVertex : mMaxDCAXY2ToMeanVertex;
+  if (dca2 > maxDCAXY2 || cosPAXY < mSVParams->minCosPAXYMeanVertex) {
     if (checkForCascade) {
       rejectIfNotCascade = true;
     } else if (checkFor3BodyDecays) {
       rejectAfter3BodyCheck = true;
     } else {
-      if (mSVParams->mTPCTrackPhotonTune && isTPConly) {
+      if (mSVParams->mTPCTrackPhotonTune && isTPConly && !far) {
         // Check for looser cut for tpc-only photons only
         if (dca2 > mSVParams->mTPCTrackMaxDCAXY2ToMeanVertex) {
           writeV0Dbg(d, 8);
@@ -873,7 +918,7 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
 
   auto vlist = seedP.vBracket.getOverlap(seedN.vBracket); // indices of vertices shared by both seeds
   bool candFound = false;
-  auto bestCosPA = checkForCascade ? mSVParams->minCosPACascV0 : mSVParams->minCosPA;
+  auto bestCosPA = checkForCascade ? mSVParams->minCosPACascV0 : (far ? mSVParams->farV0MinCosPA : mSVParams->minCosPA);
   bestCosPA = checkFor3BodyDecays ? std::min(mSVParams->minCosPA3bodyV0, bestCosPA) : bestCosPA;
   V0 v0new;
   V0Index v0Idxnew;
@@ -960,8 +1005,92 @@ bool SVertexer::checkV0(const TrackCand& seedP, const TrackCand& seedN, int iP, 
     }
   }
 
+  if (far && mV0sIdxTmp[ithread].size() != nV0Ini) {
+    mFarV0Counts[ithread][2]++;
+  }
   writeV0Dbg(d, mV0sIdxTmp[ithread].size() - nV0Ini != 0 ? 12 : 11); // 12: V0 stored, 11: not stored (cascade-only V0 without cascade)
   return mV0sIdxTmp[ithread].size() - nV0Ini != 0;
+}
+
+//__________________________________________________________________
+bool SVertexer::checkFarV0Seed(const TrackCand& seedP, const TrackCand& seedN) const
+{
+  // Seed cuts of the far V0 mode, before the fit: the circles of the two legs (xy) cross, or nearly touch, at a radius between
+  // farV0MinR and the innermost measured points of the legs; there the legs agree in z, the summed momenta point back to the beam
+  // line, and the mass is that of a K0s, Lambda or anti-Lambda. Exact for helices, so close to the fitted values.
+  o2::math_utils::CircleXYf_t cP, cN;
+  float sna, csa;
+  seedP.getCircleParams(mBz, cP, sna, csa);
+  seedN.getCircleParams(mBz, cN, sna, csa);
+  if (cP.rC <= 0.f || cN.rC <= 0.f) { // straight line: no seed cuts
+    return true;
+  }
+  const auto* par = mSVParams;
+  const float rMin = par->farV0MinR - par->farV0SeedRSlack;
+  const float upperP = seedP.rInnerUpdate > 0.f ? seedP.rInnerUpdate : seedP.minR, upperN = seedN.rInnerUpdate > 0.f ? seedN.rInnerUpdate : seedN.minR;
+  const float rMax = std::min(par->farV0MaxRIni, std::min(upperP, upperN) + par->farV0CausalityRTolerance + par->farV0SeedRSlack);
+  struct Leg {
+    float xC, yC, rC, sense, x, y, z, pt, tgl;
+  };
+  auto makeLeg = [](const TrackCand& t, const o2::math_utils::CircleXYf_t& c) {
+    const auto pos = t.getXYZGlo();
+    std::array<float, 3> p{};
+    t.getPxPyPzGlo(p);
+    const float cross = (pos.X() - c.xC) * p[1] - (pos.Y() - c.yC) * p[0]; // > 0: counter-clockwise
+    return Leg{c.xC, c.yC, c.rC, cross > 0.f ? 1.f : -1.f, pos.X(), pos.Y(), pos.Z(), t.getPt(), t.getTgl()};
+  };
+  const Leg lP = makeLeg(seedP, cP), lN = makeLeg(seedN, cN);
+  // momentum (xyz) and z of a leg at the point (x, y) of its circle
+  auto atPoint = [](const Leg& l, float x, float y, std::array<float, 3>& p, float& z) {
+    const float vx = x - l.xC, vy = y - l.yC, v = std::sqrt(vx * vx + vy * vy);
+    p[0] = -l.sense * vy / v * l.pt;
+    p[1] = l.sense * vx / v * l.pt;
+    p[2] = l.tgl * l.pt;
+    const float wx = l.x - l.xC, wy = l.y - l.yC;
+    const float s = l.sense * std::atan2(vx * wy - vy * wx, vx * wx + vy * wy) * l.rC; // path in xy from the point to the track's reference
+    z = l.z - l.tgl * s;
+  };
+  auto pointOK = [&](float x, float y) {
+    const float dx = x - mMeanVertex.getX(), dy = y - mMeanVertex.getY(), r = std::sqrt(dx * dx + dy * dy);
+    if (r < rMin || r > rMax) {
+      return false;
+    }
+    std::array<float, 3> pP{}, pN{};
+    float zP, zN;
+    atPoint(lP, x, y, pP, zP);
+    atPoint(lN, x, y, pN, zN);
+    if (std::abs(zP - zN) > par->farV0SeedMaxDZ) {
+      return false;
+    }
+    const float px = pP[0] + pN[0], py = pP[1] + pN[1], pz = pP[2] + pN[2], pt = std::sqrt(px * px + py * py);
+    if (pt <= 0.f || std::abs(dx * py - dy * px) / pt > par->farV0MaxDCAXYToMeanVertex || (dx * px + dy * py) / (r * pt) < par->minCosPAXYMeanVertex) {
+      return false;
+    }
+    const float p2Pos = pP[0] * pP[0] + pP[1] * pP[1] + pP[2] * pP[2], p2Neg = pN[0] * pN[0] + pN[1] * pN[1] + pN[2] * pN[2];
+    const float p2V0 = pt * pt + pz * pz;
+    for (int ipid = K0; ipid <= AntiLambda; ipid++) {
+      if (std::abs(mV0Hyps[ipid].calcMass(p2Pos, p2Neg, p2V0) - mV0Hyps[ipid].getMassV0Hyp()) < par->farV0SeedMassScale * mV0Hyps[ipid].getMargin(pt)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const float dxC = cN.xC - cP.xC, dyC = cN.yC - cP.yC, d = std::sqrt(dxC * dxC + dyC * dyC);
+  if (d < 1e-3f) {
+    return false;
+  }
+  const float ux = dxC / d, uy = dyC / d;
+  if (d > cP.rC + cN.rC) { // apart: the middle of the gap
+    const float gap = d - cP.rC - cN.rC;
+    return gap < par->farV0SeedMaxDXY && pointOK(cP.xC + (cP.rC + 0.5f * gap) * ux, cP.yC + (cP.rC + 0.5f * gap) * uy);
+  }
+  if (d < std::abs(cP.rC - cN.rC)) { // one inside the other: the middle between the closest points
+    const float gap = std::abs(cP.rC - cN.rC) - d, sg = cP.rC > cN.rC ? 1.f : -1.f;
+    return gap < par->farV0SeedMaxDXY && pointOK(0.5f * (cP.xC + cN.xC + sg * (cP.rC + cN.rC) * ux), 0.5f * (cP.yC + cN.yC + sg * (cP.rC + cN.rC) * uy));
+  }
+  const float a = (cP.rC * cP.rC - cN.rC * cN.rC + d * d) / (2.f * d), h = std::sqrt(std::max(0.f, cP.rC * cP.rC - a * a));
+  const float x0 = cP.xC + a * ux, y0 = cP.yC + a * uy;
+  return pointOK(x0 - h * uy, y0 + h * ux) || pointOK(x0 + h * uy, y0 - h * ux);
 }
 
 //__________________________________________________________________
@@ -1003,7 +1132,7 @@ void SVertexer::writeV0Dbg(const V0Dbg& dc, int stage)
   int tf = mDebugTF;
   (*mDebugStream) << "v0"
                   << "tf=" << tf << "stage=" << stage << "gidP=" << d.gidP << "gidN=" << d.gidN << "vMin=" << d.vMin << "vMax=" << d.vMax
-                  << "tpcOnly=" << d.tpcOnly << "minRP=" << d.minRP << "minRN=" << d.minRN << "innerRP=" << d.innerRP << "innerRN=" << d.innerRN << "x=" << d.x << "y=" << d.y << "z=" << d.z
+                  << "tpcOnly=" << d.tpcOnly << "minRP=" << d.minRP << "minRN=" << d.minRN << "innerRP=" << d.innerRP << "innerRN=" << d.innerRN << "far=" << d.far << "x=" << d.x << "y=" << d.y << "z=" << d.z
                   << "r=" << d.r << "drP=" << d.drP << "drN=" << d.drN << "chi2=" << d.chi2 << "pt=" << d.pt << "tgl2=" << d.tgl2
                   << "mG=" << d.mG << "mK0=" << d.mK0 << "mL=" << d.mL << "mAL=" << d.mAL << "hyp=" << d.hyp << "dcaXY=" << d.dcaXY
                   << "cosPAXY=" << d.cosPAXY << "cosPABest=" << d.cosPABest << "vBest=" << d.vBest << "\n";
@@ -1477,8 +1606,11 @@ bool SVertexer::processTPCTrack(const o2::tpc::TrackTPC& trTPC, GIndex gid, int 
     bool dRD2 = drd2 > mSVParams->mTPCTrackXY2Radius;
 
     if (dCls || dDPV || dRD2) {
-      mTracksPool[posneg].pop_back();
-      return true;
+      if (!mSVParams->farV0Mode || !mSVParams->farV0KeepTPCTracks) {
+        mTracksPool[posneg].pop_back();
+        return true;
+      }
+      trLoc.farOnly = true; // no photon leg: kept for the far V0 mode only
     }
   }
 
