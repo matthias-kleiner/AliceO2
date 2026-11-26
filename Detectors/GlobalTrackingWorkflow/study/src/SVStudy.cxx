@@ -128,6 +128,7 @@ class SVStudySpec final : public Task
   void getTPCOccupancy(const PVertex& pv, float& occBef, float& occAft) const;
   void processFull(o2::globaltracking::RecoContainer& recoData, ProcessingContext& pc);
   bool passProngCuts(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
+  bool passFarLegCuts(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
   int countCompatiblePVs(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
   int addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out);
   void fillITSPatterns(const o2::globaltracking::RecoContainer& recoData, FullOutput& out) const;
@@ -533,6 +534,19 @@ bool SVStudySpec::passProngCuts(const V0ID& id, const o2::globaltracking::RecoCo
   return !par.requireOppositeCharges || charge[0] * charge[1] < 0;
 }
 
+bool SVStudySpec::passFarLegCuts(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const
+{
+  // far V0s: both legs with at least minTPCClustersFar TPC clusters
+  const auto& par = V0FullOutputParams::Instance();
+  for (int ip = 0; ip < 2; ip++) {
+    const auto refs = recoData.getSingleDetectorRefs(id.getProngID(ip));
+    if (!refs[GTrackID::TPC].isIndexSet() || recoData.getTPCTrack(refs[GTrackID::TPC]).getNClusters() < par.minTPCClustersFar) {
+      return false;
+    }
+  }
+  return true;
+}
+
 int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out)
 {
   // each prong is stored once per TF: the V0s sharing it point to the same entry
@@ -820,14 +834,26 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     const float maxDCA = far ? par.maxDCAFar : par.maxDCA, minCosPA = far ? par.minCosPAFar : par.minCosPA, maxR = far ? par.maxRFar : par.maxR;
     const float dmK0 = far ? par.maxDMassK0Far : par.maxDMassK0, dmL = far ? par.maxDMassLambdaFar : par.maxDMassLambda;
     const float minQt = far ? par.minQtFar : par.minQt;
-    if (!(cand.dca > maxDCA || cand.cosPA < minCosPA || cand.qT < minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > maxR)) {
-      if (par.selK0 && std::abs(cand.massK0 - massK0) < dmK0) {
+    if (!(cand.dca > maxDCA || cand.cosPA < minCosPA || cand.qT < minQt || cand.qT > par.maxQt || cand.r < par.minR || cand.r > maxR || (far && !passFarLegCuts(id, recoData)))) {
+      // far V0s: proper decay length from the assigned primary vertex (no cut on the others)
+      float ctOverM = 0.f;
+      if (far) {
+        const auto& pv = recoData.getPrimaryVertex(id.getVertexID());
+        std::array<float, 3> xyz;
+        v0->getXYZGlo(xyz);
+        const float dx = xyz[0] - pv.getX();
+        const float dy = xyz[1] - pv.getY();
+        const float dz = xyz[2] - pv.getZ();
+        ctOverM = std::sqrt(dx * dx + dy * dy + dz * dz) / std::max(1e-6f, v0->getP());
+      }
+      if (par.selK0 && std::abs(cand.massK0 - massK0) < dmK0 && (!far || (cand.qT > par.minQtK0Far && ctOverM * massK0 < par.maxCtK0Far))) {
         cand.selection |= V0C::K0;
       }
-      if (par.selLambda && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < dmL) {
+      const bool ctLambdaOK = !far || ctOverM * massLambda < par.maxCtLambdaFar;
+      if (par.selLambda && ctLambdaOK && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < dmL) {
         cand.selection |= V0C::Lambda;
       }
-      if (par.selLambda && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < dmL) {
+      if (par.selLambda && ctLambdaOK && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < dmL) {
         cand.selection |= V0C::AntiLambda;
       }
       if (far && cand.selection) {
