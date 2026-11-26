@@ -28,6 +28,7 @@
 #include "CommonDataFormat/RangeReference.h"
 #include "DataFormatsTPC/TrackTPC.h"
 #include "DataFormatsTPC/ClusterNative.h"
+#include "SimulationDataFormat/MCCompLabel.h"
 
 namespace o2::dataformats
 {
@@ -91,23 +92,29 @@ struct V0Prong {
   RangeReference<int, int> tofClusters{};  ///< same for the matched TOF cluster (0 or 1) in the TF's TOF cluster table
   RangeReference<int, int> trdTracklets{}; ///< same for the TRD tracklets in the TF's TRD tracklet table
   uint8_t flags = 0;                       ///< Flags
+  // TOF match of the reconstruction (HasTOF), for TOF PID: beta = tofLength / (c (tofSignal - V0WithClusters::evTimeTOF))
+  double tofSignal = 0.;       ///< calibrated TOF time of the match [ps since the TF start] (MatchInfoTOF::getSignal)
+  float tofLength = 0.f;       ///< integrated track length to the TOF cluster [cm] (from the track's start, as in the reconstruction)
+  float tofExpTime[5] = {0.f}; ///< expected times of flight [ps] for e, mu, pi, K, p (o2::track::PID 0-4) over tofLength
+  o2::MCCompLabel mcLabel{};   ///< MC label of the global track (MC input only; else not set)
   bool hasTPC() const { return flags & HasTPC; }
   bool hasITS() const { return flags & HasITS; }
   bool isITSAB() const { return flags & ITSAB; }
   bool hasTOF() const { return flags & HasTOF; }
   bool hasTRD() const { return flags & HasTRD; }
-  ClassDefNV(V0Prong, 1);
+  ClassDefNV(V0Prong, 2);
 };
 
 /// selected V0 with its selection variables
 struct V0WithClusters {
   enum Selection : uint8_t {
-    K0 = 0x1,          ///< passed the K0s selection
-    Lambda = 0x2,      ///< passed the Lambda selection (proton = positive prong)
-    AntiLambda = 0x4,  ///< passed the anti-Lambda selection
-    PhotonOnly = 0x8,  ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
-    Gamma = 0x10,      ///< passed the photon-conversion selection
-    BestForLegs = 0x20, ///< best V0 (lowest legScore) for its tracks: greedy matching over the selected V0s of the TF, each track in at most one
+    K0 = 0x1,           ///< passed the K0s selection
+    Lambda = 0x2,       ///< passed the Lambda selection (proton = positive prong)
+    AntiLambda = 0x4,   ///< passed the anti-Lambda selection
+    PhotonOnly = 0x8,   ///< the V0 finder flagged the candidate as photon only (V0Index::isPhotonOnly)
+    Gamma = 0x10,       ///< passed the photon-conversion selection
+    BestForLegs = 0x20, ///< best V0 for its tracks: greedy matching over the selected V0s of the TF, each track in at most one, lowest
+                        ///< w 60 acos(cosPA) + (1 - w) sqrt(dca) / 3 cm first (w = svFullOutput.legScoreWeight)
     Far = 0x40          ///< selected with the far cuts (svFullOutput.*Far): beyond maxR, both legs without ITS
   };
   enum SampleClass : uint8_t { ClassK0 = 0,
@@ -116,8 +123,7 @@ struct V0WithClusters {
                                ClassGamma = 3 };
   V0 v0{};                    ///< the V0 finder's V0 if it sent them (svertexer.createFullV0s), else the study device's refit (DCAFitter with
                               ///< the V0 finder's settings); prongs at the decay vertex
-  V0Index v0ID{};             ///< prong IDs and primary vertex ID of the V0 finder (only valid within the TF)
-  int prong[2] = {-1, -1};    ///< entries of the positive / negative prong in the TF's prong table
+  int prong[2] = {-1, -1};    ///< entries of the positive / negative prong in the TF's prong table (their gid: the V0 finder's prong IDs)
   float dca = 0.f;            ///< V0::getDCA of the refit (chi2 at the point of closest approach of the prongs, as cut in the V0 finder)
   float cosPA = 0.f;          ///< cosine of the pointing angle to the primary vertex
   float qT = 0.f;             ///< Armenteros qT [GeV]
@@ -132,7 +138,7 @@ struct V0WithClusters {
   uint8_t selection = 0;      ///< Selection bits
   uint8_t sampleClass = 0;    ///< SampleClass of the downsampling (first passed type of K0s, Lambda, anti-Lambda, photon)
   float weight = 1.f;         ///< downsampling weight: V0s of its class (far ones apart: bit Far) and pT bin in the TF / kept ones (1: all kept)
-  float pvX = 0.f;            ///< primary vertex the V0 finder assigned (v0ID.getVertexID()) [cm]
+  float pvX = 0.f;            ///< primary vertex the V0 finder assigned [cm]
   float pvY = 0.f;
   float pvZ = 0.f;
   float pvTimeMUS = 0.f;    ///< its time [mus since the TF start]
@@ -144,23 +150,28 @@ struct V0WithClusters {
   int nPairPV = 1;          ///< primary vertices the V0 finder built this prong pair with (TPC-only prongs: one copy per vertex, shifted
                             ///< in z to its time); only the copy with the largest cosPA is written (this one)
   float cosPA2 = -2.f;      ///< cosPA of the copy with the second-largest cosPA (-2: no other copy)
-  float pv2Z = 0.f;         ///< z [cm] of the primary vertex of that copy
-  float pv2TimeMUS = 0.f;   ///< and its time [mus since the TF start]
   int nSharedLeg = 0;       ///< other selected V0s of the TF (any class, before the downsampling) using one of its tracks
-  float legScore = 0.f;     ///< w * 60 * acos(cosPA) + (1 - w) * sqrt(dca) / 3 cm, w = svFullOutput.legScoreWeight (lower: better); ranks the
-                            ///< V0s sharing a track (BestForLegs), as the photon-conversion-builder deduplication in O2Physics
-  ClassDefNV(V0WithClusters, 3);
+
+  // v4: primary-vertex covariance, leg DCAs and the TOF event time (PID samples, pointing constraint)
+  float pvCov[6] = {0.f};               ///< position covariance of the assigned primary vertex [cm^2] (VertexBase order: xx, xy, yy, xz, yz, zz)
+  float legDCAxy[2] = {-999.f, -999.f}; ///< DCA of the positive / negative leg to that vertex in the bending plane [cm] (the V0's prong
+                                        ///< propagated from the decay vertex, TPC-only legs in z shifted to the vertex time; -999: failed)
+  float legDCAz[2] = {-999.f, -999.f};  ///< same along z [cm]
+  double evTimeTOF = 0.;                ///< event time of that vertex from its TOF-matched tracks [ps since the TF start]: robust mean of
+                                        ///< (TOF signal - expected pion time), the V0's own legs excluded (evTimeTOFN = 0: none)
+  float evTimeTOFErr = 0.f;             ///< its error [ps] (spread / sqrt(N))
+  int evTimeTOFN = 0;                   ///< TOF tracks used
+  ClassDefNV(V0WithClusters, 4);
 };
 
 /// per-TF quantities: the TPC transformation used in the reconstruction and the TPC occupancy
 struct V0sTFInfo {
-  float vDrift = 0.f;  ///< drift velocity of the transformation [cm/time bin]
-  float t0 = 0.f;      ///< time offset of the transformation [time bins]
-  float lumi = 0.f;    ///< luminosity estimator the map was scaled with (TPCFastTransformPOD::getLumi)
-  float idc = 0.f;     ///< IDC estimator the map was scaled with (TPCFastTransformPOD::getIDC)
-  float tpcOcc = -1.f; ///< TPC clusters per orbit, average of the TF (TPC occupancy map) (< 0: no map)
-  int nHBFPerTF = 0;   ///< HBFs per TF (needed with the occupancy map tpcOccMap in the TPC refit)
-  ClassDefNV(V0sTFInfo, 1);
+  float vDrift = 0.f; ///< drift velocity of the transformation [cm/time bin]
+  float t0 = 0.f;     ///< time offset of the transformation [time bins]
+  float lumi = 0.f;   ///< luminosity estimator the map was scaled with (TPCFastTransformPOD::getLumi)
+  float idc = 0.f;    ///< IDC estimator the map was scaled with (TPCFastTransformPOD::getIDC); TPC occupancy: branch tpcOccMap; the
+                      ///< refit with it also needs the HBFs per TF (GRPECSObject::getNHBFPerTF of the run)
+  ClassDefNV(V0sTFInfo, 2);
 };
 
 } // namespace o2::dataformats

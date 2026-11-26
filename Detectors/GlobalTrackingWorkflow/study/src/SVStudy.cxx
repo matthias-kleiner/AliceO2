@@ -567,6 +567,9 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
   }
   prong.timeMUS = t;
   prong.timeErrMUS = tErr;
+  if (mUseMC) {
+    prong.mcLabel = recoData.getTrackMCLabel(gid);
+  }
   const auto refs = recoData.getSingleDetectorRefs(gid);
   if (refs[GTrackID::ITSTPC].isIndexSet()) {
     prong.chi2ITSTPC = recoData.getTPCITSTrack(refs[GTrackID::ITSTPC]).getChi2Match();
@@ -644,6 +647,12 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
       cl.tot = c.getTot();
       cl.channel = c.getMainContributingChannel();
       prong.flags |= o2::dataformats::V0Prong::HasTOF;
+      const auto& match = recoData.getTOFMatch(gid);
+      prong.tofSignal = match.getSignal();
+      prong.tofLength = match.getLTIntegralOut().getL();
+      for (int ipid = 0; ipid < 5; ipid++) {
+        prong.tofExpTime[ipid] = match.getLTIntegralOut().getTOF(ipid);
+      }
     }
   }
   prong.tofClusters.setEntries(out.clTOF.size() - prong.tofClusters.getFirstEntry());
@@ -754,8 +763,6 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
   tfInfo.t0 = mCorrMap->getT0();
   tfInfo.lumi = mCorrMap->getLumi();
   tfInfo.idc = mCorrMap->getIDC();
-  tfInfo.tpcOcc = recoData.occupancyMapTPC.empty() ? -1.f : recoData.occupancyMapTPC[0];
-  tfInfo.nHBFPerTF = mNHBPerTF;
 
   using V0C = o2::dataformats::V0WithClusters;
   FullOutput out;
@@ -802,6 +809,18 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       cp.second = iv;
     }
   }
+  // DCA of each leg to the primary vertex: the V0's prong (at the decay vertex, in the frame of this vertex copy) propagated back to it;
+  // a failed propagation (low-pT leg whose helix cannot reach the vertex) leaves -999
+  auto fillLegDCA = [](const o2::dataformats::V0& v0, const PVertex& pv, V0C& cand) {
+    for (int ip = 0; ip < 2; ip++) {
+      auto leg = v0.getProng(ip);
+      o2::dataformats::DCA dcaLeg;
+      if (o2::base::Propagator::Instance()->propagateToDCABxByBz(pv, leg, 2.f, o2::base::Propagator::MatCorrType::USEMatCorrLUT, &dcaLeg)) {
+        cand.legDCAxy[ip] = dcaLeg.getY();
+        cand.legDCAz[ip] = dcaLeg.getZ();
+      }
+    }
+  };
   for (int iv = 0; iv < (int)v0IDs.size(); iv++) {
     const auto& id = v0IDs[iv];
     if (!pairKey[iv]) { // no vertex, failed the prong cuts or the refit
@@ -815,10 +834,7 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     V0C cand;
     cand.nPairPV = copies.n;
     if (copies.second >= 0) {
-      const auto& pv2 = recoData.getPrimaryVertex(v0IDs[copies.second].getVertexID());
       cand.cosPA2 = getV0(copies.second, recoData)->getCosPA();
-      cand.pv2Z = pv2.getZ();
-      cand.pv2TimeMUS = pv2.getTimeStamp().getTimeStamp();
     }
     cand.dca = v0->getDCA();
     cand.cosPA = v0->getCosPA();
@@ -846,7 +862,9 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
         const float dz = xyz[2] - pv.getZ();
         ctOverM = std::sqrt(dx * dx + dy * dy + dz * dz) / std::max(1e-6f, v0->getP());
       }
-      if (par.selK0 && std::abs(cand.massK0 - massK0) < dmK0 && (!far || (cand.qT > par.minQtK0Far && ctOverM * massK0 < par.maxCtK0Far))) {
+      const bool lambdaLike = std::min(std::abs(cand.massLambda - massLambda), std::abs(cand.massAntiLambda - massLambda)) < par.vetoDMassLambdaK0;
+      const bool k0FarOK = cand.qT > par.minQtK0Far && ctOverM * massK0 < par.maxCtK0Far;
+      if (par.selK0 && std::abs(cand.massK0 - massK0) < dmK0 && (far ? k0FarOK : !lambdaLike)) {
         cand.selection |= V0C::K0;
       }
       const bool ctLambdaOK = !far || ctOverM * massLambda < par.maxCtLambdaFar;
@@ -860,8 +878,22 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
         cand.selection |= V0C::Far;
       }
     }
-    if (par.selGamma && (id.isPhotonOnly() || cand.massGamma < par.maxMassGamma) && cand.qT < par.maxQtGamma && cand.r > par.minRGamma && cand.r < par.maxRGamma &&
-        cand.cosPA > par.minCosPAGamma && (par.maxDCAGamma < 0.f || cand.dca < par.maxDCAGamma)) {
+    const float apGamma = (cand.alpha / par.maxAlphaGamma) * (cand.alpha / par.maxAlphaGamma) + (cand.qT / par.maxQtGamma) * (cand.qT / par.maxQtGamma);
+    // photon legs displaced from the vertex (computed only for candidates passing the other photon cuts; the result is kept for the output)
+    auto legsDisplaced = [&]() {
+      if (par.minLegDCAXYGamma < 0.f) {
+        return true;
+      }
+      fillLegDCA(*v0, recoData.getPrimaryVertex(id.getVertexID()), cand);
+      for (int ip = 0; ip < 2; ip++) {
+        if (cand.legDCAxy[ip] > -998.f && std::abs(cand.legDCAxy[ip]) < par.minLegDCAXYGamma) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (par.selGamma && (id.isPhotonOnly() || cand.massGamma < par.maxMassGamma) && apGamma < 1.f && cand.r > par.minRGamma && cand.r < par.maxRGamma &&
+        cand.cosPA > par.minCosPAGamma && (par.maxDCAGamma < 0.f || cand.dca < par.maxDCAGamma) && legsDisplaced()) {
       cand.selection |= V0C::Gamma;
     }
     if (!cand.selection) {
@@ -872,19 +904,21 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       cand.selection |= V0C::PhotonOnly;
     }
     cand.v0 = *v0;
-    cand.v0ID = id;
     const double logPt = std::log10(std::max(1e-6f, v0->getPt()));
     const int bin = logPt < logPtMin ? 0 : (logPt >= logPtMax ? par.nPtBins + 1 : 1 + int((logPt - logPtMin) / (logPtMax - logPtMin) * par.nPtBins));
     sel.push_back({iv, bin, v0Random(tfID.tfCounter, iv), cand});
   }
   // 1b) V0s sharing a track (before the downsampling, which may drop the competitors): count and greedy matching by legScore
   {
+    // legScore = w * 60 * acos(cosPA) + (1 - w) * sqrt(dca) / 3 cm, w = legScoreWeight (lower: better), as the photon-conversion-builder
+    // deduplication in O2Physics
     std::unordered_map<uint32_t, std::vector<int>> byLeg;
+    std::vector<float> legScore(sel.size());
     for (int k = 0; k < (int)sel.size(); k++) {
-      auto& c = sel[k].cand;
-      c.legScore = par.legScoreWeight * 60.f * std::acos(std::clamp(c.cosPA, -1.f, 1.f)) + (1.f - par.legScoreWeight) * std::sqrt(std::max(0.f, c.dca)) / 3.f;
+      const auto& c = sel[k].cand;
+      legScore[k] = par.legScoreWeight * 60.f * std::acos(std::clamp(c.cosPA, -1.f, 1.f)) + (1.f - par.legScoreWeight) * std::sqrt(std::max(0.f, c.dca)) / 3.f;
       for (int ip = 0; ip < 2; ip++) {
-        byLeg[c.v0ID.getProngID(ip).getRawWOFlags()].push_back(k);
+        byLeg[v0IDs[sel[k].iv].getProngID(ip).getRawWOFlags()].push_back(k);
       }
     }
     std::vector<int> order(sel.size());
@@ -892,7 +926,7 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       order[k] = k;
       std::unordered_set<int> others;
       for (int ip = 0; ip < 2; ip++) {
-        for (int o : byLeg[sel[k].cand.v0ID.getProngID(ip).getRawWOFlags()]) {
+        for (int o : byLeg[v0IDs[sel[k].iv].getProngID(ip).getRawWOFlags()]) {
           if (o != k) {
             others.insert(o);
           }
@@ -900,11 +934,11 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       }
       sel[k].cand.nSharedLeg = others.size();
     }
-    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return sel[a].cand.legScore < sel[b].cand.legScore; });
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return legScore[a] < legScore[b]; });
     std::unordered_set<uint32_t> usedLegs;
     for (int k : order) {
-      const uint32_t l0 = sel[k].cand.v0ID.getProngID(0).getRawWOFlags();
-      const uint32_t l1 = sel[k].cand.v0ID.getProngID(1).getRawWOFlags();
+      const uint32_t l0 = v0IDs[sel[k].iv].getProngID(0).getRawWOFlags();
+      const uint32_t l1 = v0IDs[sel[k].iv].getProngID(1).getRawWOFlags();
       if (!usedLegs.count(l0) && !usedLegs.count(l1)) {
         sel[k].cand.selection |= V0C::BestForLegs;
         usedLegs.insert(l0);
@@ -956,11 +990,81 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
   }
   kept.insert(kept.end(), keptFar.begin(), keptFar.end());
   std::sort(kept.begin(), kept.end()); // V0 finder order
+  // event time of a primary vertex from its TOF-matched tracks, for the TOF PID of the legs: per vertex (track, TOF signal - expected pion
+  // time) of its unambiguously associated tracks (filled when first needed); per V0 a robust mean without the V0's own legs
+  std::unordered_map<int, std::vector<std::pair<uint32_t, double>>> pvTOFTimes;
+  const auto pvTracks = recoData.getPrimaryVertexMatchedTracks();
+  const auto pvRefs = recoData.getPrimaryVertexMatchedTrackRefs();
+  auto setEvTimeTOF = [&](V0C& cand, const V0ID& id) {
+    const int ipv = id.getVertexID();
+    auto it = pvTOFTimes.find(ipv);
+    if (it == pvTOFTimes.end()) {
+      it = pvTOFTimes.emplace(ipv, std::vector<std::pair<uint32_t, double>>{}).first;
+      if (ipv >= 0 && ipv < (int)pvRefs.size()) {
+        const auto& ref = pvRefs[ipv];
+        for (int src = 0; src < GTrackID::NSources; src++) {
+          if (!(GTrackID::getSourceDetectorsMask(src) & DetID::getMask(DetID::TOF)).any()) {
+            continue;
+          }
+          const int first = ref.getFirstEntryOfSource(src);
+          const int last = first + ref.getEntriesOfSource(src);
+          for (int i = first; i < last; i++) {
+            const auto& vid = pvTracks[i];
+            if (vid.isAmbiguous()) {
+              continue;
+            }
+            const auto& match = recoData.getTOFMatch(vid);
+            it->second.emplace_back(vid.getRawWOFlags(), match.getSignal() - match.getLTIntegralOut().getTOF(o2::track::PID::Pion));
+          }
+        }
+      }
+    }
+    const uint32_t leg0 = id.getProngID(0).getRawWOFlags();
+    const uint32_t leg1 = id.getProngID(1).getRawWOFlags();
+    std::vector<double> t0s;
+    t0s.reserve(it->second.size());
+    for (const auto& [raw, t0] : it->second) {
+      if (raw != leg0 && raw != leg1) {
+        t0s.push_back(t0);
+      }
+    }
+    if (t0s.empty()) {
+      return;
+    }
+    // start from the median (kaons and protons arrive late under the pion hypothesis), then twice the mean within +-300 ps (~3 sigma)
+    std::nth_element(t0s.begin(), t0s.begin() + t0s.size() / 2, t0s.end());
+    double center = t0s[t0s.size() / 2];
+    double sum = 0.;
+    double sum2 = 0.;
+    int n = 0;
+    for (int iter = 0; iter < 2; iter++) {
+      sum = 0.;
+      sum2 = 0.;
+      n = 0;
+      for (double t0 : t0s) {
+        if (std::abs(t0 - center) < 300.) {
+          sum += t0 - center;
+          sum2 += (t0 - center) * (t0 - center);
+          n++;
+        }
+      }
+      if (!n) {
+        return;
+      }
+      const double mean = sum / n;
+      sum2 = sum2 / n - mean * mean;
+      center += mean;
+    }
+    cand.evTimeTOF = center;
+    cand.evTimeTOFErr = std::sqrt(std::max(0., sum2) / n);
+    cand.evTimeTOFN = n;
+  };
   // 4) the kept V0s with their primary vertex, prongs and clusters
   for (int k : kept) {
     auto& cand = sel[k].cand;
-    const auto& id = cand.v0ID;
+    const auto& id = v0IDs[sel[k].iv];
     const auto& pv = recoData.getPrimaryVertex(id.getVertexID());
+    setEvTimeTOF(cand, id);
     getTPCOccupancy(pv, cand.tpcOccBef, cand.tpcOccAft);
     cand.pvX = pv.getX();
     cand.pvY = pv.getY();
@@ -968,6 +1072,11 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
     cand.pvTimeMUS = pv.getTimeStamp().getTimeStamp();
     cand.pvTimeErrMUS = pv.getTimeStamp().getTimeStampError();
     cand.pvNContrib = pv.getNContributors();
+    const auto& pvCov = pv.getCov();
+    std::copy(pvCov.begin(), pvCov.end(), cand.pvCov);
+    if (cand.legDCAxy[0] < -998.f && cand.legDCAxy[1] < -998.f) { // not yet computed by the photon selection
+      fillLegDCA(cand.v0, pv, cand);
+    }
     cand.nCompatPV = countCompatiblePVs(id, recoData);
     for (int ip = 0; ip < 2; ip++) {
       cand.prong[ip] = addProng(id.getProngID(ip), recoData, out);
@@ -1045,14 +1154,13 @@ void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, cons
   float vx = v0.v0.getX(), vy = v0.v0.getY(), vz = v0.v0.getZ();
   float pvTimeMUS = pv.getTimeStamp().getTimeStamp();
   int nCompatPV = v0.nCompatPV, nPairPV = v0.nPairPV;
-  float cosPA2 = v0.cosPA2, pv2Z = v0.pv2Z, pv2TimeMUS = v0.pv2TimeMUS;
+  float cosPA2 = v0.cosPA2;
   int nSharedLeg = v0.nSharedLeg;
-  float legScore = v0.legScore;
   (*mFullDebugOut) << "v0"
                    << "tf=" << tfCounter << "selection=" << selection << "massK0=" << v0.massK0 << "massLambda=" << v0.massLambda
                    << "massAntiLambda=" << v0.massAntiLambda << "r=" << v0.r << "cosPA=" << v0.cosPA << "dca=" << v0.dca << "qT=" << v0.qT
                    << "alpha=" << v0.alpha << "vx=" << vx << "vy=" << vy << "vz=" << vz << "pvTimeMUS=" << pvTimeMUS
-                   << "nCompatPV=" << nCompatPV << "nPairPV=" << nPairPV << "cosPA2=" << cosPA2 << "pv2Z=" << pv2Z << "pv2TimeMUS=" << pv2TimeMUS << "nSharedLeg=" << nSharedLeg << "legScore=" << legScore
+                   << "nCompatPV=" << nCompatPV << "nPairPV=" << nPairPV << "cosPA2=" << cosPA2 << "nSharedLeg=" << nSharedLeg
                    << "time0P=" << time0[0] << "time0N=" << time0[1] << "nClTPCP=" << nClTPC[0] << "nClTPCN=" << nClTPC[1]
                    << "nClITSP=" << nClITS[0] << "nClITSN=" << nClITS[1] << "flagsP=" << prongFlags[0] << "flagsN=" << prongFlags[1]
                    << "clProng=" << clProng << "clSector=" << clSector << "clRow=" << clRow << "clPad=" << clPad << "clTime=" << clTime
