@@ -867,11 +867,13 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       if (par.selK0 && std::abs(cand.massK0 - massK0) < dmK0 && (far ? k0FarOK : !lambdaLike)) {
         cand.selection |= V0C::K0;
       }
-      const bool ctLambdaOK = !far || ctOverM * massLambda < par.maxCtLambdaFar;
-      if (par.selLambda && ctLambdaOK && cand.alpha > par.minAlphaLambda && cand.alpha < par.maxAlphaLambda && std::abs(cand.massLambda - massLambda) < dmL) {
+      // Lambdas within maxR: K0s reflection vetoed (far ones: their alpha window stays below the crossing of the two ellipses)
+      const bool lambdaOK = far ? ctOverM * massLambda < par.maxCtLambdaFar : std::abs(cand.massK0 - massK0) >= par.vetoDMassK0Lambda;
+      const float maxAlphaL = far ? par.maxAlphaLambdaFar : par.maxAlphaLambda;
+      if (par.selLambda && lambdaOK && cand.alpha > par.minAlphaLambda && cand.alpha < maxAlphaL && std::abs(cand.massLambda - massLambda) < dmL) {
         cand.selection |= V0C::Lambda;
       }
-      if (par.selLambda && ctLambdaOK && cand.alpha < -par.minAlphaLambda && cand.alpha > -par.maxAlphaLambda && std::abs(cand.massAntiLambda - massLambda) < dmL) {
+      if (par.selLambda && lambdaOK && cand.alpha < -par.minAlphaLambda && cand.alpha > -maxAlphaL && std::abs(cand.massAntiLambda - massLambda) < dmL) {
         cand.selection |= V0C::AntiLambda;
       }
       if (far && cand.selection) {
