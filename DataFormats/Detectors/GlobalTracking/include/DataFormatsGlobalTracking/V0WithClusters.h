@@ -12,8 +12,9 @@
 /// \file V0WithClusters.h
 /// \brief Selected V0s with the raw clusters of their prongs, for offline refits (re-transformation of the clusters with any TPC map)
 ///
-/// One entry per TF. The V0s of a TF share their prongs: every prong track is stored once in the prong table, its raw clusters once in the
-/// per-TF cluster tables, which the prong addresses with index ranges. Only raw detector data are stored (TPC ClusterNative, ITS compact
+/// One entry per TF: the selected V0s, each self-contained (as TrackCosmicsExtended): its two prongs with their own raw clusters. A track
+/// used by several V0s of the TF is stored with each of them (V0WithClusters::nSharedLeg; prong gid identifies it within the TF). Per TF only
+/// the TPC transformation info, the TPC occupancy map and the TF ID. Only raw detector data are stored (TPC ClusterNative, ITS compact
 /// clusters + patterns, raw TOF time, TRD tracklet words); the TPC transformation, the ITS cluster dictionary and the geometry are applied offline. To reproduce the
 /// reconstruction's TPC refit, the per-TF TPC occupancy map (cluster errors) and the cluster sharing-map bytes are stored as well.
 
@@ -21,11 +22,11 @@
 #define ALICEO2_V0_WITH_CLUSTERS_H
 
 #include <cstdint>
+#include <vector>
 #include <Rtypes.h>
 #include "ReconstructionDataFormats/V0.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
 #include "ReconstructionDataFormats/Track.h"
-#include "CommonDataFormat/RangeReference.h"
 #include "DataFormatsTPC/TrackTPC.h"
 #include "DataFormatsTPC/ClusterNative.h"
 #include "SimulationDataFormat/MCCompLabel.h"
@@ -49,7 +50,7 @@ struct V0ITSCluster {
   uint16_t row = 0;
   uint16_t col = 0;
   uint16_t pattID = 0;
-  int32_t pattEntry = -1; ///< start of the pattern bytes in the TF's pattern table (pattern not in the dictionary or group pattern), -1: none
+  int32_t pattEntry = -1; ///< start of the pattern bytes in the prong's V0Prong::itsPatterns (pattern not in the dictionary or group pattern), -1: none
   int32_t rofBC = 0;      ///< start of the cluster's ROF in BCs since the start of the TF
   ClassDefNV(V0ITSCluster, 1);
 };
@@ -70,7 +71,7 @@ struct V0TRDTracklet {
   ClassDefNV(V0TRDTracklet, 1);
 };
 
-/// prong track of one or more V0s of the TF
+/// prong track of a V0 with its raw clusters
 struct V0Prong {
   enum Flags : uint8_t {
     HasTPC = 0x1, ///< has a TPC track (tpc is valid, TPC clusters stored)
@@ -82,15 +83,15 @@ struct V0Prong {
   GlobalTrackID gid{};                     ///< global track ID of the prong (only valid within the TF)
   o2::track::TrackParCov track{};          ///< global track parameters as used by the V0 finder (inner point of the track)
   o2::tpc::TrackTPC tpc{};                 ///< TPC-only track (default if none); z refers to its time0; its cluster references are only valid
-                                           ///< within the TF: the clusters are in the TF's TPC cluster table at tpcClusters
+                                           ///< within the TF: the clusters are in clTPC
   float timeMUS = 0.f;                     ///< time of the global track [mus since the TF start]
   float timeErrMUS = 0.f;                  ///< its error [mus]
   float chi2ITSTPC = -1.f;                 ///< chi2 of the ITS-TPC match (< 0: no ITS-TPC match)
-  RangeReference<int, int> tpcClusters{};  ///< first entry and number of the prong's TPC clusters in the TF's TPC cluster table (in the
-                                           ///< order of the track's cluster references)
-  RangeReference<int, int> itsClusters{};  ///< same for the ITS clusters in the TF's ITS cluster table
-  RangeReference<int, int> tofClusters{};  ///< same for the matched TOF cluster (0 or 1) in the TF's TOF cluster table
-  RangeReference<int, int> trdTracklets{}; ///< same for the TRD tracklets in the TF's TRD tracklet table
+  std::vector<V0TPCCluster> clTPC;          ///< TPC clusters of the TPC track, in the order of its cluster references
+  std::vector<V0ITSCluster> clITS;          ///< ITS clusters of the ITS track or of the afterburner tracklet
+  std::vector<uint8_t> itsPatterns;         ///< pattern bytes (row span, column span, bitmap) of the ITS clusters that need them
+  std::vector<V0TOFCluster> clTOF;          ///< the matched TOF cluster (0 or 1)
+  std::vector<V0TRDTracklet> trdTracklets;  ///< TRD tracklets of the TRD track
   uint8_t flags = 0;                       ///< Flags
   // TOF match of the reconstruction (HasTOF), for TOF PID: beta = tofLength / (c (tofSignal - V0WithClusters::evTimeTOF))
   double tofSignal = 0.;       ///< calibrated TOF time of the match [ps since the TF start] (MatchInfoTOF::getSignal)
@@ -102,7 +103,7 @@ struct V0Prong {
   bool isITSAB() const { return flags & ITSAB; }
   bool hasTOF() const { return flags & HasTOF; }
   bool hasTRD() const { return flags & HasTRD; }
-  ClassDefNV(V0Prong, 2);
+  ClassDefNV(V0Prong, 3);
 };
 
 /// selected V0 with its selection variables
@@ -123,7 +124,8 @@ struct V0WithClusters {
                                ClassGamma = 3 };
   V0 v0{};                    ///< the V0 finder's V0 if it sent them (svertexer.createFullV0s), else the study device's refit (DCAFitter with
                               ///< the V0 finder's settings); prongs at the decay vertex
-  int prong[2] = {-1, -1};    ///< entries of the positive / negative prong in the TF's prong table (their gid: the V0 finder's prong IDs)
+  V0Prong prongPos{};         ///< positive prong with its clusters (gid: the V0 finder's prong ID)
+  V0Prong prongNeg{};         ///< negative prong
   float dca = 0.f;            ///< V0::getDCA of the refit (chi2 at the point of closest approach of the prongs, as cut in the V0 finder)
   float cosPA = 0.f;          ///< cosine of the pointing angle to the primary vertex
   float qT = 0.f;             ///< Armenteros qT [GeV]
@@ -150,7 +152,7 @@ struct V0WithClusters {
   int nPairPV = 1;          ///< primary vertices the V0 finder built this prong pair with (TPC-only prongs: one copy per vertex, shifted
                             ///< in z to its time); only the copy with the largest cosPA is written (this one)
   float cosPA2 = -2.f;      ///< cosPA of the copy with the second-largest cosPA (-2: no other copy)
-  int nSharedLeg = 0;       ///< other selected V0s of the TF (any class, before the downsampling) using one of its tracks
+  int nSharedLeg = 0;       ///< other selected V0s of the TF (any class, before the downsampling) using one of its tracks (stored with each)
 
   // v4: primary-vertex covariance, leg DCAs and the TOF event time (PID samples, pointing constraint)
   float pvCov[6] = {0.f};               ///< position covariance of the assigned primary vertex [cm^2] (VertexBase order: xx, xy, yy, xz, yz, zz)
@@ -161,7 +163,11 @@ struct V0WithClusters {
                                         ///< (TOF signal - expected pion time), the V0's own legs excluded (evTimeTOFN = 0: none)
   float evTimeTOFErr = 0.f;             ///< its error [ps] (spread / sqrt(N))
   int evTimeTOFN = 0;                   ///< TOF tracks used
-  ClassDefNV(V0WithClusters, 4);
+
+  const V0Prong& prong(int ip) const { return ip == 0 ? prongPos : prongNeg; } ///< 0: positive, 1: negative (as V0::getProng)
+  V0Prong& prong(int ip) { return ip == 0 ? prongPos : prongNeg; }
+  // v5: prongs and their clusters inside the V0 (before: per-TF prong and cluster tables addressed by index ranges)
+  ClassDefNV(V0WithClusters, 5);
 };
 
 /// per-TF quantities: the TPC transformation used in the reconstruction and the TPC occupancy

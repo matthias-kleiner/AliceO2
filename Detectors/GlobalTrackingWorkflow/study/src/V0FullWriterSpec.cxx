@@ -38,12 +38,6 @@ DataProcessorSpec getV0FullWriterSpec()
                                 -1,  // do not limit number of events to store
                                 100, // periodically autosave
                                 BranchDefinition<std::vector<o2::dataformats::V0WithClusters>>{InputSpec{"v0s", "GLO", "V0FULL", 0}, "v0s", 1, logger},
-                                BranchDefinition<std::vector<o2::dataformats::V0Prong>>{InputSpec{"prongs", "GLO", "V0FULLPRONG", 0}, "prongs", 1},
-                                BranchDefinition<std::vector<o2::dataformats::V0TPCCluster>>{InputSpec{"cltpc", "GLO", "V0FULLCLTPC", 0}, "clTPC", 1},
-                                BranchDefinition<std::vector<o2::dataformats::V0ITSCluster>>{InputSpec{"clits", "GLO", "V0FULLCLITS", 0}, "clITS", 1},
-                                BranchDefinition<std::vector<uint8_t>>{InputSpec{"itspatt", "GLO", "V0FULLITSPATT", 0}, "itsPatterns", 1},
-                                BranchDefinition<std::vector<o2::dataformats::V0TOFCluster>>{InputSpec{"cltof", "GLO", "V0FULLCLTOF", 0}, "clTOF", 1},
-                                BranchDefinition<std::vector<o2::dataformats::V0TRDTracklet>>{InputSpec{"trdtrkl", "GLO", "V0FULLTRDTRKL", 0}, "trdTracklets", 1},
                                 BranchDefinition<o2::dataformats::V0sTFInfo>{InputSpec{"tfinfo", "GLO", "V0FULLTF", 0}, "tfInfo", 1},
                                 BranchDefinition<std::vector<unsigned int>>{InputSpec{"occmap", "GLO", "V0FULLOCCMAP", 0}, "tpcOccMap", 1},
                                 BranchDefinition<o2::dataformats::TFIDInfo>{InputSpec{"tfid", "GLO", "V0FULLTFID", 0}, "tfID", 1})();

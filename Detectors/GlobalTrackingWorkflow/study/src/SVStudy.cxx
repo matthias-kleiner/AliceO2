@@ -61,6 +61,7 @@
 #include "TPCFastTransformPOD.h"
 #include "MathUtils/Utils.h"
 #include "CommonDataFormat/InteractionRecord.h"
+#include <array>
 #include <unordered_map>
 #include <unordered_set>
 #include <map>
@@ -106,19 +107,16 @@ class SVStudySpec final : public Task
  private:
   /// ITS cluster of the full output whose pattern bytes are in the TF's pattern stream
   struct ITSPattRequest {
-    int cluster; ///< entry of the cluster in the output ITS cluster table
+    int prong;   ///< entry of the prong in FullOutput::prongs
+    int cluster; ///< entry of the cluster in its clITS
     int index;   ///< index of the cluster in the TF
   };
   /// output of --full-output for one TF
   struct FullOutput {
     std::vector<o2::dataformats::V0WithClusters> v0s;
-    std::vector<o2::dataformats::V0Prong> prongs;
-    std::vector<o2::dataformats::V0TPCCluster> clTPC;
-    std::vector<o2::dataformats::V0ITSCluster> clITS;
-    std::vector<uint8_t> itsPatterns;
-    std::vector<o2::dataformats::V0TOFCluster> clTOF;
-    std::vector<o2::dataformats::V0TRDTracklet> trdTracklets;
-    std::unordered_map<uint32_t, int> prongEntry; ///< prong table entry of a global track ID (GTrackID::getRawWOFlags)
+    std::vector<std::array<int, 2>> v0Prongs;     ///< entries of the positive / negative prong of each V0 in prongs
+    std::vector<o2::dataformats::V0Prong> prongs; ///< each track once (with its clusters), copied into its V0s at the end of the TF
+    std::unordered_map<uint32_t, int> prongEntry; ///< prong entry of a global track ID (GTrackID::getRawWOFlags)
     std::vector<ITSPattRequest> pattRequests;
   };
 
@@ -132,7 +130,7 @@ class SVStudySpec final : public Task
   int countCompatiblePVs(const V0ID& id, const o2::globaltracking::RecoContainer& recoData) const;
   int addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out);
   void fillITSPatterns(const o2::globaltracking::RecoContainer& recoData, FullOutput& out) const;
-  void writeFullDebug(const o2::dataformats::V0WithClusters& v0, const FullOutput& out, const PVertex& pv, int tfCounter) const;
+  void writeFullDebug(const o2::dataformats::V0WithClusters& v0, int tfCounter) const;
   std::shared_ptr<DataRequest> mDataRequest;
   std::shared_ptr<o2::base::GRPGeomRequest> mGGCCDBRequest;
   bool mUseMC{false}; ///< MC flag
@@ -151,8 +149,8 @@ class SVStudySpec final : public Task
   mutable bool mNoDictWarned = false;
   bool mMaxV0sWarned = false;
   size_t mNV0sFull = 0;    ///< V0s written with clusters
-  size_t mNProngsFull = 0; ///< prongs written
-  size_t mNClTPCFull = 0;  ///< TPC clusters written
+  size_t mNProngsFull = 0; ///< distinct prong tracks written
+  size_t mNClTPCFull = 0;  ///< TPC clusters written (a track shared by several V0s once per V0)
   float mMaxEta = 0.8;
   float mBz = 0;
   int mNHBPerTF = 0;
@@ -549,7 +547,7 @@ bool SVStudySpec::passFarLegCuts(const V0ID& id, const o2::globaltracking::RecoC
 
 int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer& recoData, FullOutput& out)
 {
-  // each prong is stored once per TF: the V0s sharing it point to the same entry
+  // each track is built once per TF (the V0s sharing it get copies of the same entry at the end of the TF)
   const auto found = out.prongEntry.find(gid.getRawWOFlags());
   if (found != out.prongEntry.end()) {
     return found->second;
@@ -581,12 +579,12 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
     prong.flags |= o2::dataformats::V0Prong::HasTPC;
     const auto& clusters = recoData.getTPCClusters();
     const auto clRefs = recoData.getTPCTracksClusterRefs();
-    prong.tpcClusters.setFirstEntry(out.clTPC.size());
+    prong.clTPC.reserve(trk.getNClusterReferences());
     for (int j = 0; j < trk.getNClusterReferences(); j++) {
       uint8_t sector = 0, row = 0;
       uint32_t clIdx = 0;
       trk.getClusterReference(clRefs, j, sector, row, clIdx);
-      auto& cl = out.clTPC.emplace_back();
+      auto& cl = prong.clTPC.emplace_back();
       cl.cl = clusters.clusters[sector][row][clIdx];
       cl.sector = sector;
       cl.row = row;
@@ -594,7 +592,6 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
         cl.shMap = recoData.clusterShMapTPC[clusters.clusterOffset[sector][row] + clIdx];
       }
     }
-    prong.tpcClusters.setEntries(out.clTPC.size() - prong.tpcClusters.getFirstEntry());
   }
   // ITS: clusters of the ITS track, or of the afterburner tracklet attached in the ITS-TPC matching
   std::vector<int> itsIndices;
@@ -615,34 +612,31 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
   }
   const auto itsClusters = recoData.getITSClusters();
   const auto rofs = recoData.getITSClustersROFRecords();
-  prong.itsClusters.setFirstEntry(out.clITS.size());
   for (const int idx : itsIndices) {
     if (idx < 0 || idx >= (int)itsClusters.size()) {
       continue;
     }
     const auto& c = itsClusters[idx];
-    auto& cl = out.clITS.emplace_back();
+    auto& cl = prong.clITS.emplace_back();
     cl.chipID = c.getSensorID();
     cl.row = c.getRow();
     cl.col = c.getCol();
     cl.pattID = c.getPatternID();
     if (c.getPatternID() == o2::itsmft::CompCluster::InvalidPatternID || (mITSDict && mITSDict->isGroup(c.getPatternID()))) {
-      out.pattRequests.push_back({int(out.clITS.size()) - 1, idx}); // pattern bytes in the TF's pattern stream, copied by fillITSPatterns
+      out.pattRequests.push_back({entry, int(prong.clITS.size()) - 1, idx}); // pattern bytes in the TF's pattern stream, copied by fillITSPatterns
     }
     auto rof = std::upper_bound(rofs.begin(), rofs.end(), idx, [](int v, const o2::itsmft::ROFRecord& r) { return v < r.getFirstEntry(); });
     if (rof != rofs.begin()) {
       cl.rofBC = std::prev(rof)->getBCData().differenceInBC(mTFStart);
     }
   }
-  prong.itsClusters.setEntries(out.clITS.size() - prong.itsClusters.getFirstEntry());
   // TOF: the matched cluster
-  prong.tofClusters.setFirstEntry(out.clTOF.size());
   if (refs[GTrackID::TOF].isIndexSet()) {
     const auto tofClusters = recoData.getTOFClusters();
     const int idx = refs[GTrackID::TOF].getIndex();
     if (idx < (int)tofClusters.size()) {
       const auto& c = tofClusters[idx];
-      auto& cl = out.clTOF.emplace_back();
+      auto& cl = prong.clTOF.emplace_back();
       cl.timeRaw = c.getTimeRaw();
       cl.tot = c.getTot();
       cl.channel = c.getMainContributingChannel();
@@ -655,9 +649,7 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
       }
     }
   }
-  prong.tofClusters.setEntries(out.clTOF.size() - prong.tofClusters.getFirstEntry());
   // TRD: the tracklets of the TPC-TRD or ITS-TPC-TRD track
-  prong.trdTracklets.setFirstEntry(out.trdTracklets.size());
   if (refs[GTrackID::TRD].isIndexSet()) {
     const auto& trk = recoData.getTrack<o2::trd::TrackTRD>(refs[GTrackID::TRD]);
     const auto tracklets = recoData.getTRDTracklets();
@@ -667,7 +659,7 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
       if (it < 0 || it >= (int)tracklets.size()) {
         continue;
       }
-      auto& tr = out.trdTracklets.emplace_back();
+      auto& tr = prong.trdTracklets.emplace_back();
       tr.word = tracklets[it].getTrackletWord();
       tr.layer = layer;
       auto trig = std::upper_bound(trigs.begin(), trigs.end(), it, [](int v, const o2::trd::TriggerRecord& t) { return v < t.getFirstTracklet(); });
@@ -677,7 +669,6 @@ int SVStudySpec::addProng(GTrackID gid, const o2::globaltracking::RecoContainer&
     }
     prong.flags |= o2::dataformats::V0Prong::HasTRD;
   }
-  prong.trdTracklets.setEntries(out.trdTracklets.size() - prong.trdTracklets.getFirstEntry());
   return entry;
 }
 
@@ -704,8 +695,9 @@ void SVStudySpec::fillITSPatterns(const o2::globaltracking::RecoContainer& recoD
     const auto start = pattIt;
     o2::itsmft::ClusterPattern::skipPattern(pattIt);
     for (; ir < requests.size() && requests[ir].index == k; ir++) {
-      out.clITS[requests[ir].cluster].pattEntry = out.itsPatterns.size();
-      out.itsPatterns.insert(out.itsPatterns.end(), start, pattIt);
+      auto& prong = out.prongs[requests[ir].prong];
+      prong.clITS[requests[ir].cluster].pattEntry = prong.itsPatterns.size();
+      prong.itsPatterns.insert(prong.itsPatterns.end(), start, pattIt);
     }
   }
 }
@@ -1080,60 +1072,63 @@ void SVStudySpec::processFull(o2::globaltracking::RecoContainer& recoData, Proce
       fillLegDCA(cand.v0, pv, cand);
     }
     cand.nCompatPV = countCompatiblePVs(id, recoData);
-    for (int ip = 0; ip < 2; ip++) {
-      cand.prong[ip] = addProng(id.getProngID(ip), recoData, out);
-    }
+    out.v0Prongs.push_back({addProng(id.getProngID(0), recoData, out), addProng(id.getProngID(1), recoData, out)});
     out.v0s.push_back(cand);
-    if (mFullDebugOut) {
-      writeFullDebug(out.v0s.back(), out, pv, tfID.tfCounter);
-    }
   }
   if (!out.pattRequests.empty()) {
     fillITSPatterns(recoData, out);
   }
+  // 5) each V0 gets its own copy of its prongs with their clusters
+  size_t nClTPC = 0, nClITS = 0, nClTOF = 0, nTrkltTRD = 0;
+  for (size_t iv = 0; iv < out.v0s.size(); iv++) {
+    auto& v0 = out.v0s[iv];
+    for (int ip = 0; ip < 2; ip++) {
+      auto& prong = v0.prong(ip);
+      prong = out.prongs[out.v0Prongs[iv][ip]];
+      nClTPC += prong.clTPC.size();
+      nClITS += prong.clITS.size();
+      nClTOF += prong.clTOF.size();
+      nTrkltTRD += prong.trdTracklets.size();
+    }
+    if (mFullDebugOut) {
+      writeFullDebug(v0, tfID.tfCounter);
+    }
+  }
   mNV0sFull += out.v0s.size();
   mNProngsFull += out.prongs.size();
-  mNClTPCFull += out.clTPC.size();
+  mNClTPCFull += nClTPC;
   int nPerClass[4] = {0, 0, 0, 0};
   for (const auto& v : out.v0s) {
     nPerClass[v.sampleClass]++;
   }
-  LOGP(info, "Full output of TF {}: {} V0s (K0s {}, Lambda {}, anti-Lambda {}, photons {}) of {} selected, {} candidates ({} after the prong cuts, {} prong pairs); {} prongs, {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets",
-       tfID.tfCounter, out.v0s.size(), nPerClass[0], nPerClass[1], nPerClass[2], nPerClass[3], sel.size(), v0IDs.size(), nCopies, pairs.size(), out.prongs.size(), out.clTPC.size(), out.clITS.size(),
-       out.clTOF.size(), out.trdTracklets.size());
+  LOGP(info, "Full output of TF {}: {} V0s (K0s {}, Lambda {}, anti-Lambda {}, photons {}) of {} selected, {} candidates ({} after the prong cuts, {} prong pairs); {} distinct prong tracks; stored {} TPC, {} ITS, {} TOF clusters, {} TRD tracklets",
+       tfID.tfCounter, out.v0s.size(), nPerClass[0], nPerClass[1], nPerClass[2], nPerClass[3], sel.size(), v0IDs.size(), nCopies, pairs.size(), out.prongs.size(), nClTPC, nClITS, nClTOF, nTrkltTRD);
   pc.outputs().snapshot(Output{"GLO", "V0FULL", 0}, out.v0s);
-  pc.outputs().snapshot(Output{"GLO", "V0FULLPRONG", 0}, out.prongs);
-  pc.outputs().snapshot(Output{"GLO", "V0FULLCLTPC", 0}, out.clTPC);
-  pc.outputs().snapshot(Output{"GLO", "V0FULLCLITS", 0}, out.clITS);
-  pc.outputs().snapshot(Output{"GLO", "V0FULLITSPATT", 0}, out.itsPatterns);
-  pc.outputs().snapshot(Output{"GLO", "V0FULLCLTOF", 0}, out.clTOF);
-  pc.outputs().snapshot(Output{"GLO", "V0FULLTRDTRKL", 0}, out.trdTracklets);
   pc.outputs().snapshot(Output{"GLO", "V0FULLTF", 0}, tfInfo);
   pc.outputs().snapshot(Output{"GLO", "V0FULLOCCMAP", 0}, std::vector<unsigned int>(recoData.occupancyMapTPC.begin(), recoData.occupancyMapTPC.end()));
   pc.outputs().snapshot(Output{"GLO", "V0FULLTFID", 0}, tfID);
 }
 
-void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, const FullOutput& out, const PVertex& pv, int tfCounter) const
+void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, int tfCounter) const
 {
   // the stored TPC clusters of both prongs transformed with the map of the TF: z with the prong's time0 (the frame of its TPC track) and
   // zPV with the time of the primary vertex (absolute z, comparable to the V0 vertex)
   constexpr int NSectorsA = 18;
-  const float pvTimeTB = pv.getTimeStamp().getTimeStamp() * mTPCTBinMUSInv;
+  const float pvTimeTB = v0.pvTimeMUS * mTPCTBinMUSInv;
   std::vector<int> clProng, clSector, clRow;
   std::vector<float> clPad, clTime, clX, clY, clZ, clZPV, clGx, clGy;
   float time0[2] = {-1.f, -1.f};
   int nClTPC[2] = {0, 0}, nClITS[2] = {0, 0}, prongFlags[2] = {0, 0};
   for (int ip = 0; ip < 2; ip++) {
-    const auto& prong = out.prongs[v0.prong[ip]];
+    const auto& prong = v0.prong(ip);
     prongFlags[ip] = prong.flags;
-    nClTPC[ip] = prong.tpcClusters.getEntries();
-    nClITS[ip] = prong.itsClusters.getEntries();
+    nClTPC[ip] = prong.clTPC.size();
+    nClITS[ip] = prong.clITS.size();
     if (!prong.hasTPC()) {
       continue;
     }
     time0[ip] = prong.tpc.getTime0();
-    for (int i = prong.tpcClusters.getFirstEntry(); i < (int)prong.tpcClusters.getEntriesBound(); i++) {
-      const auto& c = out.clTPC[i];
+    for (const auto& c : prong.clTPC) {
       float x = 0.f, y = 0.f, z = 0.f, xPV = 0.f, yPV = 0.f, zPV = 0.f;
       mCorrMap->Transform(c.sector, c.row, c.cl.getPad(), c.cl.getTime(), x, y, z, time0[ip]);
       mCorrMap->Transform(c.sector, c.row, c.cl.getPad(), c.cl.getTime(), xPV, yPV, zPV, pvTimeTB);
@@ -1154,7 +1149,7 @@ void SVStudySpec::writeFullDebug(const o2::dataformats::V0WithClusters& v0, cons
   }
   int selection = v0.selection;
   float vx = v0.v0.getX(), vy = v0.v0.getY(), vz = v0.v0.getZ();
-  float pvTimeMUS = pv.getTimeStamp().getTimeStamp();
+  float pvTimeMUS = v0.pvTimeMUS;
   int nCompatPV = v0.nCompatPV, nPairPV = v0.nPairPV;
   float cosPA2 = v0.cosPA2;
   int nSharedLeg = v0.nSharedLeg;
@@ -1175,7 +1170,7 @@ void SVStudySpec::endOfStream(EndOfStreamContext& ec)
   mDBGOut.reset();
   mFullDebugOut.reset();
   if (mFullOutput) {
-    LOGP(info, "SV study full output: {} V0s, {} prongs, {} TPC clusters", mNV0sFull, mNProngsFull, mNClTPCFull);
+    LOGP(info, "SV study full output: {} V0s, {} distinct prong tracks, {} TPC clusters stored", mNV0sFull, mNProngsFull, mNClTPCFull);
   }
 }
 
@@ -1203,12 +1198,6 @@ DataProcessorSpec getSVStudySpec(GTrackID::mask_t srcTracks, GTrackID::mask_t sr
   if (fullOutput) {
     dataRequest->inputs.emplace_back("corrMap", o2::header::gDataOriginTPC, "TPCCORRMAP", 0, Lifetime::Timeframe);
     outputs.emplace_back("GLO", "V0FULL", 0, Lifetime::Timeframe);
-    outputs.emplace_back("GLO", "V0FULLPRONG", 0, Lifetime::Timeframe);
-    outputs.emplace_back("GLO", "V0FULLCLTPC", 0, Lifetime::Timeframe);
-    outputs.emplace_back("GLO", "V0FULLCLITS", 0, Lifetime::Timeframe);
-    outputs.emplace_back("GLO", "V0FULLITSPATT", 0, Lifetime::Timeframe);
-    outputs.emplace_back("GLO", "V0FULLCLTOF", 0, Lifetime::Timeframe);
-    outputs.emplace_back("GLO", "V0FULLTRDTRKL", 0, Lifetime::Timeframe);
     outputs.emplace_back("GLO", "V0FULLTF", 0, Lifetime::Timeframe);
     outputs.emplace_back("GLO", "V0FULLOCCMAP", 0, Lifetime::Timeframe);
     outputs.emplace_back("GLO", "V0FULLTFID", 0, Lifetime::Timeframe);
