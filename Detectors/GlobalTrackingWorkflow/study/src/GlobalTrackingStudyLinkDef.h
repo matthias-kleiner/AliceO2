@@ -48,6 +48,8 @@
 #pragma link C++ class o2::checkresid::Track + ;
 #pragma link C++ class o2::checkresid::CheckResidConfig + ;
 #pragma link C++ class o2::conf::ConfigurableParamHelper < o2::checkresid::CheckResidConfig> + ;
+#pragma link C++ class o2::svstudy::V0FullOutputParams + ;
+#pragma link C++ class o2::conf::ConfigurableParamHelper < o2::svstudy::V0FullOutputParams> + ;
 
 #pragma link C++ class o2::HistoManager + ;
 

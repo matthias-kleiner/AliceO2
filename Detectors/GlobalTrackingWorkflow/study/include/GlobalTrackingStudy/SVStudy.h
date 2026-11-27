@@ -21,8 +21,12 @@
 
 namespace o2::svstudy
 {
-/// create a processor spec
-o2::framework::DataProcessorSpec getSVStudySpec(o2::dataformats::GlobalTrackID::mask_t srcTracks, o2::dataformats::GlobalTrackID::mask_t srcCls, bool useMC);
+/// create a processor spec; fullOutput: also send the selected V0s with the raw clusters of their prongs (V0WithClusters.h, see
+/// V0FullOutputParams for the selection), written by getV0FullWriterSpec
+o2::framework::DataProcessorSpec getSVStudySpec(o2::dataformats::GlobalTrackID::mask_t srcTracks, o2::dataformats::GlobalTrackID::mask_t srcCls, bool useMC, bool fullOutput = false);
+
+/// writer of the --full-output V0s to o2_v0s_full.root
+o2::framework::DataProcessorSpec getV0FullWriterSpec();
 
 } // namespace o2::svstudy
 

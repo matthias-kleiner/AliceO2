@@ -20,6 +20,9 @@
 #include "DetectorsBase/DPLWorkflowUtils.h"
 #include "GlobalTrackingWorkflowHelpers/InputHelper.h"
 #include "DetectorsRaw/HBFUtilsInitializer.h"
+#include "TPCWorkflow/TPCScalerSpec.h"
+#include "TPCCalibration/CorrectionMapsOptions.h"
+#include "DataFormatsITSMFT/DPLAlpideParamInitializer.h"
 
 using namespace o2::framework;
 using GID = o2::dataformats::GlobalTrackID;
@@ -40,7 +43,11 @@ void customize(std::vector<ConfigParamSpec>& workflowOptions)
     {"track-sources", VariantType::String, std::string{GID::ALL}, {"comma-separated list of track sources to use"}},
     {"disable-root-input", VariantType::Bool, false, {"disable root-files input reader"}},
     {"ignore-tpc-occ", VariantType::Bool, false, {"do not fill TPC occupancy (needs TPC clusters)"}},
+    {"full-output", VariantType::Bool, false, {"also write the selected V0s (svFullOutput.* cuts) with the raw TPC / ITS / TOF clusters and TRD tracklets of their prongs to o2_v0s_full.root"}},
+    {"disable-root-output", VariantType::Bool, false, {"with --full-output: send the V0s with clusters but do not add their writer"}},
     {"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings ..."}}};
+  o2::tpc::CorrectionMapsOptions::addGlobalOptions(options);
+  o2::itsmft::DPLAlpideParamInitializer::addITSConfigOption(options);
   o2::raw::HBFUtilsInitializer::addConfigOption(options);
   std::swap(workflowOptions, options);
 }
@@ -63,13 +70,45 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
   GID::mask_t srcTrc = allowedSourcesTrc & GID::getSourcesMask(configcontext.options().get<std::string>("track-sources"));
   GID::mask_t srcCls{};
   bool fillTPCOcc = !configcontext.options().get<bool>("ignore-tpc-occ");
-  if (fillTPCOcc) {
+  const bool fullOutput = configcontext.options().get<bool>("full-output");
+  if (fillTPCOcc || fullOutput) {
     srcCls = srcCls | GID::getSourcesMask("TPC");
   }
-  o2::globaltracking::InputHelper::addInputSpecs(configcontext, specs, srcCls, srcTrc, srcTrc, useMC);
+  GID::mask_t srcTrcIn = srcTrc;
+  if (fullOutput) {
+    // the prongs' ITS clusters are read through their ITS track (or ITS-AB tracklet of the ITS-TPC matching), also if standalone ITS
+    // tracks are not in --track-sources; the TPC map of the reconstruction comes from the TPC scaler device (in the reconstruction chain
+    // from the chain's one)
+    if (GID::includesDet(DetID::ITS, srcTrc)) {
+      srcTrcIn |= GID::getSourceMask(GID::ITS);
+      if (o2::itsmft::DPLAlpideParamInitializer::isITSStaggeringEnabled(configcontext)) {
+        LOG(warning) << "--full-output: staggered ITS clusters are not supported, the ITS clusters of the V0 prongs are not stored";
+      } else {
+        srcCls |= GID::getSourceMask(GID::ITS);
+      }
+    }
+    // the matched TOF cluster and the TRD tracklets of the prongs
+    if (GID::includesDet(DetID::TOF, srcTrc)) {
+      srcCls |= GID::getSourceMask(GID::TOF);
+    }
+    if (GID::includesDet(DetID::TRD, srcTrc)) {
+      srcCls |= GID::getSourceMask(GID::TRD);
+    }
+    auto sclOpt = o2::tpc::CorrectionMapsOptions::parseGlobalOptions(configcontext.options());
+    if (sclOpt.requestCTPLumi) {
+      srcTrcIn |= GID::getSourcesMask("CTP");
+    }
+    if (!configcontext.options().get<bool>("disable-root-input")) {
+      specs.emplace_back(o2::tpc::getTPCScalerSpec(sclOpt));
+    }
+  }
+  o2::globaltracking::InputHelper::addInputSpecs(configcontext, specs, srcCls, srcTrcIn, srcTrcIn, useMC);
   o2::globaltracking::InputHelper::addInputSpecsPVertex(configcontext, specs, useMC); // P-vertex is always needed
   o2::globaltracking::InputHelper::addInputSpecsSVertex(configcontext, specs);        // S-vertex is always needed
-  specs.emplace_back(o2::svstudy::getSVStudySpec(srcTrc, srcCls, useMC));
+  specs.emplace_back(o2::svstudy::getSVStudySpec(srcTrcIn, srcCls, useMC, fullOutput));
+  if (fullOutput && !configcontext.options().get<bool>("disable-root-output")) {
+    specs.emplace_back(o2::svstudy::getV0FullWriterSpec());
+  }
 
   // configure dpl timer to inject correct firstTForbit: start from the 1st orbit of TF containing 1st sampled orbit
   o2::raw::HBFUtilsInitializer hbfIni(configcontext, specs);

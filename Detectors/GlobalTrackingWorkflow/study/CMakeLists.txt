@@ -28,6 +28,8 @@ o2_add_library(GlobalTrackingStudy
                        src/CheckResidSpec.cxx
                        src/CheckResidConfig.cxx
                        src/HistoManager.cxx
+                       src/V0FullOutputParams.cxx
+                       src/V0FullWriterSpec.cxx
                PUBLIC_LINK_LIBRARIES O2::GlobalTracking
                                      O2::GlobalTrackingWorkflowReaders
                                      O2::GlobalTrackingWorkflowHelpers
@@ -38,6 +40,7 @@ o2_add_library(GlobalTrackingStudy
                                      O2::DataFormatsTRD
                                      O2::DataFormatsTOF
                                      O2::TPCWorkflow
+                                     O2::DPLUtils
                                      O2::SimulationDataFormat)
 
 o2_target_root_dictionary(GlobalTrackingStudy
@@ -48,6 +51,7 @@ o2_target_root_dictionary(GlobalTrackingStudy
                                   include/GlobalTrackingStudy/CheckResidTypes.h
                                   include/GlobalTrackingStudy/CheckResidConfig.h
                                   include/GlobalTrackingStudy/HistoManager.h
+                                  include/GlobalTrackingStudy/V0FullOutputParams.h
                           LINKDEF src/GlobalTrackingStudyLinkDef.h
 )
 

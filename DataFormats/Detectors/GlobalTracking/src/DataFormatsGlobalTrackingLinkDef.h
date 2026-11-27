@@ -34,4 +34,17 @@
 #pragma link C++ class std::vector < o2::dataformats::TrackCosmicsExtended> + ;
 #pragma link C++ class o2::dataformats::CosmicsTFInfo + ;
 
+#pragma link C++ class o2::dataformats::V0TPCCluster + ;
+#pragma link C++ class std::vector < o2::dataformats::V0TPCCluster> + ;
+#pragma link C++ class o2::dataformats::V0ITSCluster + ;
+#pragma link C++ class std::vector < o2::dataformats::V0ITSCluster> + ;
+#pragma link C++ class o2::dataformats::V0TOFCluster + ;
+#pragma link C++ class std::vector < o2::dataformats::V0TOFCluster> + ;
+#pragma link C++ class o2::dataformats::V0TRDTracklet + ;
+#pragma link C++ class std::vector < o2::dataformats::V0TRDTracklet> + ;
+#pragma link C++ class o2::dataformats::V0Prong + ;
+#pragma link C++ class o2::dataformats::V0WithClusters + ;
+#pragma link C++ class std::vector < o2::dataformats::V0WithClusters> + ;
+#pragma link C++ class o2::dataformats::V0sTFInfo + ;
+
 #endif
