@@ -109,6 +109,25 @@ struct SVertexerParams : public o2::conf::ConfigurableParamHelper<SVertexerParam
   float mTPCTrackMaxDXYIni = 8.;             ///< don't consider as a seed (circles intersection) if XY distance exceeds this, for photon TPC-only track only
   float mTPCTrackMaxDCAXY2ToMeanVertex = 2.; ///< max DCA^2 of V0 from beam line (mean vertex) for prompt V0 candidates, for photon TPC-only track only
 
+  // Far V0s: K0s / Lambda / anti-Lambda decaying beyond the ITS, both legs without ITS (TPC-only, TPC-TRD, TPC-TOF, ...). Otherwise,
+  // with the photon tuning, a pair with a TPC-only leg is tried as a photon only, and maxRIni / maxDCAXYToMeanVertex cut far V0s.
+  // A pair of legs without ITS not stored by the normal path is tried again in the far mode: seed cuts on the circle crossing (radius,
+  // z, pointing, mass), fit with farV0MaxRIni, only these three hypotheses, V0 radius >= farV0MinR, the far DCA and causality cuts.
+  // TPC-only tracks failing the photon track cuts are kept for the far mode only. Off: no change.
+  bool farV0Mode = false;                ///< enable the far V0 mode
+  float farV0MinR = 40.f;                ///< min V0 radius [cm] of the far mode (seed and fit)
+  float farV0MaxRIni = 250.f;            ///< max seed radius [cm] of the far mode (maxRIni for the others)
+  float farV0MaxDCAXYToMeanVertex = 2.f; ///< max DCA (xy) [cm] of the V0 to the mean vertex in the far mode (seed and fit)
+  float farV0CausalityRTolerance = 3.f;  ///< causalityRTolerance [cm] of the far mode
+  bool farV0KeepTPCTracks = false;       ///< keep TPC-only tracks failing the photon track cuts (far mode only; more pairs: CPU)
+  bool farV0BothTPCOnly = false;         ///< also pairs of two TPC-only legs (else a leg must be TPC-TRD / TPC-TOF; quadratic in the TPC-only clones)
+  float farV0MinCosPA = 0.999f;          ///< min cosPA to the primary vertex in the far mode (minCosPA for the others)
+  bool farV0SeedCuts = true;             ///< apply the seed cuts before the fit (false: fit every pair of legs without ITS)
+  float farV0SeedMaxDZ = 5.f;            ///< seed cut: max z difference [cm] of the legs at the circle crossing
+  float farV0SeedMaxDXY = 2.f;           ///< seed cut: max gap [cm] between the circles if they do not cross
+  float farV0SeedRSlack = 10.f;          ///< seed cut: radius in [farV0MinR - slack, innermost point of the legs + tolerance + slack] [cm]
+  float farV0SeedMassScale = 2.f;        ///< seed cut: mass within this times the hypothesis margin
+
   uint8_t mITSSAminNclu = 6;             // global requirement of at least this many ITS clusters if no TPC info present (N.B.: affects all secondary vertexing)
   uint8_t mITSSAminNcluCascades = 6;     // require at least this many ITS clusters if no TPC info present for cascade finding.
   bool mRejectITSonlyOBtrack = false;    // reject tracks in OB with 4 hits (keep false for more low pt conversions)
